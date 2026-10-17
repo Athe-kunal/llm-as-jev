@@ -1,0 +1,10 @@
+State: {% for part in parts %}
+{{ part.text }}
+
+{% endfor %}
+{{ question }}
+Options:
+{% for desc in options %}
+[{{ loop.index }}] {{ desc }}
+{% endfor %}
+Select one option. Answer only with its bracketed numeric identifier.
