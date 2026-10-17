@@ -6,6 +6,7 @@ are the next tokens that stay inside it. See docs/architecture.md.
 """
 
 import functools
+import math
 import random
 from typing import Any
 
@@ -164,8 +165,12 @@ TOP = 64
 
 
 def _log1mexp(x: torch.Tensor) -> torch.Tensor:
-    """log(1 - exp(x)) for log-probabilities x <= 0 (-50 instead of -inf)."""
-    return torch.log(-torch.expm1(x.clamp(max=0.0))).clamp_min(-50.0)
+    """log(1 - exp(x)) for log-probabilities x <= 0 (-50 instead of -inf).
+
+    Clamped inside the log: clamping log(0) = -inf afterwards gives a NaN
+    gradient (0 * inf) when the top tokens hold all the mass.
+    """
+    return torch.log((-torch.expm1(x)).clamp_min(math.exp(-50.0)))
 
 
 def _split(logits: torch.Tensor, legal: list[int]):
@@ -269,3 +274,25 @@ def losses(model, ex: dict, device: str, pad: int) -> dict[str, torch.Tensor]:
     )
     return {"tree": tree_loss(path, ex["path"]), "mass": mass, "out": out,
             "pos": pos}
+
+
+def score(model, prompt: list[int], tokenizer: Any, k: int, device: str,
+          pad: int, budget: int = 32768):
+    """s_k (Eq. 1) for each of the k candidates, and the root's legal mass.
+
+    One sequence per trie node (the prompt + the node's tokens), batched up
+    to `budget` tokens; s_k sums the log-probabilities along suffix k.
+    """
+    suffixes, nodes = _candidates(tokenizer, k)
+    keys, logp = list(nodes), {}
+    n = max(1, budget // (len(prompt) + 4))
+    for i in range(0, len(keys), n):
+        chunk = keys[i : i + n]
+        seqs = [prompt + list(c) for c in chunk]
+        _, last = train_joint._batched_hidden(model, seqs, device, pad)
+        for c, lp in zip(chunk, torch.log_softmax(last.float(), -1)):
+            logp[c] = lp
+    s = torch.stack([
+        sum(logp[tuple(x[:t])][x[t]] for t in range(len(x))) for x in suffixes
+    ])
+    return s, logp[()][nodes[()]].exp().sum().item()

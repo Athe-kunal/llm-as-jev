@@ -200,3 +200,47 @@ is 0.3: the model must keep the ranking of its non-answer tokens.
   prefix"): prompt + the node's tokens, batched with the gold sequence.
   3 nodes are sampled uniformly from the trie nodes off the gold path (all
   of them when K ≤ 4).
+
+## 5. Training and evaluation (`train_jev.py`)
+
+```bash
+CUDA_VISIBLE_DEVICES=2 PYTHONPATH=src .venv/bin/python -m spanjudge.train_jev \
+    --model Qwen/Qwen3-0.6B --out runs/jev_qwen3_0.6b
+CUDA_VISIBLE_DEVICES=3 PYTHONPATH=src .venv/bin/python -m spanjudge.train_jev \
+    --model Qwen/Qwen3.5-4B --out runs/jev_qwen3.5_4b
+```
+
+Settings from the paper (Table 2): LoRA rank 16, α 32, dropout 0 on the
+decoder linear layers; AdamW, weight decay 0.01, gradient clipping 1.0;
+peak learning rate 1e-4, linear warmup over 100 steps, linear decay to 10%
+of the peak; global batch 32; one epoch of Reason+Long-12k (375 steps);
+λ = 1; 3 off-path nodes; top-64; seed 20260922; BF16 weights, FP32 LoRA
+parameters and optimizer states; gradient checkpointing; max length 10,240
+(no training row exceeds it with either tokenizer).
+
+Ours: one GPU per run with gradient accumulation (the paper uses FSDP);
+pinned revisions (Qwen3-0.6B `c1899de2`, Qwen3.5-4B `851bf6e8`); LoRA
+targets as in `train_joint` (linear layers under `.layers.`, no vision
+tower); the update is skipped if the gradient norm is not finite.
+
+Evaluation, before training and after it, on 100 rows per dataset of our
+in-domain `eval.jsonl` (the paper evaluates on external benchmarks only):
+
+- accuracy of argmax s_k (Eq. 1), mean log P(gold), mean legal mass at the
+  root;
+- text mode on 20 rows per dataset: greedy generation of up to 32 tokens
+  after `Best answer: [`; the share that starts with a valid `k]`
+  (`gen_valid`), that is correct, and that ends right after the `]`
+  (`gen_ends_after_bracket`). Base Qwen3-0.6B usually continues after the
+  bracket (e.g. `44] balance`, `1]\n\n**Explanation:** …`), so the last
+  number is compared with the base model's, not with 1.
+
+Cost (Qwen3.5-4B, one GPU): 47.2M training tokens per epoch including the
+off-path sequences; the longest row (8,851 tokens, 4 sequences) takes 16.5 s
+for the forward and backward passes and peaks at 26 GiB.
+
+**Numerical fixes found while testing** (both in `jev.py`): the illegal
+mass is summed directly, never computed as 1 − m (fp32 rounds it to 0 and
+ℒ_out became NaN); `_log1mexp` clamps inside the log, because clamping
+log 0 = −inf afterwards gives a NaN gradient (0 · ∞) when the top-64 tokens
+hold all the mass, which made every update's gradient NaN in BF16.
