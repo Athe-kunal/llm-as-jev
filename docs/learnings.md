@@ -823,7 +823,19 @@ right after the bracket. Trainable parameters match the paper's Table 2
 | **mean accuracy** | **0.453** | **0.628** | **0.755** | **0.852** |
 | mean log P(gold) | −2.54 | −0.88 | −0.69 | −0.40 |
 | root legal mass | 0.9999 | 0.9986 | 0.9978 | 0.9968 |
+| text mode: valid `k]` | 1.000 | 1.000 | 1.000 | 1.000 |
+| text mode: correct | 0.446 | 0.621 | 0.771 | 0.883 |
 | stops after `]` | 0.037 | 0.037 | 1.000 | 0.996 |
+
+Text-mode rows are over 240 generations (20 per dataset); the other rows
+over 1,200. Gains: 0.6B +17.5 points mean accuracy, 4B +9.7; every dataset
+improves or stays level.
+
+Caveats: the eval rows come from the same 12 datasets as training (the
+paper reports out-of-domain benchmarks: JevBench, MMLU, BoolQ, …, not run
+here), so this shows the fine-tuning works, not that it generalizes; 100
+rows per dataset give about ±5 points of noise per dataset; one seed per
+model.
 
 Findings:
 

@@ -1,18 +1,18 @@
 """Reason+Long-12k: the training mixture of Li & Wagle (arXiv 2610.02076v3).
 
-Usage:
+Usage (or: make data):
   # fetch the pinned sources into data/external/<dataset>/ (once)
-  PYTHONPATH=src .venv/bin/python -m spanjudge.reason_long --download
+  PYTHONPATH=src .venv/bin/python -m dataloader.build_data --download
   # build data/splits/reason_long_12k/{train,eval}.jsonl and manifest.json
-  PYTHONPATH=src .venv/bin/python -m spanjudge.reason_long
+  PYTHONPATH=src .venv/bin/python -m dataloader.build_data
 
 Twelve public human-annotated datasets, 1,000 training rows each (Table 3 of
 the paper): CLINC150, MASSIVE (en-US), Bitext customer support, ReClor,
 LogiQA 2.0, CosmosQA ("none of the above" gold upsampled to 16%), PIQA,
 alpha-NLI, ProofWriter, ContractNLI, MuSiQue (answerability over 20
-paragraphs) and QuALITY. Rows use human.py's format (human._row); labels are
+paragraphs) and QuALITY. Rows use the format of _row (docs/data.md); labels are
 the datasets' own gold answers. Native evidence spans are kept where the
-release has them: ContractNLI (human spans, human.contractnli), MuSiQue
+release has them: ContractNLI (human spans, _contractnli), MuSiQue
 (supporting paragraphs of answerable questions) and ProofWriter (the facts
 and rules of the gold proof).
 
@@ -24,23 +24,19 @@ are dropped; exact duplicate inputs within the pool are collapsed. Training
 rows come from each dataset's official train split, eval rows (up to
 EVAL_ROWS per dataset, whole groups) from its official validation split;
 Bitext has no split, so a seeded group hold-out stands in for one. Rows whose
-prompt (train_joint.build_prompt, question_first) exceeds MAX_TOKENS are
-left out, never truncated. See docs/data.md.
+prompt (answers.build_prompt, the paper's prompt, with the LENGTH_TOKENIZER
+tokenizer) exceeds MAX_TOKENS are left out, never truncated. See docs/data.md.
 """
 
 import argparse
 import collections
-import contextlib
 import csv
-import gzip
 import hashlib
-import io
 import json
 import pathlib
 import random
 import re
 import statistics
-import string
 import tarfile
 import unicodedata
 import urllib.request
@@ -49,8 +45,9 @@ from typing import Any, Callable, Iterable
 
 from huggingface_hub import hf_hub_download
 
-from spanjudge import human
-from spanjudge.human import _EXTERNAL, _row
+from loguru import logger
+
+from dataloader import answers
 
 SEED = 20260922  # the paper's training seed (Table 2)
 PER_DATASET = 1000
@@ -60,6 +57,94 @@ COSMOS_NONE_SHARE = 0.16  # Appendix G: "we upsample these to 16%"
 NGRAM = 13
 MIN_SENTENCE_WORDS = 6
 OUT = "data/splits/reason_long_12k"
+LENGTH_TOKENIZER = "Qwen/Qwen3.5-4B"  # the paper's model; lengths only
+_EXTERNAL = "data/external"
+
+
+def _hash(*parts: Any) -> str:
+    return hashlib.sha256("\x1f".join(map(str, parts)).encode()).hexdigest()[
+        :16
+    ]
+
+
+def _row(
+    source: str,
+    key: Any,
+    subset: str,
+    group: Any,
+    parts: list[tuple[str, str]],
+    question: str,
+    labels: dict[str, str],
+    label: str,
+    spans: list[tuple[str, int, int]],
+) -> dict[str, Any]:
+    """One row; spans are (part name, start, end) in that part's text."""
+    texts = dict(parts)
+    located = sorted(
+        {(p, a, b) for p, a, b in spans if 0 <= a < b <= len(texts[p])}
+    )
+    return {
+        "id": f"{source}:{_hash(key, question)}",
+        "source": source,
+        "subset": subset,
+        "group": f"{source}:{_hash(group)}",
+        "parts": [{"name": n, "text": t} for n, t in parts],
+        "question": question,
+        "labels": labels,
+        "label": label,
+        "spans": [
+            {"part": p, "start": a, "end": b, "text": texts[p][a:b]}
+            for p, a, b in located
+        ],
+        "needs_spans": bool(located),
+    }
+
+
+def _contractnli() -> list[dict[str, Any]]:
+    """ContractNLI: NDA + hypothesis -> entailed / contradicted / not mentioned.
+
+    "Not mentioned" has no spans. Subset: hypothesis.
+    """
+    labels = {
+        "entailed": "The contract entails the statement.",
+        "contradicted": "The contract contradicts the statement.",
+        "not_mentioned": "The contract does not mention it.",
+    }
+    names = {
+        "Entailment": "entailed",
+        "Contradiction": "contradicted",
+        "NotMentioned": "not_mentioned",
+    }
+    rows = []
+    for split in ("train", "dev", "test"):
+        with open(f"{_EXTERNAL}/contractnli/contract-nli/{split}.json") as f:
+            data = json.load(f)
+        for doc in data["documents"]:
+            text = doc["text"]
+            for key, a in doc["annotation_sets"][0]["annotations"].items():
+                label = names[a["choice"]]
+                spans = (
+                    []
+                    if label == "not_mentioned"
+                    else [("Contract", *doc["spans"][i]) for i in a["spans"]]
+                )
+                rows.append(
+                    _row(
+                        "contractnli",
+                        (doc["id"], key),
+                        key,
+                        doc["id"],
+                        [("Contract", text)],
+                        f'Statement: "{data["labels"][key]["hypothesis"]}"\n'
+                        "Does the contract entail the statement, contradict"
+                        " it, or not mention it?",
+                        labels,
+                        label,
+                        spans,
+                    )
+                )
+    return rows
+
 
 # ---------------------------------------------------------------- sources
 # (local dataset dir, kind, where, revision, files). kind "hf": Hugging Face
@@ -140,7 +225,7 @@ TRAIN_SOURCES: dict[str, dict[str, Any]] = {
                   "f84977c40dbfef70c9cab48037b7becfc8e45f73/data/v1.0.1/"
                   "QuALITY.v1.0.1.zip"},
     },
-    # contractnli: already in data/external/contractnli (human.contractnli)
+    # contractnli: already in data/external/contractnli (_contractnli)
 }
 
 BENCH_SOURCES: dict[str, dict[str, Any]] = {
@@ -256,7 +341,7 @@ def download(names: Iterable[str] | None = None) -> None:
                     tmp.rename(path)
                 record["files"][f] = {"url": url, "sha256": _sha256(path)}
         (root / "SOURCES.json").write_text(json.dumps(record, indent=1) + "\n")
-        print(f"{name}: {len(record['files'])} files")
+        logger.info("{}: {} files", name, len(record["files"]))
 
 
 # ---------------------------------------------------------------- loaders
@@ -264,7 +349,7 @@ def download(names: Iterable[str] | None = None) -> None:
 # train split and the official validation / dev split (labelled test splits
 # are not used). Option ids are the labels' own names (intent, true / false /
 # unknown, yes / no) or the 1-based position of the option in the release
-# ("1".."k"); train_joint shuffles the options and assigns its own codes.
+# ("1".."k"); answers.encode shuffles the options and numbers them.
 # subset = gold label (used by the eval draw to round-robin over labels).
 # Every row carries "_units": the source texts the overlap filter checks
 # (the release's own fields: utterance, passage, question, options, theory,
@@ -533,13 +618,13 @@ def proofwriter() -> Split:
 
 
 def contractnli() -> Split:
-    """ContractNLI via human.contractnli (spans kept), split by document."""
-    rows = human.contractnli(random.Random(0))  # the loader ignores the rng
+    """ContractNLI via _contractnli (spans kept), split by document."""
+    rows = _contractnli()
     out = {}
     for split, f in (("train", "train"), ("validation", "dev")):
         data = json.loads(
             (_root("contractnli") / f"contract-nli/{f}.json").read_text())
-        groups = {f"contractnli:{human._hash(d['id'])}"
+        groups = {f"contractnli:{_hash(d['id'])}"
                   for d in data["documents"]}
         out[split] = [
             {**r, "subset": r["label"],
@@ -872,41 +957,13 @@ def decontaminate(rows: list[dict], index: OverlapIndex,
 
 
 # ---------------------------------------------------------------- lengths
-@contextlib.contextmanager
-def _wide_codes():
-    """Lets train_joint.build_prompt render > 26 options (lengths only).
-
-    Codes past Z become AA, AB, ... (one or two letters, so token counts are
-    within a few tokens per option of any one-token code scheme).
-    """
-    from spanjudge import train_joint
-
-    original = train_joint.choice_letters
-    letters = list(string.ascii_uppercase)
-    codes = letters + [a + b for a in letters for b in letters]
-    train_joint.choice_letters = lambda row, order: codes[: len(order)]
-    try:
-        yield
-    finally:
-        train_joint.choice_letters = original
-
-
-def prompt_lengths(rows: list[dict], tok: Any, order: str) -> list[int]:
-    """Prompt tokens of each row as train_joint renders it (given ORDER)."""
-    from spanjudge import train_joint
-
-    saved = train_joint.ORDER
-    train_joint.ORDER = order
+def prompt_lengths(rows: list[dict], tok: Any) -> list[int]:
+    """Prompt tokens of each row in the paper's prompt (answers.build_prompt)."""
+    texts = [answers.build_prompt(r, list(r["labels"]), tok)[0] for r in rows]
     out = []
-    try:
-        with _wide_codes():
-            texts = [train_joint.build_prompt(r, list(r["labels"]))[0]
-                     for r in rows]
-        for i in range(0, len(texts), 256):
-            enc = tok(texts[i:i + 256], add_special_tokens=False)
-            out += [len(x) for x in enc["input_ids"]]
-    finally:
-        train_joint.ORDER = saved
+    for i in range(0, len(texts), 256):
+        enc = tok(texts[i:i + 256], add_special_tokens=False)
+        out += [len(x) for x in enc["input_ids"]]
     return out
 
 
@@ -943,11 +1000,19 @@ def _dedupe(rows: list[dict]) -> tuple[list[dict], int, int]:
 def take_eval(rows: list[dict], cap: int, rng: random.Random) -> list[dict]:
     """Up to cap rows in whole groups, round-robin over subsets (labels).
 
-    splits.take_groups' order, but a group is only taken while it fits.
+    Groups are taken per subset in a shuffled order; a group is only taken
+    while it fits.
     """
-    from spanjudge.splits import _by_subset_groups
-
-    by = _by_subset_groups(rows, rng)
+    groups: dict[str, list[dict]] = collections.defaultdict(list)
+    for r in rows:
+        groups[r["group"]].append(r)
+    by: dict[str, list[list[dict]]] = collections.defaultdict(list)
+    for g in sorted(groups):
+        rs = groups[g]
+        subset = collections.Counter(r["subset"] for r in rs).most_common(1)[0][0]
+        by[subset].append(rs)
+    for k in by:
+        rng.shuffle(by[k])
     taken, count, order = [], 0, sorted(by)
     while any(by[s] for s in order):
         for s in order:
@@ -1000,18 +1065,15 @@ def build(out: pathlib.Path, eval_rows: int = EVAL_ROWS,
     """Writes train.jsonl, eval.jsonl and manifest.json under out."""
     from transformers import AutoTokenizer
 
-    from spanjudge import train_joint
-
-    tok = AutoTokenizer.from_pretrained(train_joint.MODEL_ID,
-                                        revision=train_joint.REVISION)
-    print("indexing benchmarks ...", flush=True)
+    tok = AutoTokenizer.from_pretrained(LENGTH_TOKENIZER)
+    logger.info("indexing benchmarks ...")
     items = benchmark_items()
     index = OverlapIndex(items)
     manifest: dict[str, Any] = {
         "paper": "Li & Wagle, LLM-as-Jev, arXiv 2610.02076v3, Reason+Long-12k",
         "seed": SEED, "per_dataset": PER_DATASET, "eval_rows": eval_rows,
-        "max_tokens": max_tokens, "order": "question_first",
-        "tokenizer": f"{train_joint.MODEL_ID}@{train_joint.REVISION}",
+        "max_tokens": max_tokens, "prompt": "answers.build_prompt",
+        "tokenizer": LENGTH_TOKENIZER,
         "normalization": {"ngram": NGRAM, "min_sentence_words":
                           MIN_SENTENCE_WORDS},
         "benchmarks": {
@@ -1025,13 +1087,13 @@ def build(out: pathlib.Path, eval_rows: int = EVAL_ROWS,
     }
     train, evals = [], []
     for name in names or DATASETS:
-        print(f"{name} ...", flush=True)
+        logger.info("{} ...", name)
         rng = random.Random(f"{SEED}:{name}")
         data = DATASETS[name]()
         st: dict[str, Any] = {
             "source_split": SOURCE_SPLITS[name],
             "revision": TRAIN_SOURCES.get(name, {}).get(
-                "revision", "local data/external/contractnli (human.py)"),
+                "revision", "local data/external/contractnli"),
             "source": TRAIN_SOURCES.get(name, {}).get("repo") or list(
                 TRAIN_SOURCES.get(name, {}).get("files", {}).values()),
             "train_split_rows": len(data["train"]),
@@ -1039,7 +1101,7 @@ def build(out: pathlib.Path, eval_rows: int = EVAL_ROWS,
         }
         # eval: deduplicated validation rows that fit, whole groups
         val, _, _ = _dedupe(data["validation"])
-        val_len = prompt_lengths(val, tok, "question_first")
+        val_len = prompt_lengths(val, tok)
         val_fit = [r for r, n in zip(val, val_len, strict=True)
                    if n <= max_tokens]
         ev = take_eval(val_fit, eval_rows, rng)
@@ -1057,22 +1119,16 @@ def build(out: pathlib.Path, eval_rows: int = EVAL_ROWS,
         pool = [r for r in pool if r["group"] not in val_groups]
         st["drop_group_in_validation"] = before - len(pool)
         pool = decontaminate(pool, index, st)
-        lengths = prompt_lengths(pool, tok, "question_first")
-        over = [r for r, n in zip(pool, lengths, strict=True)
-                if n > max_tokens]
-        near = [r for r, n in zip(pool, lengths, strict=True)
-                if n > max_tokens - 64]
-        doc_first = prompt_lengths(near, tok, "doc_first")
-        st["drop_too_long_question_first"] = len(over)
-        st["too_long_doc_first"] = sum(n > max_tokens for n in doc_first)
+        lengths = prompt_lengths(pool, tok)
+        st["drop_too_long"] = sum(n > max_tokens for n in lengths)
         fit = [r for r, n in zip(pool, lengths, strict=True)
                if n <= max_tokens]
         st["clean_pool"] = len(fit)
         st["clean_pool_labels"] = dict(sorted(collections.Counter(
             r["label"] for r in fit).items()))
         tr = sample_train(name, fit, PER_DATASET, rng)
-        tr_len = prompt_lengths(tr, tok, "question_first")
-        ev_len = prompt_lengths(ev, tok, "question_first")
+        tr_len = prompt_lengths(tr, tok)
+        ev_len = prompt_lengths(ev, tok)
         st.update({
             "train": len(tr), "eval": len(ev),
             "train_labels": dict(sorted(collections.Counter(
@@ -1095,9 +1151,8 @@ def build(out: pathlib.Path, eval_rows: int = EVAL_ROWS,
         manifest["datasets"][name] = st
         train += [_clean(r) for r in tr]
         evals += [_clean(r) for r in ev]
-        print(json.dumps({k: v for k, v in st.items()
-                          if not k.startswith("contaminated_examples")}),
-              flush=True)
+        logger.info(json.dumps({k: v for k, v in st.items()
+                                if not k.startswith("contaminated_examples")}))
     random.Random(SEED).shuffle(train)
     out.mkdir(parents=True, exist_ok=True)
     for split, rows in (("train", train), ("eval", evals)):
@@ -1112,7 +1167,8 @@ def build(out: pathlib.Path, eval_rows: int = EVAL_ROWS,
         "duplicate_train_ids": len(train) - len({r["id"] for r in train}),
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
-    print(json.dumps(manifest["totals"]), json.dumps(manifest["checks"]))
+    logger.info("{} {}", json.dumps(manifest["totals"]),
+                json.dumps(manifest["checks"]))
     return manifest
 
 

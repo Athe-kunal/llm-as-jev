@@ -1,9 +1,9 @@
 """Viewer: what each Reason+Long-12k dataset looks like, a few rows each.
 
 Usage:
-  PYTHONPATH=src .venv/bin/python -m spanjudge.data_viz
-  PYTHONPATH=src .venv/bin/python -m spanjudge.data_viz --per 3 --seed 7 --port 8791
-  PYTHONPATH=src .venv/bin/python -m spanjudge.data_viz \
+  PYTHONPATH=src .venv/bin/python -m viewers.data
+  PYTHONPATH=src .venv/bin/python -m viewers.data --per 3 --seed 7 --port 8791
+  PYTHONPATH=src .venv/bin/python -m viewers.data \
       --data data/splits/reason_long_12k/train.jsonl
 
 Picks --per rows per dataset with a seeded RNG (for proofwriter, contractnli

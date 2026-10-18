@@ -8,7 +8,7 @@ no code or data release (checked 2026-10-15: arXiv abstract page, GitHub, Huggin
 Face), so every source below was assembled from the original dataset releases
 and every choice the paper leaves open is listed in Section 4.
 
-Builder: `src/spanjudge/reason_long.py`. Outputs: `train.jsonl`, `eval.jsonl`,
+Builder: `src/dataloader/build_data.py`. Outputs: `train.jsonl`, `eval.jsonl`,
 `manifest.json` (all counts below are copied from the manifest).
 
 ## 1. The mixture
@@ -35,8 +35,8 @@ Select one option. Answer only with its bracketed numeric identifier.
 
 followed by the assistant prefix `Best answer: [`; each candidate is the
 suffix `k]`. Our rows store the context (`parts`), `question` and options
-(`labels`) separately; `train_joint.build_prompt` renders them in this repo's
-format (Section 5).
+(`labels`) separately; `answers.build_prompt` renders them into the paper's
+prompt (`docs/architecture.md` §2).
 
 | dataset | task | options | train split used | eval split used | split rows (train / val) | clean pool | train | eval | train rows with spans | license |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -72,19 +72,19 @@ Sources and revisions (the sha256 of every fetched file is in
 | PIQA | `yonatanbisk.com/piqa/data/{train,valid}{.jsonl,-labels.lst}` | unversioned (sha256 recorded) |
 | αNLI | AI2 `alphanli-train-dev.zip` (storage.googleapis.com/ai2-mosaic) | unversioned (sha256 recorded) |
 | ProofWriter | AI2 `proofwriter-dataset-V2020.12.3.zip`, `OWA/depth-5/meta-{train,dev}.jsonl` | V2020.12.3 |
-| ContractNLI | Stanford NLP `contract-nli` release (`data/external/contractnli`, loaded by `human.contractnli`) | pre-existing download (`cnli.zip`, unversioned) |
+| ContractNLI | Stanford NLP `contract-nli` release (`data/external/contractnli`, loaded by `build_data._contractnli`) | pre-existing download (`cnli.zip`, unversioned) |
 | MuSiQue | HF `bdsaglam/musique` (mirror of the official Google Drive zip), `musique_full_v1.0_{train,dev}.jsonl` | `22873a40` |
 | QuALITY | GitHub `nyu-mll/quality`, `data/v1.0.1/QuALITY.v1.0.1.zip`, `htmlstripped` files | `f84977c4` |
 
 ## 2. Per-dataset conversion
 
-Common format (`human._row`): `{id, source, subset, group, parts:[{name,text}],
+Common format (`build_data._row`): `{id, source, subset, group, parts:[{name,text}],
 question, labels:{answer_id: description}, label, spans:[{part,start,end,text}],
 needs_spans}`. Labels are the datasets' own gold answers, never changed and
 never produced by a model. For multiple-choice datasets the answer ids are the
 1-based option positions in the release (`"1"`..`"k"`) and the descriptions are
-the option texts verbatim; `train_joint.encode` shuffles the options per
-example. `group` keeps rows that share a source context together (used to keep
+the option texts verbatim; `answers.encode` shuffles the options per
+training example. `group` keeps rows that share a source context together (used to keep
 train and eval disjoint). `subset` is the gold label (ContractNLI: also the
 label; the eval draw round-robins over it).
 
@@ -99,13 +99,13 @@ label; the eval draw round-robins over it).
 | PIQA | `Goal`: `goal` | "Which solution better achieves the goal?" | `sol1`, `sol2`; gold from `*-labels.lst` | none |
 | αNLI | `Observation 1`: `obs1`; `Observation 2`: `obs2` | "Which hypothesis best explains what happened between the two observations?" | `hyp1`, `hyp2`; gold from `*-labels.lst` | none |
 | ProofWriter | `Theory`: `theory` | `Statement: "<question>"` / "Based only on the theory, is the statement true, false, or unknown?" | `true` / `false` / `unknown` with fixed descriptions; gold `answer` | true/false: each fact and rule of the first proof in `proofsWithIntermediates` (the statement's proof, or its negation's for false), as sentence spans in the theory; unknown: none |
-| ContractNLI | `Contract`: document text | `Statement: "<hypothesis>"` / "Does the contract entail the statement, contradict it, or not mention it?" | `entailed` / `contradicted` / `not_mentioned` (`human.contractnli`) | entailed/contradicted: the human evidence spans of the release; not_mentioned: none |
+| ContractNLI | `Contract`: document text | `Statement: "<hypothesis>"` / "Does the contract entail the statement, contradict it, or not mention it?" | `entailed` / `contradicted` / `not_mentioned` (`build_data._contractnli`) | entailed/contradicted: the human evidence spans of the release; not_mentioned: none |
 | MuSiQue | `Paragraphs`: the 20 paragraphs, each `title\nparagraph_text`, separated by a blank line, in release order | `Question: <question>` / "Do the paragraphs contain enough information to answer the question?" | `yes` / `no` (the release's `answerable` flag) | yes: each `is_supporting` paragraph (title line and text); no: none |
 | QuALITY | `Article`: HTML-stripped `article` | `question` | 4 `options`; gold `gold_label` (annotator majority); questions without one skipped | none |
 
 Rows with spans have `needs_spans = true`. Every span satisfies
 `span.text == parts[span.part][start:end]` (checked). ContractNLI rows are the
-existing `human.contractnli` rows (unchanged; the paper's formulation, contract
+rows of `build_data._contractnli` (unchanged; the paper's formulation, contract
 + hypothesis → three classes, is the same), with `subset` set to the label.
 
 ## 3. Cleaning and decontamination
@@ -308,22 +308,10 @@ filtered against the benchmarks (they are never trained on).
 
 ## 5. Differences from the paper
 
-- **Answer codes.** The paper lists options as `[1]`, `[2]`, … and scores the
-  suffix `k]` after `Best answer: [` with a tree-factorized listwise loss over
-  the candidate trie. Our trainer (`train_joint.py`) renders
-  `Question: …\nChoices:\nA. …` and scores one letter token A–Z after its
-  answer prefix. It supports at most 26 options.
-- **More than 26 options.** CLINC150 (151 options) and MASSIVE (60) exceed
-  26: `train_joint.encode` fails on them (`ValueError: zip() argument 2 is longer than argument 1` in `question_block`, because `choice_letters` returns at most 26 codes). Bitext (27) also
-  exceeds 26. The rows are written as released (all intent names as options);
-  `train_joint` is not changed. See Section 7.
-- **No KL anchors, no tree loss.** The paper's objective adds three KL anchors
-  to the frozen base model (Eq. 3, λ = 1); our joint trainer has a choice loss
-  and an evidence-span head instead.
-- **Prompt layout.** Rows are rendered with `ORDER = "question_first"`
-  (question and choices before the context) and this repo's system prompt; the
-  paper puts the state first and the options after it. Token counts in
-  Section 6 are for our rendering.
+- **Answer codes, loss, prompt: as the paper.** Options are numbered `[k]`,
+  scored after `Best answer: [` over the candidate trie, trained with the
+  tree-factorized loss and the KL anchors (`docs/architecture.md`). Our part
+  layout inside `{state}` is our choice (§2 there).
 - **Evidence spans.** The paper trains no span supervision. We keep native
   human/structural evidence where the release has it (ContractNLI, MuSiQue,
   ProofWriter); all other rows have empty spans.
@@ -334,45 +322,38 @@ filtered against the benchmarks (they are never trained on).
 
 ## 6. Length statistics
 
-Prompt tokens with the `Qwen/Qwen3.5-2B` tokenizer at
-`train_joint.REVISION`, rendered by `train_joint.build_prompt` with
-`ORDER = "question_first"` (for the >26-option datasets, codes past Z are
-rendered as two letters for counting only).
+Prompt tokens of the paper's prompt (`answers.build_prompt`: chat template,
+no system prompt, up to `Best answer: [`) with the `Qwen/Qwen3.5-4B`
+tokenizer, the model the paper measures with.
 
 | dataset | train median | train p95 | train max | eval median | eval p95 | eval max | clean-pool max | candidates over 10,240 |
 |---|---|---|---|---|---|---|---|---|
-| CLINC150 | 896 | 904 | 916 | 896 | 905 | 919 | 928 | 0 (val: 0) |
-| MASSIVE (en-US) | 462 | 469 | 492 | 461 | 469 | 479 | 492 | 0 (val: 0) |
-| Bitext | 256 | 261 | 270 | 256 | 261 | 268 | 270 | 0 (val: 0) |
-| ReClor | 284 | 369 | 463 | 287 | 379 | 637 | 515 | 0 (val: 0) |
-| LogiQA 2.0 | 279 | 368 | 567 | 279 | 362 | 582 | 616 | 0 (val: 0) |
-| CosmosQA | 217 | 280 | 349 | 228 | 284 | 318 | 353 | 0 (val: 0) |
-| PIQA | 144 | 245 | 474 | 144 | 249 | 398 | 1,183 | 0 (val: 0) |
-| αNLI (ART) | 159 | 173 | 197 | 159 | 174 | 196 | 214 | 0 (val: 0) |
-| ProofWriter | 287 | 371 | 408 | 272 | 375 | 389 | 411 | 0 (val: 0) |
-| ContractNLI | 2,076 | 4,490 | 8,566 | 2,643 | 5,967 | 6,181 | 8,566 | 17 (val: 0) |
-| MuSiQue | 2,467 | 3,357 | 5,866 | 2,581 | 3,513 | 4,952 | 7,706 | 0 (val: 0) |
-| QuALITY | 6,865 | 8,133 | 8,900 | 6,741 | 8,279 | 8,603 | 8,900 | 0 (val: 0) |
+| CLINC150 | 1,178 | 1,186 | 1,198 | 1,178 | 1,187 | 1,201 | 1,210 | 0 (val: 0) |
+| MASSIVE (en-US) | 518 | 525 | 548 | 517 | 525 | 535 | 548 | 0 (val: 0) |
+| Bitext | 246 | 251 | 260 | 246 | 251 | 258 | 260 | 0 (val: 0) |
+| ReClor | 231 | 317 | 411 | 235 | 327 | 585 | 463 | 0 (val: 0) |
+| LogiQA 2.0 | 227 | 316 | 515 | 227 | 310 | 530 | 563 | 0 (val: 0) |
+| CosmosQA | 166 | 229 | 298 | 177 | 233 | 267 | 302 | 0 (val: 0) |
+| PIQA | 91 | 192 | 420 | 91 | 196 | 345 | 1,130 | 0 (val: 0) |
+| αNLI (ART) | 96 | 110 | 133 | 96 | 110 | 133 | 151 | 0 (val: 0) |
+| ProofWriter | 235 | 319 | 356 | 220 | 323 | 337 | 359 | 0 (val: 0) |
+| ContractNLI | 2,023 | 4,437 | 8,513 | 2,591 | 5,915 | 6,129 | 8,513 | 17 (val: 0) |
+| MuSiQue | 2,413 | 3,303 | 5,812 | 2,527 | 3,459 | 4,898 | 7,652 | 0 (val: 0) |
+| QuALITY | 6,814 | 8,082 | 8,849 | 6,689 | 8,228 | 8,552 | 8,849 | 0 (val: 0) |
 
 The paper's medians for the long datasets — ContractNLI 2.1k, MuSiQue 2.4k,
-QuALITY 6.8k tokens (Table 3) — match ours (2,076, 2,467 and 6,865), although
-the paper measures its own prompt and tokenizer (Qwen3.5-4B). 17 ContractNLI
-training candidates (out of 7,173 after the earlier steps) exceed 10,240 tokens
-under question_first (the same 17 under doc_first) and are left out; no
-validation row and no candidate of any other dataset exceeds the limit. CLINC150
-prompts are long for single utterances (~900 tokens) because all 151 intent
-names are listed as options.
+QuALITY 6.8k tokens (Table 3) — match ours (2,023, 2,413 and 6,814). 17
+ContractNLI training candidates exceed 10,240 tokens and are left out; no
+validation row and no candidate of any other dataset exceeds the limit.
+CLINC150 prompts are long for single utterances (~1,200 tokens) because all
+151 intent names are listed as options. (Until 2026-10-18 the builder
+measured our earlier letter-code prompt with the Qwen3.5-2B tokenizer; the
+same 17 rows were over the limit and the built files are byte-identical.)
 
 ## 7. Open decisions for the user
 
-1. **More than 26 options (CLINC150 151, MASSIVE 60, Bitext 27).**
-   `train_joint` cannot encode these rows (3,000 of 12,000 training rows, 1,500
-   eval rows). Options: (a) extend the codes in `train_joint` (two-letter codes,
-   or the paper's bracketed numbers `[k]` with a multi-token/tree loss);
-   (b) present a subset of candidate intents per row (e.g. gold + 25 sampled
-   negatives), which changes the task relative to the paper; (c) drop the intent
-   datasets (no longer Reason+Long-12k). The data is written as released (all
-   options), so any of these can be applied at load time.
+1. ~~More than 26 options~~ — resolved: numbered `[k]` answers over the
+   candidate trie (`docs/architecture.md` §1).
 2. **Evidence spans for the nine datasets without native evidence** (10,196 of
    12,000 training rows have empty spans, including the unknown / not
    mentioned / unanswerable rows of the three span datasets; 1,804 have native
@@ -411,11 +392,11 @@ dataset.
 
 ```bash
 # 1. fetch the pinned sources (skips files already present)
-PYTHONPATH=src .venv/bin/python -m spanjudge.reason_long --download
+PYTHONPATH=src .venv/bin/python -m dataloader.build_data --download
 # ContractNLI is read from data/external/contractnli/contract-nli (existing download)
 
 # 2. build data/splits/reason_long_12k/{train,eval}.jsonl and manifest.json
-PYTHONPATH=src .venv/bin/python -m spanjudge.reason_long
+PYTHONPATH=src .venv/bin/python -m dataloader.build_data
 # options: --eval-rows 500 --max-tokens 10240 --datasets <subset> --out <dir>
 ```
 

@@ -5,6 +5,26 @@ Our open-source version of the fine-tuning recipe of Li & Wagle, "LLM-as-Jev"
 Reason+Long-12k data of `docs/data.md`. Models: Qwen3-0.6B and Qwen3.5-4B,
 as in the paper.
 
+## 0. Code map (`src/`)
+
+| file | role |
+|---|---|
+| `dataloader/data.py` | `load_rows(source, split)`: rows from a local folder / `.jsonl`, or a Hugging Face dataset id |
+| `modeling/modeling.py` | `load_base`, `add_lora`, `load_trained`, `batched_hidden` |
+| `dataloader/answers.py` | prompt (`prompts/decision.j2`), trie, `encode`, `score` (Eq. 1 + in-trie decoding) |
+| `train/losses.py` | ℒ_tree and the KL anchors; `compute` for one example |
+| `train/train.py` | training loop (CLI) |
+| `evaluation/evaluate.py` | metrics on the eval split (CLI) |
+| `evaluation/benchmarks.py` | the paper's external benchmarks and JevBench as rows (CLI) |
+| `modeling/span_heads.py` | evidence-span heads kept from the earlier joint trainer (not yet wired in) |
+| `dataloader/build_data.py` | builds Reason+Long-12k (`docs/data.md`) |
+| `viewers/data.py`, `viewers/model.py` | local dataset browser; trained-vs-base viewer |
+| `dataloader/prompts.py`, `prompts/decision.j2` | Jinja templates (`prompts/` at `src/prompts/`) |
+
+Launchers: `scripts/train.sh`, `scripts/evaluate.sh`, `scripts/view.sh`;
+data: `make data`. Models are loaded from the Hugging Face Hub (latest
+version). All logging goes through loguru.
+
 ## 1. Answer interface and candidate trie (§3.2)
 
 The options are listed as `[1] …`, `[2] …`, and the assistant turn is
@@ -63,7 +83,7 @@ the trie:
 
 ## 2. Prompt (§3.2, App. A)
 
-`jev.build_prompt` renders `src/spanjudge/prompts/jev.j2` as the user turn,
+`answers.build_prompt` renders `src/prompts/decision.j2` as the user turn,
 applies the model's chat template (`add_generation_prompt=True`,
 `enable_thinking=False`, no system prompt) and appends `Best answer: [`:
 
@@ -94,10 +114,10 @@ last line). Our choices for what goes in the state:
 
 ## 3. Decision loss ℒ_tree (Eq. 2)
 
-`jev.encode` feeds the prompt followed by the whole gold suffix (teacher
+`answers.encode` feeds the prompt followed by the whole gold suffix (teacher
 forcing) and records the gold path: for each suffix token, the position
 whose logits predict it, the legal tokens of the node it leaves, and the
-gold token. `jev.tree_loss` sums one term per path step:
+gold token. `losses.tree_loss` sums one term per path step:
 
 ```python
 for t, (_, legal, gold) in enumerate(path):
@@ -164,8 +184,8 @@ positions get 0.5 each.
 **Truncation.** Each reference distribution keeps its top 64 tokens plus one
 remainder bucket; the model's distribution is bucketed over the same 64
 tokens, and the KL is taken between the two 65-way distributions
-(`jev._kl_top`). ℒ_mass is the binary KL computed from the legal and illegal
-masses, each summed directly (`jev._split`): computing the illegal mass as
+(`losses._kl_top`). ℒ_mass is the binary KL computed from the legal and illegal
+masses, each summed directly (`losses._split`): computing the illegal mass as
 1 − m rounds to 0 in fp32 when m is within ~10⁻⁸ of 1, as at most trie
 nodes, and made ℒ_out NaN.
 
@@ -201,14 +221,17 @@ is 0.3: the model must keep the ranking of its non-answer tokens.
   3 nodes are sampled uniformly from the trie nodes off the gold path (all
   of them when K ≤ 4).
 
-## 5. Training and evaluation (`train_jev.py`)
+## 5. Training and evaluation (`train.py`, `evaluate.py`)
 
 ```bash
-CUDA_VISIBLE_DEVICES=2 PYTHONPATH=src .venv/bin/python -m spanjudge.train_jev \
-    --model Qwen/Qwen3-0.6B --out runs/jev_qwen3_0.6b
-CUDA_VISIBLE_DEVICES=3 PYTHONPATH=src .venv/bin/python -m spanjudge.train_jev \
-    --model Qwen/Qwen3.5-4B --out runs/jev_qwen3.5_4b
+scripts/train.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2    # background; GPU 2
+scripts/train.sh Qwen/Qwen3.5-4B runs/qwen3.5_4b 3
+scripts/evaluate.sh Qwen/Qwen3.5-4B runs/qwen3.5_4b 1        # trained
+scripts/evaluate.sh Qwen/Qwen3.5-4B runs/qwen3.5_4b 1 base   # base model
 ```
+
+`--data` (train and eval scripts) takes a local folder or a Hugging Face
+dataset id with `train` and `eval` splits.
 
 Settings from the paper (Table 2): LoRA rank 16, α 32, dropout 0 on the
 decoder linear layers; AdamW, weight decay 0.01, gradient clipping 1.0;
@@ -219,9 +242,10 @@ parameters and optimizer states; gradient checkpointing; max length 10,240
 (no training row exceeds it with either tokenizer).
 
 Ours: one GPU per run with gradient accumulation (the paper uses FSDP);
-pinned revisions (Qwen3-0.6B `c1899de2`, Qwen3.5-4B `851bf6e8`); LoRA
-targets as in `train_joint` (linear layers under `.layers.`, no vision
-tower); the update is skipped if the gradient norm is not finite.
+LoRA on the linear layers under `.layers.` (no vision tower,
+`modeling.add_lora`); the update is skipped if the gradient norm is not
+finite. (The first runs used Qwen3-0.6B `c1899de2` and Qwen3.5-4B
+`851bf6e8`, the Hub versions of 2026-10-17.)
 
 Evaluation, before training and after it, on 100 rows per dataset of our
 in-domain `eval.jsonl` (the paper evaluates on external benchmarks only):
@@ -239,18 +263,18 @@ Cost (Qwen3.5-4B, one GPU): 47.2M training tokens per epoch including the
 off-path sequences; the longest row (8,851 tokens, 4 sequences) takes 16.5 s
 for the forward and backward passes and peaks at 26 GiB.
 
-**Numerical fixes found while testing** (both in `jev.py`): the illegal
+**Numerical fixes found while testing** (both in `losses.py`): the illegal
 mass is summed directly, never computed as 1 − m (fp32 rounds it to 0 and
 ℒ_out became NaN); `_log1mexp` clamps inside the log, because clamping
 log 0 = −inf afterwards gives a NaN gradient (0 · ∞) when the top-64 tokens
 hold all the mass, which made every update's gradient NaN in BF16.
 
-## 6. Inference: scoring and decoding (`jev.score`)
+## 6. Inference: scoring and decoding (`answers.score`)
 
 One prefill of the prompt; its KV cache is copied and repeated for each
 depth of the trie, and all nodes of that depth run as one batch on top of it
 (1–3 short steps, App. C). Qwen3.5's linear-attention cache layers have no
-`batch_repeat_interleave`, so `jev._repeat_cache` repeats their conv and
+`batch_repeat_interleave`, so `answers._repeat_cache` repeats their conv and
 recurrent states. It returns s_k (Eq. 1) for every candidate, the root's
 legal mass, and the answer **decoded inside the trie**: the most likely
 legal token at each node from the root down to the closing `]`, so the

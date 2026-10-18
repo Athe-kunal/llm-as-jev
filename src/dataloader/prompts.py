@@ -1,4 +1,4 @@
-"""Prompt templates (Jinja) for the judge and the rewriter."""
+"""Prompt templates (Jinja, prompts/*.j2)."""
 
 import pathlib
 from typing import Any
@@ -6,7 +6,7 @@ from typing import Any
 import jinja2
 
 _ENV = jinja2.Environment(
-    loader=jinja2.FileSystemLoader(pathlib.Path(__file__).parent / "prompts"),
+    loader=jinja2.FileSystemLoader(pathlib.Path(__file__).parent.parent / "prompts"),
     undefined=jinja2.StrictUndefined,
     trim_blocks=True,
     lstrip_blocks=True,
@@ -26,8 +26,3 @@ def render(name: str, **values: Any) -> str:
     """
     return _ENV.get_template(f"{name}.j2").render(**values).rstrip("\n")
 
-
-def source(name: str) -> str:
-    """Returns the raw text of prompts/<name>.j2 (for the viewer)."""
-    path = pathlib.Path(__file__).parent / "prompts" / f"{name}.j2"
-    return path.read_text()

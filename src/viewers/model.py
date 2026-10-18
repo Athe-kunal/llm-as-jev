@@ -1,8 +1,8 @@
 """Viewer: a trained LLM-as-Jev adapter against its base model on dev rows.
 
 Usage:
-  CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src .venv/bin/python -m spanjudge.jev_viz \
-      --run runs/jev_qwen3_0.6b
+  CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src .venv/bin/python -m viewers.model \
+      --run runs/qwen3_0.6b
 
 Each request picks an eval row (optionally from one dataset, or by index),
 renders the paper prompt (options in release order), and shows for the
@@ -27,8 +27,9 @@ from fastapi import responses
 import torch
 import uvicorn
 
-from spanjudge import jev
-from spanjudge import train_joint
+from dataloader import answers
+from dataloader import data
+from modeling import modeling
 
 # Options shown per model: the top ones by probability plus the gold one.
 _SHOW = 12
@@ -65,26 +66,23 @@ class _Model:
     """Base model + the run's LoRA adapter on one GPU."""
 
     def __init__(self, run: str):
-        from peft import PeftModel
         from transformers import AutoTokenizer
 
         args = json.loads((pathlib.Path(run) / "args.json").read_text())
         self.name = args["model"]
-        self.tok = AutoTokenizer.from_pretrained(args["model"],
-                                                 revision=args["revision"])
-        base = train_joint.load_base(args["model"], args["revision"]).to("cuda")
-        self.model = PeftModel.from_pretrained(
-            base, str(pathlib.Path(run) / "adapter")).eval()
+        self.tok = AutoTokenizer.from_pretrained(args["model"])
+        self.model = modeling.load_trained(
+            args["model"], str(pathlib.Path(run) / "adapter"))
         self.lock = threading.Lock()
 
     def _one(self, prompt: list[int], k: int) -> dict[str, Any]:
-        s, mass, decoded = jev.score(self.model, prompt, self.tok, k, "cuda")
+        s, mass, decoded = answers.score(self.model, prompt, self.tok, k, "cuda")
         return {"p": torch.softmax(s, 0).tolist(), "mass": mass,
                 "gen": f"{decoded + 1}]"}
 
     def predict(self, row: dict[str, Any]) -> dict[str, Any]:
         """Trained and base predictions for one row (release option order)."""
-        ex = jev.encode(row, self.tok, None)
+        ex = answers.encode(row, self.tok, None)
         prompt = ex["input_ids"][: ex["path"][0][0] + 1]
         with self.lock, torch.no_grad():
             trained = self._one(prompt, ex["n_options"])
@@ -119,9 +117,8 @@ def _side(title: str, r: dict, gold: int, options: list[str]) -> str:
         f"<pre>Best answer: [{_esc(r['gen'])}</pre></p></div>")
 
 
-def make_app(run: str, data: str) -> fastapi.FastAPI:
-    with open(data) as f:
-        rows = [json.loads(line) for line in f]
+def make_app(run: str, source: str, split: str) -> fastapi.FastAPI:
+    rows = data.load_rows(source, split)
     sources = sorted({r["source"] for r in rows})
     model = _Model(run)
     app = fastapi.FastAPI()
@@ -162,11 +159,12 @@ def main() -> None:
     """Serves the viewer."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run", required=True)
-    parser.add_argument("--data",
-                        default="data/splits/reason_long_12k/eval.jsonl")
+    parser.add_argument("--data", default=data.TRAIN_EVAL,
+                        help="local folder / .jsonl, or a Hub dataset id")
+    parser.add_argument("--split", default="eval")
     parser.add_argument("--port", type=int, default=8781)
     args = parser.parse_args()
-    app = make_app(args.run, args.data)
+    app = make_app(args.run, args.data, args.split)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 

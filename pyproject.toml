@@ -22,6 +22,7 @@ dependencies = [
     # Fast short convolution in Qwen3.5's linear-attention layers. Built from
     # source against the installed torch: CUDA_HOME=/usr/local/cuda-12.6.
     "causal-conv1d==1.5.3.post1",
+    "loguru>=0.7.3",
 ]
 
 [project.optional-dependencies]
@@ -47,9 +48,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.package-data]
-spanjudge = ["*.html"]
-
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
@@ -72,6 +70,3 @@ convention = "google"
 force-single-line = true
 force-sort-within-sections = true
 
-[tool.ruff.lint.per-file-ignores]
-# Adapters override documented abstract methods; Google style allows that.
-"src/spanjudge/sources.py" = ["D102"]

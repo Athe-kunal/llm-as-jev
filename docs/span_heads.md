@@ -1,6 +1,11 @@
 # Span head architectures
 
-Both heads live in `src/spanjudge/train_joint.py` and sit on top of
+> The head classes now live in `src/modeling/span_heads.py`
+> (`build_head(name, hidden, args)`); the letter-code trainer, its batched
+> inference and `eval_joint` described below were removed on 2026-10-18 and
+> are in git history (commit 3076456). Not yet wired into `train.py`.
+
+Both heads lived in `src/spanjudge/train_joint.py` and sat on top of
 Qwen3.5-2B (hidden size 2048) with LoRA. In both, the **answer is the LM
 letter**: the next-token logits at the assistant position, read for the
 choice letters only (`code_ids`, softmax over the row's choices). The span
