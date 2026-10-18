@@ -5,6 +5,7 @@ suffix "k]". The suffixes form a prefix-free trie; each node's legal tokens
 are the next tokens that stay inside it. See docs/architecture.md.
 """
 
+import copy
 import functools
 import math
 import random
@@ -276,23 +277,55 @@ def losses(model, ex: dict, device: str, pad: int) -> dict[str, torch.Tensor]:
             "pos": pos}
 
 
-def score(model, prompt: list[int], tokenizer: Any, k: int, device: str,
-          pad: int, budget: int = 32768):
-    """s_k (Eq. 1) for each of the k candidates, and the root's legal mass.
+def _repeat_cache(cache, n: int) -> None:
+    """Repeats a prompt's cache n times along the batch, in place.
 
-    One sequence per trie node (the prompt + the node's tokens), batched up
-    to `budget` tokens; s_k sums the log-probabilities along suffix k.
+    Attention layers use the library's batch_repeat_interleave; Qwen3.5's
+    linear-attention layers have none, so their conv and recurrent states
+    (fixed-size, one per state index) are repeated here.
+    """
+    for layer in cache.layers:
+        if hasattr(layer, "batch_repeat_interleave"):
+            layer.batch_repeat_interleave(n)
+            continue
+        for name in ("conv_states", "recurrent_states"):
+            states = getattr(layer, name)
+            keys = states.keys() if isinstance(states, dict) else range(len(states))
+            for i in keys:
+                if isinstance(states[i], torch.Tensor):
+                    states[i] = states[i].repeat_interleave(n, dim=0)
+
+
+def score(model, prompt: list[int], tokenizer: Any, k: int, device: str):
+    """s_k (Eq. 1) for each candidate, the root's legal mass, and the answer
+    decoded inside the trie.
+
+    One prefill of the prompt; its cache is then copied for each depth of
+    the trie, and all nodes of that depth run as one batch on top of it
+    (1-3 short steps, App. C). The decoded answer takes the most likely
+    legal token at each node from the root until the closing "]", so it is
+    always a valid "k]" (greedy within the trie; nothing after "]").
     """
     suffixes, nodes = _candidates(tokenizer, k)
-    keys, logp = list(nodes), {}
-    n = max(1, budget // (len(prompt) + 4))
-    for i in range(0, len(keys), n):
-        chunk = keys[i : i + n]
-        seqs = [prompt + list(c) for c in chunk]
-        _, last = train_joint._batched_hidden(model, seqs, device, pad)
-        for c, lp in zip(chunk, torch.log_softmax(last.float(), -1)):
-            logp[c] = lp
+    out = model(input_ids=torch.tensor([prompt], device=device),
+                use_cache=True, logits_to_keep=1)
+    logp = {(): torch.log_softmax(out.logits[0, -1].float(), -1)}
+    depths: dict[int, list] = {}
+    for n in nodes:
+        if n:
+            depths.setdefault(len(n), []).append(n)
+    for d, keys in sorted(depths.items()):
+        cache = copy.deepcopy(out.past_key_values)
+        _repeat_cache(cache, len(keys))
+        o = model(input_ids=torch.tensor(keys, device=device),
+                  past_key_values=cache, use_cache=True, logits_to_keep=1)
+        for n, lp in zip(keys, torch.log_softmax(o.logits[:, -1].float(), -1)):
+            logp[n] = lp
     s = torch.stack([
         sum(logp[tuple(x[:t])][x[t]] for t in range(len(x))) for x in suffixes
     ])
-    return s, logp[()][nodes[()]].exp().sum().item()
+    node: tuple = ()
+    while node in nodes:  # greedy over the legal tokens, down to a leaf
+        node += (max(nodes[node], key=lambda t: logp[node][t].item()),)
+    decoded = suffixes.index(list(node))
+    return s, logp[()][nodes[()]].exp().sum().item(), decoded

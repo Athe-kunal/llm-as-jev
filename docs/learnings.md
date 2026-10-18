@@ -796,6 +796,54 @@ Comprehensiveness 0.094 (random 0.071), against 0.318 (0.121) question first.
   question, so it stays cacheable), top layers [question ; document ;
   question ; tail].
 
+### 5.17 LLM-as-Jev recipe on Reason+Long-12k (Qwen3-0.6B, Qwen3.5-4B)
+
+Our reproduction of the paper's fine-tuning (tree-factorized listwise loss +
+KL anchors, λ = 1, LoRA r16, one epoch = 375 steps; `train_jev.py`,
+`docs/architecture.md`). Eval: 100 rows per dataset of our in-domain
+`eval.jsonl` (1,200 rows), options in release order, accuracy of argmax s_k
+(Eq. 1). "Stops after `]`": share of 240 greedy text-mode generations that end
+right after the bracket. Trainable parameters match the paper's Table 2
+(10,092,544 and 32,464,896).
+
+| dataset | 0.6B base | 0.6B trained | 4B base | 4B trained |
+|---|---|---|---|---|
+| CLINC150 | 0.21 | 0.83 | 0.82 | 0.93 |
+| MASSIVE | 0.31 | 0.74 | 0.79 | 0.88 |
+| Bitext | 0.56 | 0.92 | 0.83 | 0.96 |
+| ReClor | 0.45 | 0.52 | 0.81 | 0.86 |
+| LogiQA 2.0 | 0.49 | 0.51 | 0.73 | 0.73 |
+| CosmosQA | 0.44 | 0.51 | 0.77 | 0.87 |
+| PIQA | 0.64 | 0.66 | 0.87 | 0.92 |
+| αNLI | 0.56 | 0.57 | 0.83 | 0.86 |
+| ProofWriter | 0.49 | 0.64 | 0.53 | 0.78 |
+| ContractNLI | 0.41 | 0.66 | 0.73 | 0.86 |
+| MuSiQue | 0.48 | 0.52 | 0.58 | 0.79 |
+| QuALITY | 0.40 | 0.46 | 0.77 | 0.78 |
+| **mean accuracy** | **0.453** | **0.628** | **0.755** | **0.852** |
+| mean log P(gold) | −2.54 | −0.88 | −0.69 | −0.40 |
+| root legal mass | 0.9999 | 0.9986 | 0.9978 | 0.9968 |
+| stops after `]` | 0.037 | 0.037 | 1.000 | 0.996 |
+
+Findings:
+
+- The largest gains are on the many-option intent sets (2-3 digit answers),
+  so the multi-token trie loss trains as intended.
+- The anchors hold behaviour outside the decision: legal mass stays at
+  ~0.997-0.999, and the text-mode stopping rate is unchanged per dataset
+  (0.6B keeps restating the option after `]` as its base does; 4B stops at
+  `]` in 239 of 240, one ContractNLI reply restates the option). Training
+  never sees tokens after `]`.
+- Training: ℒ_tree 2.49 → ~0.7 (0.6B) and → ~0.2-0.5 (4B); anchors stay small
+  (4B at the end: mass 0.0008, out 0.05, pos 0.003). No skipped updates.
+- 0.6B barely learns MuSiQue answerability (says "Yes" on 19 of 20 text-mode
+  rows, P ≈ 0.55); 4B learns it (0.58 → 0.79). LogiQA does not move at 4B.
+- Text-mode spot checks: 57 fixed / 15 broken of 240 (0.6B), 32 fixed / 5
+  broken (4B).
+- Cost on one GPU: 0.6B 3.0 h, 4B 6.2 h of training; each eval of 1,200 rows
+  took 15 / 40 min with per-node recompute (now ~25x faster on CLINC with the
+  cached scorer, `docs/architecture.md` §6).
+
 ## 6. Candidate human-span datasets (not yet vetted)
 
 FaithBench (LLM summaries, expert spans with reasons), REVEAL (reasoning

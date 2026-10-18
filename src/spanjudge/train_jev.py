@@ -56,7 +56,7 @@ def evaluate(model, tok, rows, gen_rows, device: str, pad: int):
         for r in rows:
             ex = jev.encode(r, tok, None)
             prompt = ex["input_ids"][: ex["path"][0][0] + 1]
-            s, mass = jev.score(model, prompt, tok, ex["n_options"], device, pad)
+            s, mass, _ = jev.score(model, prompt, tok, ex["n_options"], device)
             st = stats[r["source"]]
             st["rows"] += 1
             st["accuracy"] += float(s.argmax().item() == ex["gold"])

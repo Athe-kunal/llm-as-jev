@@ -244,3 +244,29 @@ mass is summed directly, never computed as 1 − m (fp32 rounds it to 0 and
 ℒ_out became NaN); `_log1mexp` clamps inside the log, because clamping
 log 0 = −inf afterwards gives a NaN gradient (0 · ∞) when the top-64 tokens
 hold all the mass, which made every update's gradient NaN in BF16.
+
+## 6. Inference: scoring and decoding (`jev.score`)
+
+One prefill of the prompt; its KV cache is copied and repeated for each
+depth of the trie, and all nodes of that depth run as one batch on top of it
+(1–3 short steps, App. C). Qwen3.5's linear-attention cache layers have no
+`batch_repeat_interleave`, so `jev._repeat_cache` repeats their conv and
+recurrent states. It returns s_k (Eq. 1) for every candidate, the root's
+legal mass, and the answer **decoded inside the trie**: the most likely
+legal token at each node from the root down to the closing `]`, so the
+output is always exactly one valid `k]` and nothing is generated after it.
+
+Unconstrained `generate()` is not the answer path: the model emits `]\n\n`
+as one merged token, so stopping on the `]` token never fires, and Qwen3-0.6B
+(base and trained alike) then restates the option or writes an explanation.
+Training never sees text after `]` (the input ends at the gold `k]`); only
+ℒ_pos at the position after `]` keeps that distribution at the base model's.
+
+Checked against recomputing the prompt once per node: same argmax on every
+row tested, |ΔP| ≤ 0.03 (bf16); the decoded answer equals the argmax of
+s_k. Time per row on one GPU after warm-up:
+
+| model | CLINC150 (151 options) | MASSIVE (60) | QuALITY (4, 3.4K tokens) |
+|---|---|---|---|
+| Qwen3-0.6B, per-node recompute → cached | 2.74 → 0.38 s | 0.42 → 0.12 s | 0.38 → 0.09 s |
+| Qwen3.5-4B, per-node recompute → cached | 9.3 → 0.37 s | 1.64 → 0.19 s | 0.97 → 0.24 s |
