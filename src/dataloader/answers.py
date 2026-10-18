@@ -144,23 +144,78 @@ def encode(row: dict[str, Any], tokenizer: Any, rng: random.Random | None):
     }
 
 
-def _repeat_cache(cache, n: int) -> None:
-    """Repeats a prompt's cache n times along the batch, in place.
+def _select_cache(cache, rows: torch.Tensor):
+    """A new cache holding the given batch rows of cache (repeats allowed).
 
-    Attention layers use the library's batch_repeat_interleave; Qwen3.5's
-    linear-attention layers have none, so their conv and recurrent states
-    (fixed-size, one per state index) are repeated here.
+    Each layer is shallow-copied with its own state dicts, then the
+    library's reorder_cache picks the rows (index_select along the batch);
+    that covers attention keys/values and Qwen3.5's linear-attention conv
+    and recurrent states, and leaves cache itself untouched.
     """
+    new = copy.copy(cache)
+    new.layers = []
     for layer in cache.layers:
-        if hasattr(layer, "batch_repeat_interleave"):
-            layer.batch_repeat_interleave(n)
-            continue
-        for name in ("conv_states", "recurrent_states"):
-            states = getattr(layer, name)
-            keys = states.keys() if isinstance(states, dict) else range(len(states))
-            for i in keys:
-                if isinstance(states[i], torch.Tensor):
-                    states[i] = states[i].repeat_interleave(n, dim=0)
+        layer = copy.copy(layer)
+        for name, value in vars(layer).items():
+            if isinstance(value, (dict, list)):
+                setattr(layer, name, copy.copy(value))
+        layer.reorder_cache(rows)
+        new.layers.append(layer)
+    return new
+
+
+def score_batch(model, prompts: list[list[int]], tokenizer: Any,
+                ks: list[int], device: str, budget: int = 32768) -> list[tuple]:
+    """score() for several prompts: (s, root legal mass, decoded) per prompt.
+
+    One left-padded prefill of all prompts (positions skip the padding).
+    Then, per trie depth d, every node of that depth of every prompt runs
+    on top of a copy of its prompt's cache, as one batch of d-token inputs,
+    in chunks of at most budget // (longest prompt) nodes.
+    """
+    n = max(map(len, prompts))
+    ids = torch.full((len(prompts), n), tokenizer.pad_token_id, dtype=torch.long)
+    mask = torch.zeros_like(ids)
+    for i, p in enumerate(prompts):
+        ids[i, n - len(p):] = torch.tensor(p)
+        mask[i, n - len(p):] = 1
+    ids, mask = ids.to(device), mask.to(device)                         # [B, n]
+    out = model(input_ids=ids, attention_mask=mask,
+                position_ids=(mask.cumsum(-1) - 1).clamp(min=0),
+                use_cache=True, logits_to_keep=1)
+    root = torch.log_softmax(out.logits[:, -1].float(), -1)             # [B, V]
+    logp = [{(): lp} for lp in root]
+    tries = [_candidates(tokenizer, k) for k in ks]
+    depths: dict[int, list] = {}
+    for i, (_, nodes) in enumerate(tries):
+        for node in nodes:
+            if node:
+                depths.setdefault(len(node), []).append((i, node))
+    length = mask.sum(-1)                                               # [B]
+    step = max(1, budget // n)
+    for d, items in sorted(depths.items()):
+        for c in range(0, len(items), step):
+            chunk = items[c : c + step]
+            rows = torch.tensor([i for i, _ in chunk], device=device)   # [M]
+            o = model(
+                input_ids=torch.tensor([node for _, node in chunk], device=device),
+                attention_mask=torch.cat([mask[rows], mask.new_ones(len(chunk), d)], -1),
+                position_ids=length[rows, None] + torch.arange(d, device=device),
+                past_key_values=_select_cache(out.past_key_values, rows),
+                use_cache=True, logits_to_keep=1)
+            for (i, node), lp in zip(chunk, torch.log_softmax(o.logits[:, -1].float(), -1)):
+                logp[i][node] = lp
+    results = []
+    for lp, (suffixes, nodes) in zip(logp, tries):
+        s = torch.stack([
+            sum(lp[tuple(x[:t])][x[t]] for t in range(len(x))) for x in suffixes
+        ])
+        node: tuple = ()
+        while node in nodes:  # greedy over the legal tokens, down to a leaf
+            node += (max(nodes[node], key=lambda t: lp[node][t].item()),)
+        results.append((s, lp[()][nodes[()]].exp().sum().item(),
+                        suffixes.index(list(node))))
+    return results
 
 
 def score(model, prompt: list[int], tokenizer: Any, k: int, device: str):
@@ -173,26 +228,4 @@ def score(model, prompt: list[int], tokenizer: Any, k: int, device: str):
     legal token at each node from the root until the closing "]", so it is
     always a valid "k]" (greedy within the trie; nothing after "]").
     """
-    suffixes, nodes = _candidates(tokenizer, k)
-    out = model(input_ids=torch.tensor([prompt], device=device),
-                use_cache=True, logits_to_keep=1)
-    logp = {(): torch.log_softmax(out.logits[0, -1].float(), -1)}
-    depths: dict[int, list] = {}
-    for n in nodes:
-        if n:
-            depths.setdefault(len(n), []).append(n)
-    for d, keys in sorted(depths.items()):
-        cache = copy.deepcopy(out.past_key_values)
-        _repeat_cache(cache, len(keys))
-        o = model(input_ids=torch.tensor(keys, device=device),
-                  past_key_values=cache, use_cache=True, logits_to_keep=1)
-        for n, lp in zip(keys, torch.log_softmax(o.logits[:, -1].float(), -1)):
-            logp[n] = lp
-    s = torch.stack([
-        sum(logp[tuple(x[:t])][x[t]] for t in range(len(x))) for x in suffixes
-    ])
-    node: tuple = ()
-    while node in nodes:  # greedy over the legal tokens, down to a leaf
-        node += (max(nodes[node], key=lambda t: logp[node][t].item()),)
-    decoded = suffixes.index(list(node))
-    return s, logp[()][nodes[()]].exp().sum().item(), decoded
+    return score_batch(model, [prompt], tokenizer, [k], device)[0]

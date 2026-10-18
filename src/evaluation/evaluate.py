@@ -21,6 +21,7 @@ import json
 import pathlib
 import random
 import re
+import time
 
 from loguru import logger
 import torch
@@ -44,19 +45,48 @@ def subset(rows: list[dict], per: int, seed: int) -> list[dict]:
     return out
 
 
-def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str):
-    """Per-dataset metrics, and one example record per text-mode row."""
+def _batches(lengths: list[int], budget: int) -> list[list[int]]:
+    """Row indices sorted by length, packed so rows x longest <= budget."""
+    out: list[list[int]] = []
+    for i in sorted(range(len(lengths)), key=lengths.__getitem__):
+        if out and (len(out[-1]) + 1) * lengths[i] <= budget:
+            out[-1].append(i)
+        else:
+            out.append([i])
+    return out
+
+
+def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
+             batch_tokens: int = 32768):
+    """Per-dataset metrics, and one example record per text-mode row.
+
+    Rows are scored in batches of similar length (answers.score_batch) of at
+    most batch_tokens padded prompt tokens; text mode runs one row at a time.
+    """
     was_training = model.training
     model.eval()
     stats: dict = collections.defaultdict(lambda: collections.defaultdict(float))
     examples = []
     stop = [tok.convert_tokens_to_ids("<|im_end|>"), tok.eos_token_id]
     gen_ids = {id(r) for r in gen_rows}
+    encoded = [answers.encode(r, tok, None) for r in rows]
+    prompts = [ex["input_ids"][: ex["path"][0][0] + 1] for ex in encoded]
+    scored: list = [None] * len(rows)
+    start = last = time.time()
+    done = 0
     with torch.no_grad():
-        for r in rows:
-            ex = answers.encode(r, tok, None)
-            prompt = ex["input_ids"][: ex["path"][0][0] + 1]
-            s, mass, _ = answers.score(model, prompt, tok, ex["n_options"], device)
+        for batch in _batches([len(p) for p in prompts], batch_tokens):
+            results = answers.score_batch(
+                model, [prompts[i] for i in batch], tok,
+                [encoded[i]["n_options"] for i in batch], device, batch_tokens)
+            for i, res in zip(batch, results):
+                scored[i] = res
+            done += len(batch)
+            if time.time() - last > 60 or done == len(rows):
+                last, el = time.time(), time.time() - start
+                logger.info("scored {}/{} rows, {:.1f}m, eta {:.1f}m", done,
+                            len(rows), el / 60, el / done * (len(rows) - done) / 60)
+        for r, ex, prompt, (s, mass, _) in zip(rows, encoded, prompts, scored):
             st = stats[r["source"]]
             st["rows"] += 1
             st["accuracy"] += float(s.argmax().item() == ex["gold"])

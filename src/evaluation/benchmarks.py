@@ -168,6 +168,8 @@ def main() -> None:
                         choices=list(LOADERS))
     parser.add_argument("--gen-per", type=int, default=10,
                         help="text-mode rows per benchmark")
+    parser.add_argument("--batch-tokens", type=int, default=32768,
+                        help="padded prompt tokens per scoring batch")
     args = parser.parse_args()
 
     from transformers import AutoTokenizer
@@ -181,10 +183,12 @@ def main() -> None:
     gen_rows = evaluate.subset(rows, args.gen_per, SEED)
     tok = AutoTokenizer.from_pretrained(args.model)
     if args.adapter:
-        model = modeling.load_trained(args.model, args.adapter)
+        # merged into the weights: no per-layer adapter calls at inference
+        model = modeling.load_trained(args.model, args.adapter).merge_and_unload()
     else:
         model = modeling.load_base(args.model).to("cuda").eval()
-    metrics, examples = evaluate.evaluate(model, tok, rows, gen_rows, "cuda")
+    metrics, examples = evaluate.evaluate(model, tok, rows, gen_rows, "cuda",
+                                         args.batch_tokens)
     ext = [metrics[n]["accuracy"] for n in EXTERNAL if n in metrics]
     if len(ext) == len(EXTERNAL):
         metrics["external_macro"] = {"accuracy": sum(ext) / len(ext)}

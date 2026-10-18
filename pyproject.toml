@@ -23,6 +23,7 @@ dependencies = [
     # source against the installed torch: CUDA_HOME=/usr/local/cuda-12.6.
     "causal-conv1d==1.5.3.post1",
     "loguru>=0.7.3",
+    "tensordict>=0.14.3",
 ]
 
 [project.optional-dependencies]

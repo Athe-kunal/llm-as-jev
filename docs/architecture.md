@@ -12,7 +12,7 @@ as in the paper.
 | `dataloader/data.py` | `load_rows(source, split)`: rows from a local folder / `.jsonl`, or a Hugging Face dataset id |
 | `modeling/modeling.py` | `load_base`, `add_lora`, `load_trained`, `batched_hidden` |
 | `dataloader/answers.py` | prompt (`prompts/decision.j2`), trie, `encode`, `score` (Eq. 1 + in-trie decoding) |
-| `train/losses.py` | ℒ_tree and the KL anchors; `compute` for one example |
+| `train/losses.py` | ℒ_tree and the KL anchors, batched over trie nodes (TensorDict, shapes per line); `compute` for one example |
 | `train/train.py` | training loop (CLI) |
 | `evaluation/evaluate.py` | metrics on the eval split (CLI) |
 | `evaluation/benchmarks.py` | the paper's external benchmarks and JevBench as rows (CLI) |
@@ -189,6 +189,16 @@ masses, each summed directly (`losses._split`): computing the illegal mass as
 1 − m rounds to 0 in fp32 when m is within ~10⁻⁸ of 1, as at most trie
 nodes, and made ℒ_out NaN.
 
+**Batched layout.** `compute` stacks all N = T + O trie nodes (T gold-path,
+O off-path) into one `[N, V]` logits tensor, with legal tokens as an
+`[N, V]` boolean mask and the 0.5-shared weights as an `[N]` vector, so
+every helper works on all nodes at once. Per-node results (`_split`,
+`node_stats`, `node_anchor`, `pos_stats`) are `TensorDict`s with
+`batch_size=[N]`, and `compute` returns a `TensorDict` of the four scalar
+losses; each line of `losses.py` is annotated with its shape. Against the
+earlier per-node loop this gives identical losses and gradients (checked
+with perturbed LoRA weights, so the anchors are nonzero).
+
 **Check (Qwen3-0.6B, the Bitext row of Section 3).** The model against
 itself gives exactly 0 at every site. Top-64 covers 77.2% of the illegal
 mass at the root (the illegal mass there is only 0.0002, a flat tail; the
@@ -269,13 +279,16 @@ mass is summed directly, never computed as 1 − m (fp32 rounds it to 0 and
 log 0 = −inf afterwards gives a NaN gradient (0 · ∞) when the top-64 tokens
 hold all the mass, which made every update's gradient NaN in BF16.
 
-## 6. Inference: scoring and decoding (`answers.score`)
+## 6. Inference: scoring and decoding (`answers.score_batch`)
 
-One prefill of the prompt; its KV cache is copied and repeated for each
-depth of the trie, and all nodes of that depth run as one batch on top of it
-(1–3 short steps, App. C). Qwen3.5's linear-attention cache layers have no
-`batch_repeat_interleave`, so `answers._repeat_cache` repeats their conv and
-recurrent states. It returns s_k (Eq. 1) for every candidate, the root's
+One left-padded prefill of several prompts (positions skip the padding);
+then, per depth of the trie, every node of that depth of every prompt runs
+as one batch on top of a copy of its prompt's cache (1–3 short steps,
+App. C), in chunks so that nodes × longest prompt stays within a token
+budget. `answers._select_cache` builds each copy with the library's
+`reorder_cache` (an `index_select` along the batch), which covers attention
+keys/values and Qwen3.5's linear-attention conv and recurrent states.
+`answers.score` is the one-prompt case (the viewer). It returns s_k (Eq. 1) for every candidate, the root's
 legal mass, and the answer **decoded inside the trie**: the most likely
 legal token at each node from the root down to the closing `]`, so the
 output is always exactly one valid `k]` and nothing is generated after it.
@@ -294,3 +307,15 @@ s_k. Time per row on one GPU after warm-up:
 |---|---|---|---|
 | Qwen3-0.6B, per-node recompute → cached | 2.74 → 0.38 s | 0.42 → 0.12 s | 0.38 → 0.09 s |
 | Qwen3.5-4B, per-node recompute → cached | 9.3 → 0.37 s | 1.64 → 0.19 s | 0.97 → 0.24 s |
+
+**Batching across rows** (`evaluate.evaluate`, `--batch-tokens`, default
+32,768 padded prompt tokens per batch): rows are sorted by prompt length and
+packed, then scored with `score_batch`; text mode stays one row at a time.
+`benchmarks.py` also merges the LoRA adapter into the weights
+(`merge_and_unload`), so trained runs cost the same as base runs. Batched
+and one-at-a-time scores agree to 2e-4 (Qwen3-0.6B) and 0.02 (Qwen3.5-4B,
+whose linear-attention kernels are not bit-exact across batch shapes) in
+fp32. In bf16 they drift by up to ~0.3–1.4 nats on 77-option rows, the same
+size as between a batch of one and a batch of two identical prompts (no
+padding), i.e. bf16 rounding; on 120 benchmark rows the argmax agreed on
+115/120 (0.6B) and 119/120 (4B) with equal accuracy.

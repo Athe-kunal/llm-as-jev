@@ -2,141 +2,183 @@
 
 Li & Wagle, "LLM-as-Jev" (arXiv 2610.02076v3, §3.4, App. I):
 loss = L_tree + lambda * (L_mass + L_out + L_pos). See docs/architecture.md.
+
+Shapes in the comments:
+  V  vocabulary size
+  T  gold-path nodes (suffix tokens of the gold option, "k]")
+  O  sampled off-path nodes (answers.OFF_PATH, fewer for small tries)
+  N  trie nodes scored together: T + O
+  S  sequences in the forward batch: 1 gold + O off-path
+  K  anchored top tokens (TOP)
+Per-node quantities are TensorDicts with batch_size [N], so indexing or
+slicing one slices every field together.
 """
 
 import math
 
 import torch
+from tensordict import TensorDict
 
 from modeling import modeling
-
-def tree_loss(logits: torch.Tensor, path: list) -> torch.Tensor:
-    """L_tree = -log q(gold | x), Eq. 2.
-
-    Each gold-path node contributes -log(p(gold token) / legal mass), which
-    is logsumexp over the legal tokens' logits minus the gold token's logit
-    (the full-vocabulary normalizer cancels). logits: [len(path), vocab],
-    row t at path[t]'s position.
-    """
-    loss = logits.new_zeros((), dtype=torch.float32)
-    for t, (_, legal, gold) in enumerate(path):
-        z = logits[t].float()
-        loss = loss + torch.logsumexp(z[legal], 0) - z[gold]
-    return loss
-
 
 # Anchored distributions keep the reference's top TOP tokens plus one bucket
 # for the rest (App. I).
 TOP = 64
 
 
+def legal_mask(legal: list[list[int]], vocab: int, device) -> torch.Tensor:
+    """[N, V] bool: True at each node's legal tokens."""
+    mask = torch.zeros(len(legal), vocab, dtype=torch.bool, device=device)  # [N, V]
+    for i, tokens in enumerate(legal):
+        mask[i, tokens] = True
+    return mask
+
+
+def tree_loss(logits: torch.Tensor, legal: torch.Tensor,
+              gold: torch.Tensor) -> torch.Tensor:
+    """L_tree = -log q(gold | x), Eq. 2.
+
+    Each gold-path node contributes -log(p(gold token) / legal mass), which
+    is logsumexp over the legal tokens' logits minus the gold token's logit
+    (the full-vocabulary normalizer cancels).
+    logits [T, V], legal [T, V] bool, gold [T] -> [].
+    """
+    z = logits.float()                                                  # [T, V]
+    lse = torch.logsumexp(z.masked_fill(~legal, -torch.inf), -1)        # [T]
+    return (lse - z.gather(-1, gold[:, None])[:, 0]).sum()              # []
+
+
 def _log1mexp(x: torch.Tensor) -> torch.Tensor:
     """log(1 - exp(x)) for log-probabilities x <= 0 (-50 instead of -inf).
 
-    Clamped inside the log: clamping log(0) = -inf afterwards gives a NaN
-    gradient (0 * inf) when the top tokens hold all the mass.
+    Elementwise, any shape. Clamped inside the log: clamping log(0) = -inf
+    afterwards gives a NaN gradient (0 * inf) when the top tokens hold all
+    the mass.
     """
     return torch.log((-torch.expm1(x)).clamp_min(math.exp(-50.0)))
 
 
-def _split(logits: torch.Tensor, legal: list[int]):
-    """Log-probabilities, log legal mass and log illegal mass at a node.
+def _split(logits: torch.Tensor, legal: torch.Tensor) -> TensorDict:
+    """Log-probabilities, log legal mass and log illegal mass at each node.
 
-    Both masses are summed directly: 1 - m rounds to 0 in fp32 when the
-    legal mass is within ~1e-8 of 1, as at most trie nodes.
+    logits [N, V], legal [N, V] bool -> TensorDict [N]. Both masses are
+    summed directly: 1 - m rounds to 0 in fp32 when the legal mass is within
+    ~1e-8 of 1, as at most trie nodes.
     """
-    logp = torch.log_softmax(logits.float(), -1)
-    is_legal = torch.zeros_like(logp, dtype=torch.bool)
-    is_legal[legal] = True
-    illegal = logp.masked_fill(is_legal, -torch.inf)
-    return logp, torch.logsumexp(logp[legal], 0), torch.logsumexp(illegal, 0), illegal
+    logp = torch.log_softmax(logits.float(), -1)                        # [N, V]
+    illegal = logp.masked_fill(legal, -torch.inf)                       # [N, V]
+    return TensorDict(
+        logp=logp,                                                      # [N, V]
+        illegal=illegal,                                                # [N, V]
+        log_m=torch.logsumexp(logp.masked_fill(~legal, -torch.inf), -1),  # [N]
+        log_r=torch.logsumexp(illegal, -1),                             # [N]
+        batch_size=logits.shape[:1],
+    )
 
 
 def _kl_top(ref_lp: torch.Tensor, lp: torch.Tensor) -> torch.Tensor:
     """KL(ref || model) over the reference's top tokens plus a remainder bucket.
 
-    ref_lp, lp: the reference's and the model's log-probabilities of the
-    same top tokens, each within its own (normalized) distribution.
+    ref_lp, lp [N, K]: the reference's and the model's log-probabilities of
+    the same top tokens, each within its own (normalized) distribution.
+    Returns [N].
     """
-    ref = torch.cat([ref_lp, _log1mexp(torch.logsumexp(ref_lp, 0))[None]])
-    mod = torch.cat([lp, _log1mexp(torch.logsumexp(lp, 0))[None]])
-    return (ref.exp() * (ref - mod)).sum()
+    rest = _log1mexp(torch.logsumexp(ref_lp, -1))                       # [N]
+    ref = torch.cat([ref_lp, rest[:, None]], -1)                        # [N, K+1]
+    rest = _log1mexp(torch.logsumexp(lp, -1))                           # [N]
+    mod = torch.cat([lp, rest[:, None]], -1)                            # [N, K+1]
+    return (ref.exp() * (ref - mod)).sum(-1)                            # [N]
 
 
-def node_stats(logits: torch.Tensor, legal: list[int], top: int = TOP):
-    """At a trie node: log legal and illegal mass, and the top illegal tokens
-    with their log-probabilities within the illegal mass (p-bar of L_out)."""
-    _, log_m, log_r, illegal = _split(logits, legal)
-    lp, idx = (illegal - log_r).topk(top)
-    return log_m, log_r, idx, lp
+def node_stats(logits: torch.Tensor, legal: torch.Tensor,
+               top: int = TOP) -> TensorDict:
+    """At each trie node: log legal and illegal mass, and the top illegal
+    tokens with their log-probabilities within the illegal mass (p-bar of
+    L_out). logits [N, V], legal [N, V] -> TensorDict [N]."""
+    s = _split(logits, legal)
+    lp, idx = (s["illegal"] - s["log_r"][:, None]).topk(top, -1)        # [N, K] x2
+    return TensorDict(log_m=s["log_m"], log_r=s["log_r"],               # [N] x2
+                      idx=idx, lp=lp, batch_size=s.batch_size)          # [N, K] x2
 
 
-def pos_stats(logits: torch.Tensor, top: int = TOP):
-    """At a context position: the top tokens and their log-probabilities."""
-    lp, idx = torch.log_softmax(logits.float(), -1).topk(top)
-    return idx, lp
+def pos_stats(logits: torch.Tensor, top: int = TOP) -> TensorDict:
+    """At each context position: the top tokens and their log-probabilities.
+    logits [P, V] -> TensorDict [P]."""
+    lp, idx = torch.log_softmax(logits.float(), -1).topk(top, -1)       # [P, K] x2
+    return TensorDict(idx=idx, lp=lp, batch_size=logits.shape[:1])
 
 
-def node_anchor(logits: torch.Tensor, legal: list[int], ref) -> tuple:
-    """(L_mass, L_out) at one trie node, against ref = node_stats(p0's logits).
+def node_anchor(logits: torch.Tensor, legal: torch.Tensor,
+                ref: TensorDict) -> TensorDict:
+    """L_mass and L_out at each trie node, against ref = node_stats(p0's logits).
 
     L_mass = binary KL(m0 || m), the legal vs illegal mass; L_out = KL over
     the illegal tokens, each side renormalized within its illegal mass.
+    logits [N, V], legal [N, V], ref [N] -> TensorDict [N] (mass, out).
     """
-    ref_log_m, ref_log_r, idx, ref_lp = ref
-    logp, log_m, log_r, _ = _split(logits, legal)
-    mass = (ref_log_m.exp() * (ref_log_m - log_m)
-            + ref_log_r.exp() * (ref_log_r - log_r))
-    out = _kl_top(ref_lp, logp[idx] - log_r)
-    return mass, out
+    s = _split(logits, legal)
+    mass = (ref["log_m"].exp() * (ref["log_m"] - s["log_m"])           # [N]
+            + ref["log_r"].exp() * (ref["log_r"] - s["log_r"]))
+    lp = s["logp"].gather(-1, ref["idx"]) - s["log_r"][:, None]         # [N, K]
+    return TensorDict(mass=mass, out=_kl_top(ref["lp"], lp),            # [N] x2
+                      batch_size=s.batch_size)
 
 
-def pos_anchor(logits: torch.Tensor, ref) -> torch.Tensor:
-    """L_pos at one context position, against ref = pos_stats(p0's logits)."""
-    idx, ref_lp = ref
-    return _kl_top(ref_lp, torch.log_softmax(logits.float(), -1)[idx])
+def pos_anchor(logits: torch.Tensor, ref: TensorDict) -> torch.Tensor:
+    """L_pos at each context position, against ref = pos_stats(p0's logits).
+    logits [P, V], ref [P] -> [P]."""
+    lp = torch.log_softmax(logits.float(), -1).gather(-1, ref["idx"])   # [P, K]
+    return _kl_top(ref["lp"], lp)                                       # [P]
 
 
-def _logits(model, ex: dict, seqs: list[list[int]], device: str, pad: int):
+def _logits(model, ex: dict, seqs: list[list[int]], device: str,
+            pad: int) -> TensorDict:
     """Gold-path logits, reply-start logits, and each sequence's last logits.
 
-    Row 0 is the gold sequence, whose last position is after "]"; the other
-    rows are the off-path sequences, whose last position is their node.
+    Row 0 of last is the gold sequence, whose last position is after "]";
+    the other rows are the off-path sequences, whose last position is their
+    node. Fields have different leading sizes, so the TensorDict has no
+    batch dimension.
     """
-    hs, last = modeling.batched_hidden(model, seqs, device, pad)
+    hs, last = modeling.batched_hidden(model, seqs, device, pad)        # S x [L_i, H], [S, V]
     head = model.get_base_model().lm_head
-    pos = [p for p, _, _ in ex["path"]] + [ex["reply"]]
-    at = head(hs[0][pos].to(head.weight.dtype)).float()
-    return at[:-1], at[-1], last
+    pos = [p for p, _, _ in ex["path"]] + [ex["reply"]]                 # T + 1 positions
+    at = head(hs[0][pos].to(head.weight.dtype)).float()                 # [T+1, V]
+    return TensorDict(path=at[:-1], reply=at[-1], last=last,            # [T, V], [V], [S, V]
+                      batch_size=[])
 
 
-def compute(model, ex: dict, device: str, pad: int) -> dict[str, torch.Tensor]:
+def compute(model, ex: dict, device: str, pad: int) -> TensorDict:
     """L_tree and the anchors L_mass, L_out, L_pos (Eqs. 2-3) for one example.
 
     One batch: the gold sequence and, per off-path node, the prompt + the
     node's tokens. p_theta is the LoRA model; p0 is the same model with the
-    adapter disabled, run without gradients. Weights: the gold-path nodes
-    share 0.5 and the off-path nodes 0.5; the reply start and the position
-    after "]" get 0.5 each. Total loss: tree + lambda * (mass + out + pos).
+    adapter disabled, run without gradients. All N trie nodes (T gold-path,
+    then O off-path) are scored as one [N, V] batch. Weights: the gold-path
+    nodes share 0.5 and the off-path nodes 0.5; the reply start and the
+    position after "]" get 0.5 each. Total loss: tree + lambda * (mass + out
+    + pos). Returns a TensorDict [] of four scalars.
     """
     prompt = ex["input_ids"][: ex["path"][0][0] + 1]
-    seqs = [ex["input_ids"]] + [prompt + n for n, _ in ex["off_path"]]
+    seqs = [ex["input_ids"]] + [prompt + n for n, _ in ex["off_path"]]  # S sequences
     with torch.no_grad(), model.disable_adapter():
-        ref_path, ref_reply, ref_last = _logits(model, ex, seqs, device, pad)
-    path, reply, last = _logits(model, ex, seqs, device, pad)
-    nodes = [
-        [(path[t], ref_path[t], legal) for t, (_, legal, _) in enumerate(ex["path"])],
-        [(last[i], ref_last[i], legal)
-         for i, (_, legal) in enumerate(ex["off_path"], 1)],
-    ]
-    mass = out = path.new_zeros(())
-    for group in nodes:
-        for lg, ref, legal in group:
-            m, o = node_anchor(lg, legal, node_stats(ref, legal))
-            mass = mass + 0.5 / len(group) * m
-            out = out + 0.5 / len(group) * o
-    pos = 0.5 * pos_anchor(reply, pos_stats(ref_reply)) + 0.5 * pos_anchor(
-        last[0], pos_stats(ref_last[0])
+        ref = _logits(model, ex, seqs, device, pad)                     # p0
+    cur = _logits(model, ex, seqs, device, pad)                         # p_theta
+    T, O = len(ex["path"]), len(ex["off_path"])
+    legal = legal_mask([l for _, l, _ in ex["path"]] + [l for _, l in ex["off_path"]],
+                       cur["path"].shape[-1], device)                   # [N, V]
+    gold = torch.tensor([g for _, _, g in ex["path"]], device=device)   # [T]
+    weight = torch.tensor([0.5 / T] * T + [0.5 / max(O, 1)] * O,
+                          device=device)                                # [N]
+    nodes = torch.cat([cur["path"], cur["last"][1:]])                   # [N, V]
+    ref_nodes = torch.cat([ref["path"], ref["last"][1:]])               # [N, V]
+    anchor = node_anchor(nodes, legal, node_stats(ref_nodes, legal))    # TensorDict [N]
+    sites = torch.stack([cur["reply"], cur["last"][0]])                 # [2, V]
+    ref_sites = torch.stack([ref["reply"], ref["last"][0]])             # [2, V]
+    return TensorDict(
+        tree=tree_loss(cur["path"], legal[:T], gold),                   # []
+        mass=(weight * anchor["mass"]).sum(),                           # []
+        out=(weight * anchor["out"]).sum(),                             # []
+        pos=0.5 * pos_anchor(sites, pos_stats(ref_sites)).sum(),        # []
+        batch_size=[],
     )
-    return {"tree": tree_loss(path, ex["path"]), "mass": mass, "out": out,
-            "pos": pos}
