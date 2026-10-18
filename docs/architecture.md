@@ -18,8 +18,8 @@ as in the paper.
 | `evaluation/benchmarks.py` | the paper's external benchmarks and JevBench as rows (CLI) |
 | `modeling/span_heads.py` | evidence-span heads kept from the earlier joint trainer (not yet wired in) |
 | `dataloader/build_data.py` | builds Reason+Long-12k (`docs/data.md`) |
-| `viewers/data.py`, `viewers/model.py` | local dataset browser; trained-vs-base viewer |
 | `dataloader/prompts.py`, `prompts/decision.j2` | Jinja templates (`prompts/` at `src/prompts/`) |
+| `blogs/model_viewer.py` | trained-vs-base viewer (`scripts/view.sh`); dataset examples in `blogs/01_prompt_and_data/` |
 
 Launchers: `scripts/train.sh`, `scripts/evaluate.sh`, `scripts/view.sh`;
 data: `make data`. Models are loaded from the Hugging Face Hub (latest

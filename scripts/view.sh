@@ -7,4 +7,4 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 run=${1:?run dir}; gpu=${2:-0}; port=${3:-8781}
 CUDA_VISIBLE_DEVICES=$gpu PYTHONPATH=src exec .venv/bin/python \
-    -m viewers.model --run "$run" --port "$port"
+    blogs/model_viewer.py --run "$run" --port "$port"

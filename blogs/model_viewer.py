@@ -1,7 +1,7 @@
 """Viewer: a trained LLM-as-Jev adapter against its base model on dev rows.
 
 Usage:
-  CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src .venv/bin/python -m viewers.model \
+  CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src .venv/bin/python blogs/model_viewer.py \
       --run runs/qwen3_0.6b
 
 Each request picks an eval row (optionally from one dataset, or by index),

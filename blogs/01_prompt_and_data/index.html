@@ -1,0 +1,2306 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Prompt and data</title><style>
+:root{--bg:#fbfaf7;--fg:#1d1f23;--muted:#6b6f76;--card:#fff;--line:#e2e0da;
+--code:#f4f3ef;--gold:#d8f5e1;--goldline:#1f7a3d;--c-sys:#8a8f98;--c-state:#5b4bb7;
+--c-q:#b3541e;--c-opt:#1f6f8b;--c-ins:#8a5a00;--c-pre:#1f7a3d}
+@media (prefers-color-scheme:dark){:root{--bg:#15171b;--fg:#e6e6e6;--muted:#9aa1ac;
+--card:#1e2127;--line:#343842;--code:#22252c;--gold:#173a25;--goldline:#7fdca0;
+--c-sys:#7b8190;--c-state:#a99bff;--c-q:#ffa06b;--c-opt:#6fcbe8;--c-ins:#f0c674;
+--c-pre:#7fdca0}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:960px;padding:24px 16px 64px;background:var(--bg);
+color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{font-size:24px;margin:0 0 2px}h2{font-size:18px;margin:32px 0 8px}
+.sub,.muted{color:var(--muted)}
+code,pre,.prompt{font-family:ui-monospace,"SF Mono",Menlo,monospace}
+code{background:var(--code);padding:0 4px;border-radius:3px;font-size:13px}
+ul{padding-left:20px;margin:0}li{margin:3px 0}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;margin:8px 0}
+.legend i{font-style:normal;border-left:4px solid;padding-left:6px}
+.prompt{background:var(--card);border:1px solid var(--line);border-radius:8px;
+padding:12px 14px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;
+word-break:break-word;margin:0}
+.prompt span{border-left:3px solid;padding-left:5px;margin-left:-8px}
+.s-sys{color:var(--c-sys);border-color:var(--c-sys)}
+.s-state{color:var(--c-state);border-color:var(--c-state);font-weight:600}
+.s-q{color:var(--c-q);border-color:var(--c-q)}
+.s-opt{color:var(--c-opt);border-color:var(--c-opt)}
+.s-ins{color:var(--c-ins);border-color:var(--c-ins)}
+.s-pre{color:var(--c-pre);border-color:var(--c-pre);font-weight:600}
+.s-opt.gold{background:var(--gold);border-color:var(--goldline)}
+.doc{display:block;max-height:220px;overflow:auto;background:var(--code);
+border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin:4px 0;
+color:var(--fg)}
+.ans{margin-top:8px;font-size:13px}
+.ans b{font-family:ui-monospace,monospace;background:var(--gold);
+border-left:4px solid var(--goldline);padding:1px 6px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
+.tabs button{font:inherit;font-size:13px;color:var(--fg);background:var(--card);
+border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer}
+.tabs button[aria-selected=true]{background:var(--fg);color:var(--bg)}
+.tabs small{opacity:.65;margin-left:4px}
+.ds{display:none}.ds.on{display:block}
+.ex{margin:14px 0}.ex h4{margin:0 0 4px;font-size:12px;color:var(--muted);
+font-weight:normal}
+details summary{cursor:pointer;color:var(--muted)}
+</style></head><body><h1>1. Prompt and data</h1><div class="sub">LLM-as-Jev reproduction</div><h2>Prompt</h2><div class="legend"><i class="s-sys">chat template</i><i class="s-state">State: / Options:</i><i class="s-q">question</i><i class="s-opt">[k] options</i><i class="s-ins">fixed instruction</i><i class="s-pre">assistant prefill</i></div><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">What size does the screen need to be cut?</span>
+
+<span class="s-q">Which solution better achieves the goal?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] The size needs to be long enough to cover the whole jar.
+</span><span class="s-opt gold">[2] The screen needs to be cut to the size of the opening of the jar.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>2]</b> <span class="muted">(gold: 2)</span></div><p class="muted">The answer is the suffix <code>k]</code> after the prefill. Yes/no tasks use <code>[1]</code>/<code>[2]</code> too. Rendered with <code>Qwen/Qwen3.5-4B</code>'s chat template.</p><h2>Data</h2><ul><li>12 datasets, 1,000 training rows each: 3 intent, 6 short reasoning, 3 long-input (Reason+Long-12k).</li><li>Options are shuffled per example at training time, so gold lands on any <code>[k]</code>.</li><li>Rows store <code>parts</code>, <code>question</code> and options separately; the prompt is rendered from them.</li><li>State parts carry no names, are separated by a blank line, and the question always sits just before <code>Options:</code>.</li><li>Inputs are never truncated; rows are capped at 10,240 tokens.</li><li>ProofWriter, ContractNLI and MuSiQue rows keep native evidence spans; all others have none.</li></ul><h2>Browser</h2><div class="tabs" role="tablist"><button data-id="clinc150">CLINC150<small>1,000</small></button><button data-id="massive">MASSIVE (en-US)<small>1,000</small></button><button data-id="bitext">Bitext<small>1,000</small></button><button data-id="reclor">ReClor<small>1,000</small></button><button data-id="logiqa2">LogiQA 2.0<small>1,000</small></button><button data-id="cosmosqa">CosmosQA<small>1,000</small></button><button data-id="piqa">PIQA<small>1,000</small></button><button data-id="anli">αNLI (ART)<small>1,000</small></button><button data-id="proofwriter">ProofWriter (OWA, depth 5)<small>1,000</small></button><button data-id="contractnli">ContractNLI<small>1,000</small></button><button data-id="musique">MuSiQue (full v1.0)<small>1,000</small></button><button data-id="quality">QuALITY (v1.0.1, HTML-stripped)<small>1,000</small></button></div><section class="ds" id="clinc150"><p><b>CLINC150</b> · <span class="muted">1,000 train rows. Short user messages, each labelled with one of 151 intents across 10 domains, including out-of-scope (`oos`). The option ids are the intent names.</span></p><div class="ex"><h4>#1 · <code>clinc150:ccce93f52f95babc</code> · 151 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">i&#x27;m not sure of that</span>
+
+<span class="s-q">Which intent does the user&#x27;s message express?</span>
+<span class="s-state">Options:</span>
+<details><summary>151 options (click to expand)</summary><span class="s-opt">[1] bill_balance
+</span><span class="s-opt">[2] cancel_reservation
+</span><span class="s-opt">[3] food_last
+</span><span class="s-opt">[4] spelling
+</span><span class="s-opt">[5] spending_history
+</span><span class="s-opt">[6] whisper_mode
+</span><span class="s-opt">[7] meal_suggestion
+</span><span class="s-opt">[8] international_fees
+</span><span class="s-opt">[9] oil_change_when
+</span><span class="s-opt">[10] change_language
+</span><span class="s-opt">[11] direct_deposit
+</span><span class="s-opt">[12] pay_bill
+</span><span class="s-opt">[13] what_song
+</span><span class="s-opt">[14] transfer
+</span><span class="s-opt">[15] how_old_are_you
+</span><span class="s-opt">[16] credit_limit_change
+</span><span class="s-opt">[17] min_payment
+</span><span class="s-opt">[18] calendar
+</span><span class="s-opt">[19] timer
+</span><span class="s-opt">[20] routing
+</span><span class="s-opt">[21] rewards_balance
+</span><span class="s-opt">[22] pto_request_status
+</span><span class="s-opt">[23] goodbye
+</span><span class="s-opt">[24] redeem_rewards
+</span><span class="s-opt">[25] pto_balance
+</span><span class="s-opt">[26] freeze_account
+</span><span class="s-opt">[27] reset_settings
+</span><span class="s-opt">[28] share_location
+</span><span class="s-opt">[29] oil_change_how
+</span><span class="s-opt">[30] meeting_schedule
+</span><span class="s-opt">[31] cancel
+</span><span class="s-opt">[32] tire_change
+</span><span class="s-opt">[33] meaning_of_life
+</span><span class="s-opt">[34] pto_request
+</span><span class="s-opt">[35] taxes
+</span><span class="s-opt">[36] date
+</span><span class="s-opt">[37] mpg
+</span><span class="s-opt">[38] calories
+</span><span class="s-opt">[39] how_busy
+</span><span class="s-opt">[40] reminder
+</span><span class="s-opt">[41] cook_time
+</span><span class="s-opt">[42] jump_start
+</span><span class="s-opt">[43] what_can_i_ask_you
+</span><span class="s-opt">[44] travel_alert
+</span><span class="s-opt">[45] change_speed
+</span><span class="s-opt">[46] do_you_have_pets
+</span><span class="s-opt">[47] expiration_date
+</span><span class="s-opt">[48] reminder_update
+</span><span class="s-opt">[49] international_visa
+</span><span class="s-opt">[50] accept_reservations
+</span><span class="s-opt">[51] who_made_you
+</span><span class="s-opt">[52] todo_list
+</span><span class="s-opt">[53] shopping_list
+</span><span class="s-opt">[54] weather
+</span><span class="s-opt">[55] time
+</span><span class="s-opt">[56] greeting
+</span><span class="s-opt">[57] order
+</span><span class="s-opt">[58] insurance
+</span><span class="s-opt">[59] uber
+</span><span class="s-opt">[60] account_blocked
+</span><span class="s-opt">[61] transactions
+</span><span class="s-opt">[62] vaccines
+</span><span class="s-opt">[63] report_lost_card
+</span><span class="s-opt">[64] restaurant_reservation
+</span><span class="s-opt">[65] change_user_name
+</span><span class="s-opt">[66] pin_change
+</span><span class="s-opt">[67] alarm
+</span><span class="s-opt">[68] card_declined
+</span><span class="s-opt">[69] lost_luggage
+</span><span class="s-opt">[70] next_song
+</span><span class="s-opt">[71] tell_joke
+</span><span class="s-opt">[72] what_is_your_name
+</span><span class="s-opt gold">[73] maybe
+</span><span class="s-opt">[74] damaged_card
+</span><span class="s-opt">[75] tire_pressure
+</span><span class="s-opt">[76] recipe
+</span><span class="s-opt">[77] what_are_your_hobbies
+</span><span class="s-opt">[78] ingredient_substitution
+</span><span class="s-opt">[79] ingredients_list
+</span><span class="s-opt">[80] exchange_rate
+</span><span class="s-opt">[81] repeat
+</span><span class="s-opt">[82] carry_on
+</span><span class="s-opt">[83] todo_list_update
+</span><span class="s-opt">[84] shopping_list_update
+</span><span class="s-opt">[85] travel_suggestion
+</span><span class="s-opt">[86] are_you_a_bot
+</span><span class="s-opt">[87] who_do_you_work_for
+</span><span class="s-opt">[88] credit_score
+</span><span class="s-opt">[89] schedule_maintenance
+</span><span class="s-opt">[90] no
+</span><span class="s-opt">[91] improve_credit_score
+</span><span class="s-opt">[92] calculator
+</span><span class="s-opt">[93] current_location
+</span><span class="s-opt">[94] gas_type
+</span><span class="s-opt">[95] play_music
+</span><span class="s-opt">[96] credit_limit
+</span><span class="s-opt">[97] income
+</span><span class="s-opt">[98] measurement_conversion
+</span><span class="s-opt">[99] oos
+</span><span class="s-opt">[100] book_flight
+</span><span class="s-opt">[101] travel_notification
+</span><span class="s-opt">[102] restaurant_reviews
+</span><span class="s-opt">[103] flight_status
+</span><span class="s-opt">[104] confirm_reservation
+</span><span class="s-opt">[105] rollover_401k
+</span><span class="s-opt">[106] calendar_update
+</span><span class="s-opt">[107] order_checks
+</span><span class="s-opt">[108] change_accent
+</span><span class="s-opt">[109] change_volume
+</span><span class="s-opt">[110] roll_dice
+</span><span class="s-opt">[111] user_name
+</span><span class="s-opt">[112] nutrition_info
+</span><span class="s-opt">[113] next_holiday
+</span><span class="s-opt">[114] restaurant_suggestion
+</span><span class="s-opt">[115] interest_rate
+</span><span class="s-opt">[116] flip_coin
+</span><span class="s-opt">[117] pto_used
+</span><span class="s-opt">[118] gas
+</span><span class="s-opt">[119] bill_due
+</span><span class="s-opt">[120] translate
+</span><span class="s-opt">[121] report_fraud
+</span><span class="s-opt">[122] text
+</span><span class="s-opt">[123] book_hotel
+</span><span class="s-opt">[124] find_phone
+</span><span class="s-opt">[125] distance
+</span><span class="s-opt">[126] car_rental
+</span><span class="s-opt">[127] update_playlist
+</span><span class="s-opt">[128] replacement_card_duration
+</span><span class="s-opt">[129] apr
+</span><span class="s-opt">[130] plug_type
+</span><span class="s-opt">[131] order_status
+</span><span class="s-opt">[132] schedule_meeting
+</span><span class="s-opt">[133] make_call
+</span><span class="s-opt">[134] payday
+</span><span class="s-opt">[135] last_maintenance
+</span><span class="s-opt">[136] insurance_change
+</span><span class="s-opt">[137] traffic
+</span><span class="s-opt">[138] definition
+</span><span class="s-opt">[139] directions
+</span><span class="s-opt">[140] balance
+</span><span class="s-opt">[141] fun_fact
+</span><span class="s-opt">[142] change_ai_name
+</span><span class="s-opt">[143] new_card
+</span><span class="s-opt">[144] w2
+</span><span class="s-opt">[145] where_are_you_from
+</span><span class="s-opt">[146] application_status
+</span><span class="s-opt">[147] thank_you
+</span><span class="s-opt">[148] sync_device
+</span><span class="s-opt">[149] timezone
+</span><span class="s-opt">[150] smart_home
+</span><span class="s-opt">[151] yes
+</span></details><span class="s-opt gold">[73] maybe
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>73]</b> <span class="muted">(gold: maybe)</span></div></div><div class="ex"><h4>#2 · <code>clinc150:cec3a24d173490d0</code> · 151 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">how much mpg does this car get in the city</span>
+
+<span class="s-q">Which intent does the user&#x27;s message express?</span>
+<span class="s-state">Options:</span>
+<details><summary>151 options (click to expand)</summary><span class="s-opt">[1] calculator
+</span><span class="s-opt">[2] restaurant_reservation
+</span><span class="s-opt">[3] apr
+</span><span class="s-opt">[4] international_visa
+</span><span class="s-opt">[5] travel_suggestion
+</span><span class="s-opt">[6] reset_settings
+</span><span class="s-opt">[7] who_do_you_work_for
+</span><span class="s-opt">[8] carry_on
+</span><span class="s-opt">[9] roll_dice
+</span><span class="s-opt">[10] gas_type
+</span><span class="s-opt">[11] who_made_you
+</span><span class="s-opt">[12] user_name
+</span><span class="s-opt">[13] bill_balance
+</span><span class="s-opt">[14] oil_change_how
+</span><span class="s-opt">[15] transfer
+</span><span class="s-opt">[16] spelling
+</span><span class="s-opt">[17] replacement_card_duration
+</span><span class="s-opt">[18] new_card
+</span><span class="s-opt">[19] what_is_your_name
+</span><span class="s-opt">[20] how_busy
+</span><span class="s-opt">[21] pto_request
+</span><span class="s-opt">[22] recipe
+</span><span class="s-opt">[23] insurance
+</span><span class="s-opt">[24] redeem_rewards
+</span><span class="s-opt">[25] repeat
+</span><span class="s-opt">[26] restaurant_suggestion
+</span><span class="s-opt">[27] find_phone
+</span><span class="s-opt">[28] credit_limit_change
+</span><span class="s-opt">[29] fun_fact
+</span><span class="s-opt">[30] pto_used
+</span><span class="s-opt">[31] last_maintenance
+</span><span class="s-opt">[32] do_you_have_pets
+</span><span class="s-opt">[33] change_accent
+</span><span class="s-opt">[34] book_flight
+</span><span class="s-opt">[35] change_user_name
+</span><span class="s-opt">[36] plug_type
+</span><span class="s-opt">[37] change_ai_name
+</span><span class="s-opt">[38] credit_limit
+</span><span class="s-opt">[39] transactions
+</span><span class="s-opt">[40] time
+</span><span class="s-opt">[41] food_last
+</span><span class="s-opt">[42] flight_status
+</span><span class="s-opt">[43] todo_list
+</span><span class="s-opt">[44] distance
+</span><span class="s-opt">[45] current_location
+</span><span class="s-opt">[46] min_payment
+</span><span class="s-opt">[47] change_volume
+</span><span class="s-opt">[48] maybe
+</span><span class="s-opt">[49] account_blocked
+</span><span class="s-opt">[50] gas
+</span><span class="s-opt">[51] report_fraud
+</span><span class="s-opt">[52] application_status
+</span><span class="s-opt">[53] how_old_are_you
+</span><span class="s-opt">[54] traffic
+</span><span class="s-opt">[55] improve_credit_score
+</span><span class="s-opt">[56] car_rental
+</span><span class="s-opt">[57] whisper_mode
+</span><span class="s-opt">[58] next_song
+</span><span class="s-opt">[59] insurance_change
+</span><span class="s-opt">[60] lost_luggage
+</span><span class="s-opt">[61] expiration_date
+</span><span class="s-opt">[62] thank_you
+</span><span class="s-opt">[63] exchange_rate
+</span><span class="s-opt">[64] restaurant_reviews
+</span><span class="s-opt">[65] payday
+</span><span class="s-opt gold">[66] mpg
+</span><span class="s-opt">[67] play_music
+</span><span class="s-opt">[68] ingredients_list
+</span><span class="s-opt">[69] order
+</span><span class="s-opt">[70] greeting
+</span><span class="s-opt">[71] tell_joke
+</span><span class="s-opt">[72] are_you_a_bot
+</span><span class="s-opt">[73] translate
+</span><span class="s-opt">[74] no
+</span><span class="s-opt">[75] calories
+</span><span class="s-opt">[76] balance
+</span><span class="s-opt">[77] credit_score
+</span><span class="s-opt">[78] pto_balance
+</span><span class="s-opt">[79] oos
+</span><span class="s-opt">[80] smart_home
+</span><span class="s-opt">[81] share_location
+</span><span class="s-opt">[82] date
+</span><span class="s-opt">[83] spending_history
+</span><span class="s-opt">[84] meeting_schedule
+</span><span class="s-opt">[85] pto_request_status
+</span><span class="s-opt">[86] order_status
+</span><span class="s-opt">[87] travel_notification
+</span><span class="s-opt">[88] order_checks
+</span><span class="s-opt">[89] alarm
+</span><span class="s-opt">[90] uber
+</span><span class="s-opt">[91] todo_list_update
+</span><span class="s-opt">[92] goodbye
+</span><span class="s-opt">[93] vaccines
+</span><span class="s-opt">[94] damaged_card
+</span><span class="s-opt">[95] book_hotel
+</span><span class="s-opt">[96] nutrition_info
+</span><span class="s-opt">[97] meaning_of_life
+</span><span class="s-opt">[98] confirm_reservation
+</span><span class="s-opt">[99] ingredient_substitution
+</span><span class="s-opt">[100] shopping_list_update
+</span><span class="s-opt">[101] travel_alert
+</span><span class="s-opt">[102] timer
+</span><span class="s-opt">[103] cancel_reservation
+</span><span class="s-opt">[104] shopping_list
+</span><span class="s-opt">[105] calendar_update
+</span><span class="s-opt">[106] freeze_account
+</span><span class="s-opt">[107] sync_device
+</span><span class="s-opt">[108] rollover_401k
+</span><span class="s-opt">[109] interest_rate
+</span><span class="s-opt">[110] tire_pressure
+</span><span class="s-opt">[111] text
+</span><span class="s-opt">[112] cook_time
+</span><span class="s-opt">[113] oil_change_when
+</span><span class="s-opt">[114] what_song
+</span><span class="s-opt">[115] directions
+</span><span class="s-opt">[116] yes
+</span><span class="s-opt">[117] calendar
+</span><span class="s-opt">[118] income
+</span><span class="s-opt">[119] what_can_i_ask_you
+</span><span class="s-opt">[120] routing
+</span><span class="s-opt">[121] flip_coin
+</span><span class="s-opt">[122] international_fees
+</span><span class="s-opt">[123] rewards_balance
+</span><span class="s-opt">[124] schedule_maintenance
+</span><span class="s-opt">[125] report_lost_card
+</span><span class="s-opt">[126] reminder
+</span><span class="s-opt">[127] next_holiday
+</span><span class="s-opt">[128] change_speed
+</span><span class="s-opt">[129] update_playlist
+</span><span class="s-opt">[130] meal_suggestion
+</span><span class="s-opt">[131] pay_bill
+</span><span class="s-opt">[132] pin_change
+</span><span class="s-opt">[133] where_are_you_from
+</span><span class="s-opt">[134] schedule_meeting
+</span><span class="s-opt">[135] bill_due
+</span><span class="s-opt">[136] jump_start
+</span><span class="s-opt">[137] timezone
+</span><span class="s-opt">[138] make_call
+</span><span class="s-opt">[139] direct_deposit
+</span><span class="s-opt">[140] definition
+</span><span class="s-opt">[141] cancel
+</span><span class="s-opt">[142] what_are_your_hobbies
+</span><span class="s-opt">[143] reminder_update
+</span><span class="s-opt">[144] w2
+</span><span class="s-opt">[145] measurement_conversion
+</span><span class="s-opt">[146] tire_change
+</span><span class="s-opt">[147] card_declined
+</span><span class="s-opt">[148] weather
+</span><span class="s-opt">[149] accept_reservations
+</span><span class="s-opt">[150] change_language
+</span><span class="s-opt">[151] taxes
+</span></details><span class="s-opt gold">[66] mpg
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>66]</b> <span class="muted">(gold: mpg)</span></div></div></section><section class="ds" id="massive"><p><b>MASSIVE (en-US)</b> · <span class="muted">1,000 train rows. Voice-assistant utterances labelled with one of 60 intents. The option ids are the intent names.</span></p><div class="ex"><h4>#1 · <code>massive:aa5c231d21c54759</code> · 60 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">have i received any emails from shaun</span>
+
+<span class="s-q">Which intent does the user&#x27;s message express?</span>
+<span class="s-state">Options:</span>
+<details><summary>60 options (click to expand)</summary><span class="s-opt">[1] play_audiobook
+</span><span class="s-opt">[2] iot_hue_lightdim
+</span><span class="s-opt">[3] audio_volume_down
+</span><span class="s-opt">[4] qa_currency
+</span><span class="s-opt">[5] transport_taxi
+</span><span class="s-opt">[6] cooking_query
+</span><span class="s-opt">[7] music_likeness
+</span><span class="s-opt">[8] qa_stock
+</span><span class="s-opt">[9] general_greet
+</span><span class="s-opt">[10] iot_cleaning
+</span><span class="s-opt">[11] transport_traffic
+</span><span class="s-opt">[12] lists_query
+</span><span class="s-opt">[13] alarm_query
+</span><span class="s-opt">[14] audio_volume_mute
+</span><span class="s-opt">[15] transport_query
+</span><span class="s-opt">[16] datetime_convert
+</span><span class="s-opt">[17] weather_query
+</span><span class="s-opt">[18] transport_ticket
+</span><span class="s-opt">[19] play_game
+</span><span class="s-opt">[20] cooking_recipe
+</span><span class="s-opt">[21] music_query
+</span><span class="s-opt">[22] iot_wemo_on
+</span><span class="s-opt">[23] email_addcontact
+</span><span class="s-opt">[24] iot_hue_lighton
+</span><span class="s-opt">[25] social_post
+</span><span class="s-opt gold">[26] email_query
+</span><span class="s-opt">[27] qa_factoid
+</span><span class="s-opt">[28] general_joke
+</span><span class="s-opt">[29] play_radio
+</span><span class="s-opt">[30] lists_remove
+</span><span class="s-opt">[31] iot_hue_lightup
+</span><span class="s-opt">[32] music_settings
+</span><span class="s-opt">[33] iot_hue_lightchange
+</span><span class="s-opt">[34] general_quirky
+</span><span class="s-opt">[35] recommendation_events
+</span><span class="s-opt">[36] datetime_query
+</span><span class="s-opt">[37] news_query
+</span><span class="s-opt">[38] alarm_set
+</span><span class="s-opt">[39] takeaway_order
+</span><span class="s-opt">[40] social_query
+</span><span class="s-opt">[41] calendar_set
+</span><span class="s-opt">[42] recommendation_locations
+</span><span class="s-opt">[43] iot_coffee
+</span><span class="s-opt">[44] qa_definition
+</span><span class="s-opt">[45] qa_maths
+</span><span class="s-opt">[46] music_dislikeness
+</span><span class="s-opt">[47] play_podcasts
+</span><span class="s-opt">[48] calendar_remove
+</span><span class="s-opt">[49] email_querycontact
+</span><span class="s-opt">[50] calendar_query
+</span><span class="s-opt">[51] recommendation_movies
+</span><span class="s-opt">[52] iot_wemo_off
+</span><span class="s-opt">[53] email_sendemail
+</span><span class="s-opt">[54] alarm_remove
+</span><span class="s-opt">[55] audio_volume_other
+</span><span class="s-opt">[56] play_music
+</span><span class="s-opt">[57] iot_hue_lightoff
+</span><span class="s-opt">[58] takeaway_query
+</span><span class="s-opt">[59] lists_createoradd
+</span><span class="s-opt">[60] audio_volume_up
+</span></details><span class="s-opt gold">[26] email_query
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>26]</b> <span class="muted">(gold: email_query)</span></div></div><div class="ex"><h4>#2 · <code>massive:81afb48193f869dc</code> · 60 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">register complaint on twitter</span>
+
+<span class="s-q">Which intent does the user&#x27;s message express?</span>
+<span class="s-state">Options:</span>
+<details><summary>60 options (click to expand)</summary><span class="s-opt">[1] datetime_convert
+</span><span class="s-opt">[2] weather_query
+</span><span class="s-opt">[3] email_querycontact
+</span><span class="s-opt">[4] recommendation_events
+</span><span class="s-opt">[5] alarm_query
+</span><span class="s-opt">[6] recommendation_movies
+</span><span class="s-opt">[7] transport_query
+</span><span class="s-opt">[8] takeaway_order
+</span><span class="s-opt">[9] general_quirky
+</span><span class="s-opt">[10] play_radio
+</span><span class="s-opt">[11] music_settings
+</span><span class="s-opt">[12] email_addcontact
+</span><span class="s-opt">[13] play_podcasts
+</span><span class="s-opt">[14] recommendation_locations
+</span><span class="s-opt">[15] transport_traffic
+</span><span class="s-opt">[16] audio_volume_other
+</span><span class="s-opt">[17] play_music
+</span><span class="s-opt">[18] iot_wemo_on
+</span><span class="s-opt">[19] transport_taxi
+</span><span class="s-opt">[20] alarm_remove
+</span><span class="s-opt">[21] datetime_query
+</span><span class="s-opt">[22] iot_hue_lightdim
+</span><span class="s-opt">[23] iot_coffee
+</span><span class="s-opt">[24] iot_hue_lightup
+</span><span class="s-opt">[25] qa_factoid
+</span><span class="s-opt">[26] qa_definition
+</span><span class="s-opt">[27] lists_query
+</span><span class="s-opt">[28] iot_wemo_off
+</span><span class="s-opt">[29] play_audiobook
+</span><span class="s-opt gold">[30] social_post
+</span><span class="s-opt">[31] transport_ticket
+</span><span class="s-opt">[32] lists_remove
+</span><span class="s-opt">[33] qa_stock
+</span><span class="s-opt">[34] music_likeness
+</span><span class="s-opt">[35] audio_volume_up
+</span><span class="s-opt">[36] iot_hue_lighton
+</span><span class="s-opt">[37] play_game
+</span><span class="s-opt">[38] iot_cleaning
+</span><span class="s-opt">[39] social_query
+</span><span class="s-opt">[40] qa_currency
+</span><span class="s-opt">[41] audio_volume_mute
+</span><span class="s-opt">[42] music_dislikeness
+</span><span class="s-opt">[43] cooking_recipe
+</span><span class="s-opt">[44] general_joke
+</span><span class="s-opt">[45] audio_volume_down
+</span><span class="s-opt">[46] email_query
+</span><span class="s-opt">[47] qa_maths
+</span><span class="s-opt">[48] lists_createoradd
+</span><span class="s-opt">[49] calendar_query
+</span><span class="s-opt">[50] takeaway_query
+</span><span class="s-opt">[51] calendar_remove
+</span><span class="s-opt">[52] music_query
+</span><span class="s-opt">[53] iot_hue_lightoff
+</span><span class="s-opt">[54] iot_hue_lightchange
+</span><span class="s-opt">[55] general_greet
+</span><span class="s-opt">[56] news_query
+</span><span class="s-opt">[57] calendar_set
+</span><span class="s-opt">[58] cooking_query
+</span><span class="s-opt">[59] email_sendemail
+</span><span class="s-opt">[60] alarm_set
+</span></details><span class="s-opt gold">[30] social_post
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>30]</b> <span class="muted">(gold: social_post)</span></div></div></section><section class="ds" id="bitext"><p><b>Bitext</b> · <span class="muted">1,000 train rows. E-commerce customer-support messages labelled with one of 27 intents. Messages keep the release&#x27;s `{{...}}` placeholders.</span></p><div class="ex"><h4>#1 · <code>bitext:b5fdbeacb9e2c349</code> · 27 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">I do not know wht I have to do to get my invoice #85632</span>
+
+<span class="s-q">Which intent does the user&#x27;s message express?</span>
+<span class="s-state">Options:</span>
+<details><summary>27 options (click to expand)</summary><span class="s-opt">[1] registration_problems
+</span><span class="s-opt">[2] review
+</span><span class="s-opt">[3] switch_account
+</span><span class="s-opt">[4] recover_password
+</span><span class="s-opt">[5] create_account
+</span><span class="s-opt">[6] contact_customer_service
+</span><span class="s-opt">[7] cancel_order
+</span><span class="s-opt">[8] change_order
+</span><span class="s-opt">[9] check_payment_methods
+</span><span class="s-opt">[10] check_cancellation_fee
+</span><span class="s-opt">[11] place_order
+</span><span class="s-opt">[12] track_order
+</span><span class="s-opt">[13] track_refund
+</span><span class="s-opt">[14] set_up_shipping_address
+</span><span class="s-opt">[15] check_invoice
+</span><span class="s-opt">[16] complaint
+</span><span class="s-opt">[17] delete_account
+</span><span class="s-opt">[18] change_shipping_address
+</span><span class="s-opt">[19] delivery_period
+</span><span class="s-opt">[20] check_refund_policy
+</span><span class="s-opt">[21] payment_issue
+</span><span class="s-opt gold">[22] get_invoice
+</span><span class="s-opt">[23] edit_account
+</span><span class="s-opt">[24] contact_human_agent
+</span><span class="s-opt">[25] get_refund
+</span><span class="s-opt">[26] newsletter_subscription
+</span><span class="s-opt">[27] delivery_options
+</span></details><span class="s-opt gold">[22] get_invoice
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>22]</b> <span class="muted">(gold: get_invoice)</span></div></div><div class="ex"><h4>#2 · <code>bitext:d8961aea6433edf8</code> · 27 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">can I see the shipping options?</span>
+
+<span class="s-q">Which intent does the user&#x27;s message express?</span>
+<span class="s-state">Options:</span>
+<details><summary>27 options (click to expand)</summary><span class="s-opt">[1] cancel_order
+</span><span class="s-opt">[2] create_account
+</span><span class="s-opt">[3] switch_account
+</span><span class="s-opt">[4] track_order
+</span><span class="s-opt">[5] delivery_period
+</span><span class="s-opt">[6] newsletter_subscription
+</span><span class="s-opt">[7] payment_issue
+</span><span class="s-opt">[8] delete_account
+</span><span class="s-opt">[9] complaint
+</span><span class="s-opt">[10] contact_human_agent
+</span><span class="s-opt">[11] registration_problems
+</span><span class="s-opt">[12] change_shipping_address
+</span><span class="s-opt">[13] set_up_shipping_address
+</span><span class="s-opt">[14] check_payment_methods
+</span><span class="s-opt">[15] get_refund
+</span><span class="s-opt">[16] edit_account
+</span><span class="s-opt">[17] place_order
+</span><span class="s-opt">[18] track_refund
+</span><span class="s-opt">[19] check_invoice
+</span><span class="s-opt">[20] review
+</span><span class="s-opt">[21] change_order
+</span><span class="s-opt">[22] recover_password
+</span><span class="s-opt">[23] check_refund_policy
+</span><span class="s-opt">[24] contact_customer_service
+</span><span class="s-opt gold">[25] delivery_options
+</span><span class="s-opt">[26] get_invoice
+</span><span class="s-opt">[27] check_cancellation_fee
+</span></details><span class="s-opt gold">[25] delivery_options
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>25]</b> <span class="muted">(gold: delivery_options)</span></div></div></section><section class="ds" id="reclor"><p><b>ReClor</b> · <span class="muted">1,000 train rows. Logical-reasoning argument passages with a 4-option question about the argument. Research-only license.</span></p><div class="ex"><h4>#1 · <code>reclor:94c65c13f123c1d3</code> · 4 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Sarah: When commercial fishing boats with permits to fish for certain species accidentally catch a type of fish for which they have no permit, the latter must be thrown back. This is a very wasteful practice because many, if not most, of the rejected fish do not survive. Fishing permits should ttherefore be altered so that fishers can keep fish caught accidentally. Amar: Making it legal to keep those fish would probably lead to a lot more &quot;accidents. &quot;</span>
+
+<span class="s-q">The technique Amar uses in responding to Sarah&#x27;s argument is to</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] allude to a factor that supposedly strengthens the case for Sarah&#x27;s recommendation
+</span><span class="s-opt gold">[2] contend that Sarah&#x27;s recommendation has an important negative consequence
+</span><span class="s-opt">[3] maintain that Sarah overlooks important lessons from past policies
+</span><span class="s-opt">[4] point out that Sarah used a crucial term in two distinct senses
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>2]</b> <span class="muted">(gold: 1)</span></div></div><div class="ex"><h4>#2 · <code>reclor:d0ecde64e6363f5e</code> · 4 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">The only physical factor preventing a human journey to Mars has been weight. Carrying enough fuel to propel a conventional spacecraft to Mars and back would make even the lightest craft too heavy to be launched from Earth. A device has recently been invented, however, that allows an otherwise conventional spacecraft to refill the craft&#x27; s fuel tanks with fuel manufactured from the Martian atmosphere for the return trip. Ttherefore, it is possible for people to go to Mars in a spacecraft that carries this device and then return.</span>
+
+<span class="s-q">Which one of the following is an assumption on which the argument depends?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt gold">[1] The device for manufacturing fuel for the return to Earth weighs less than the tanks of fuel that a conventional spacecraft would otherwise need to carry from Earth for the return trip.
+</span><span class="s-opt">[2] The fuel manufactured from the Martian atmosphere would not differ in composition from the fuel used to travel to Mars.
+</span><span class="s-opt">[3] A conventional spacecraft equipped with the device would not be appreciably more expensive to construct than current spacecraft typically are.
+</span><span class="s-opt">[4] The device for manufacturing fuel from the Martian atmosphere would not take up any of the spaceship crew&#x27;s living space.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>1]</b> <span class="muted">(gold: 3)</span></div></div></section><section class="ds" id="logiqa2"><p><b>LogiQA 2.0</b> · <span class="muted">1,000 train rows. Short logical-reasoning passages (civil-service style) with a 4-option question.</span></p><div class="ex"><h4>#1 · <code>logiqa2:c1a4bd1d6b29991b</code> · 4 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Newspapers are limited by publishing time, radio and television are limited by broadcasting time, while Internet media have no limitation on publishing time, coupled with the simplicity of production and release, the timeliness of new media is far better than that of traditional media. News was originally defined as the report of recent facts; now, news is the report of facts that are happening. It is often seen that the spread of news is synchronized with the progress of events.</span>
+
+<span class="s-q">Which of the following is the main content of this text?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] The spread of news should be synchronized with events
+</span><span class="s-opt">[2] Internet media news releases are real-time
+</span><span class="s-opt gold">[3] New media reinterprets the definition of news
+</span><span class="s-opt">[4] There is a big difference between new media and traditional media
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>3]</b> <span class="muted">(gold: 2)</span></div></div><div class="ex"><h4>#2 · <code>logiqa2:cf96e4ebdcda71b0</code> · 4 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">The report of the Ministry of Health shows that the cost of health care has indeed increased over the years. It can be seen that the medical conditions enjoyed by each of us have been greatly improved.</span>
+
+<span class="s-q">Which of the followings raises the most serious challenge to the above conclusion?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] 70% of the state allocation to the health sector is spent on infrastructure construction
+</span><span class="s-opt gold">[2] The vast majority of health care expenses are spent on high-tech intensive care for high-risk patients
+</span><span class="s-opt">[3] The cost of nursing care for chronic diseases in the elderly is very huge
+</span><span class="s-opt">[4] Without increasing the cost, our sanitary conditions may also be improved
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>2]</b> <span class="muted">(gold: 1)</span></div></div></section><section class="ds" id="cosmosqa"><p><b>CosmosQA</b> · <span class="muted">1,000 train rows. Commonsense reading comprehension: a short everyday context with a question and 4 options.</span></p><div class="ex"><h4>#1 · <code>cosmosqa:4cc54ecd547261aa</code> · 4 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">I had it pretty easy in Atlanta . Dekalb County would come pick up our recycling every week . And they took just about anything recyclable . Here in Macon , our county will only recycle paper , and I have n&#x27;t bothered to figure out how to get a recycling bin from them .</span>
+
+<span class="s-q">What may be the reason why they have n&#x27;t gotten a recycling bin ?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] None of the above choices .
+</span><span class="s-opt gold">[2] Because they are too lazy .
+</span><span class="s-opt">[3] Because they do n&#x27;t have a way to get it .
+</span><span class="s-opt">[4] Because they really do n&#x27;t want to recycle .
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>2]</b> <span class="muted">(gold: 2)</span></div></div><div class="ex"><h4>#2 · <code>cosmosqa:c024111c662751c3</code> · 4 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">So my 30th birthday started out kind of rough . I fell down the stairs and banged up my ankle badly enough that I cancelled the show I was supposed to do that night in the Poconos . I called Rachel and she came over here and took care of me all day . Then she gave me my present .</span>
+
+<span class="s-q">What led Rachel to come over and take care of the speaker ?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] None of the above choices .
+</span><span class="s-opt">[2] She is a nurses aid and has a contract to care for the speaker
+</span><span class="s-opt">[3] The speaker is paying her to come over and care for her injuries
+</span><span class="s-opt gold">[4] They are a naturally caring person and they look out for the wellbeing of friends whenever possible
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>4]</b> <span class="muted">(gold: 4)</span></div></div></section><section class="ds" id="piqa"><p><b>PIQA</b> · <span class="muted">1,000 train rows. Physical commonsense: a goal and two candidate solutions; pick the one that better achieves the goal.</span></p><div class="ex"><h4>#1 · <code>piqa:36431408b3750e08</code> · 2 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">What size does the screen need to be cut?</span>
+
+<span class="s-q">Which solution better achieves the goal?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt gold">[1] The screen needs to be cut to the size of the opening of the jar.
+</span><span class="s-opt">[2] The size needs to be long enough to cover the whole jar.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>1]</b> <span class="muted">(gold: 2)</span></div></div><div class="ex"><h4>#2 · <code>piqa:7b5e8633141b7aeb</code> · 2 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">How to cut leaves off a plant?</span>
+
+<span class="s-q">Which solution better achieves the goal?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt gold">[1] Using a good scissor would more than suffice.
+</span><span class="s-opt">[2] Using a good axe would more than suffice.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>1]</b> <span class="muted">(gold: 2)</span></div></div></section><section class="ds" id="anli"><p><b>αNLI (ART)</b> · <span class="muted">1,000 train rows. Abductive reasoning: two observations and two hypotheses; pick the one that best explains what happened between them.</span></p><div class="ex"><h4>#1 · <code>anli:fc566da48993094f</code> · 2 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Yesterday Kim got a brand new blazer.</span>
+
+<span class="doc">Kim asked her friends if they wanted to go to Starbucks.</span>
+
+<span class="s-q">Which hypothesis best explains what happened between the two observations?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] Nobody noticed about Kim&#x27;s blazer, because they had coffee.
+</span><span class="s-opt gold">[2] Nobody noticed about Kim&#x27;s blazer.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>2]</b> <span class="muted">(gold: 1)</span></div></div><div class="ex"><h4>#2 · <code>anli:eec3be248a2db922</code> · 2 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Jimmy went skateboarding this afternoon.</span>
+
+<span class="doc">After all his practice this week, Jimmy has learned a new trick.</span>
+
+<span class="s-q">Which hypothesis best explains what happened between the two observations?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt gold">[1] He wants to skate like the pros.
+</span><span class="s-opt">[2] He ended up quitting skating that day.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>1]</b> <span class="muted">(gold: 2)</span></div></div></section><section class="ds" id="proofwriter"><p><b>ProofWriter (OWA, depth 5)</b> · <span class="muted">1,000 train rows. A theory of facts and rules, and a statement; is it true, false, or unknown given the theory? True and false rows carry proof-step sentences as spans.</span></p><div class="ex"><h4>#1 · <code>proofwriter:00c12cf2b0f2956a</code> · 3 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">The lion chases the mouse. The lion does not chase the tiger. The lion is kind. The lion likes the mouse. The lion does not like the squirrel. The mouse chases the lion. The mouse does not chase the tiger. The mouse is not green. The mouse is not red. The mouse needs the tiger. The squirrel chases the mouse. The squirrel is big. The squirrel does not need the lion. The tiger is blue. Big people are red. If someone is blue then they chase the squirrel. If someone likes the lion then they do not need the squirrel. If someone is blue and they need the tiger then they like the tiger. If someone is kind then they need the lion. If someone needs the lion then they are blue. If someone is big then they are not blue. If someone chases the squirrel then they like the lion. If someone is blue then they chase the lion.</span>
+
+<span class="s-q">Statement: &quot;The lion likes the lion.&quot;
+Based only on the theory, is the statement true, false, or unknown?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] Unknown: the theory implies neither the statement nor its negation.
+</span><span class="s-opt">[2] False: the theory implies that the statement is false.
+</span><span class="s-opt gold">[3] True: the theory implies the statement.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>3]</b> <span class="muted">(gold: true)</span></div></div><div class="ex"><h4>#2 · <code>proofwriter:e45c6408c5b909f6</code> · 3 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">The cat chases the squirrel. The cat is blue. The cat is round. The cat needs the mouse. The cow chases the cat. The cow needs the cat. The cow sees the squirrel. The mouse chases the cat. The mouse chases the squirrel. The mouse sees the cat. The mouse sees the cow. The squirrel sees the cat. If the cat needs the mouse then the mouse chases the squirrel. If something chases the squirrel then it chases the cow. If something is blue then it needs the cow. If something chases the cow then the cow is big. If the mouse is round then the mouse is blue. If the mouse chases the squirrel and the mouse chases the cow then the mouse is not big. If something sees the cat and the cat needs the cow then it is kind. If something is kind then it is round. If something is round and it sees the mouse then the mouse is rough.</span>
+
+<span class="s-q">Statement: &quot;The mouse needs the cow.&quot;
+Based only on the theory, is the statement true, false, or unknown?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] Unknown: the theory implies neither the statement nor its negation.
+</span><span class="s-opt">[2] False: the theory implies that the statement is false.
+</span><span class="s-opt gold">[3] True: the theory implies the statement.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>3]</b> <span class="muted">(gold: true)</span></div></div></section><section class="ds" id="contractnli"><p><b>ContractNLI</b> · <span class="muted">1,000 train rows. A long contract and a hypothesis statement: entailed, contradicted, or not mentioned. Entailed and contradicted rows carry the human evidence spans.</span></p><div class="ex"><h4>#1 · <code>contractnli:c124502f33dd39f8</code> · 3 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Microkerf Limited and ________________________________________
+NON DISCLOSURE AGREEMENT
+Microkerf Limited
+1 Coal Cart Road
+Birstall Industrial Estate
+Leicester
+Leicestershire
+LE4 3BY
+Tel: +44 116 267 1408
+Fax: +44 116 267 1409
+THIS CONFIDENTIALITY AGREEMENT is made on ___________________
+BETWEEN:
+(1) Microkerf Limited, a company registered in the UK with registered number 04654281, and whose registered office is located at 1 Coal Cart Road, Birstall Industrial Estate, Leicester, LE4 3BY (“Microkerf”)
+and
+(2) ______________________________________________________ ______________________________________________________ ______________________________________________________ ______________________________________________________ ______________________________________________________
+Microkerf Limited and __________________________ are hereinafter referred to as the “Parties” or either one thereof as “Party”.
+IT IS HEREBY AGREED AS FOLLOWS:
+1. In this Agreement:
+1.1 “Confidential Information” means:
+(a) all and any information, documents, data and opinions disclosed by a Party to the other Party (or otherwise acquired by one Party pursuant to this Agreement) including without limitation commercial, financial or proprietary material, pricing information, data, know-how, formulae, processes, operating methods and procedures, results, designs, drawings, specifications, industrial and or intellectual property, computer programmes or other software and any other information relating to the technology of either Party and the Discussions whether in written, electronic, pictorial, visual or oral form; magnetic, electronic, graphic or digitised format; or disclosed pursuant to discussions with any of the Affiliates, officers, employees, agents, advisors or consultants of a Party and whether or not marked or indicated as confidential;
+(b) information of whatever nature relating to the technology or business or properties of a Party obtained by observation during visits to its premises or those of its Affiliates or those of any third party instructed, engaged, or retained in any way whatsoever by a Party;
+(c) analyses, compilations, studies and other documents prepared by the Parties, their officers, employees, agents, advisors or consultants which contain or otherwise reflect or are generated from the information specified in paragraphs (a) and (b) above; and samples, prototypes or models relating to the technology of a Party.
+1.2 “Disclosing Party” means the party disclosing the Confidential Information to the Receiving Party under this Agreement.
+1.3 “Permitted Purpose” means the use of Confidential Information in relation to the Discussions.
+1.4 “Receiving Party” means the Party to whom the Confidential Information is disclosed.
+2 The Receiving Party hereby agrees with and undertakes to the Disclosing Party, on behalf of itself and all persons to whom disclosure by it is permitted within the terms of this Agreement, that, subject as herein described, all Confidential Information, howsoever acquired or received by the Receiving Party:
+2.1 shall not be used for any purpose other than the Permitted Purpose; and
+2.2 shall be held strictly confidential, using commercially reasonable methods, and shall not be divulged directly or indirectly or otherwise made available in whole or in part to any third party without the prior written consent of the Disclosing Party provided that the Receiving Party may without such approval disclose such Confidential Information;
+(a) to an Affiliate of the Receiving Party directly concerned with the Permitted Purpose and whose knowledge of the Confidential Information is essential for the Permitted Purpose. For the purposes of this Agreement “Affiliate” shall mean any holding company or subsidiary company of the holding company and “subsidiary” shall have the meanings respectively ascribe thereto by Section 736 of the Companies Act 1985 (and includes a subsidiary undertaking as defined in Section 258 of the Companies Act 1985); or
+(b) to any governmental or regulatory authority having a right to require the same or to any recognised Stock Exchange, in compliance with the rules and regulations thereof or to the extent required by law (provided that the Receiving Party shall prior to such disclosure inform the Disclosing Party in writing of such requirement (including a confirmation that the Disclosing Party’s legal advisers’ opinion is that such disclosure is required) and shall disclose only such Confidential Information as is necessary to comply therewith); or
+(c) to its employees and officers and to its outside professional advisers or the employees, officers or outside professional advisers of its Affiliates directly concerned with the Permitted Purpose and whose knowledge of the Confidential Information is essential for the Permitted Purpose provided that prior to any disclosure of Confidential Information under the paragraphs (a) to (c) above, the Receiving Party shall ensure that each recipient thereof is made aware of the confidential nature of the Confidential Information and the Receiving Party shall assume full responsibility for the actions of its Affiliates, employees and officers and professional advisors.
+3 The undertakings contained in Clause 2 of this Agreement shall not apply to such of the Confidential Information as:
+3.1 is at the time of being obtained by the Receiving Party within the public domain other than as a result of breach of this Agreement; or
+3.2 is proved by documentary evidence as being at the time of the Agreement already lawfully in the possession of the Receiving Party; or
+3.3 after being obtained by the Receiving Party comes within the pubic domain other than by reason of a breach by any Party of the undertakings contained in this Agreement; or
+3.4 is properly received by the Receiving Party from a third party who is rightfully in possession of such Confidential Information and who is not bound by any obligation of confidence or secrecy; or
+3.5 proved by documentary evidence as having been independently developed by the Receiving Party or its Affiliates with no knowledge of the Confidential Information.
+4 All Confidential Information shall remain the property of the Disclosing Party and the disclosure of Confidential Information hereunder does not amount to the grant of a licence or similar right, any patent, copyright or design licence in favour of the Receiving Party. The Disclosing Party confirms that the Confidential Information is given by it in good faith but does not represent, warrant, arrange or undertake that the Confidential Information is accurate, up to date, exhaustive or complete on the subject matter concerned.
+5 The Receiving Party hereby acknowledges that any breach by it of any of the provisions of this Agreement may cause serious damage to the Disclosing Party. In particular (but without limitation) it is recognised that parts of the Confidential Information may be patent able or capable of being the subject of registered design rights or similar protection and that premature disclosure thereof may prejudice the ability of the disclosing party to obtain such protection. The Receiving Party undertakes fully and effectively to indemnify and keep so indemnified the Disclosing Party for and against all loss, damage, costs and liabilities suffered or incurred by it arising from:-
+5.1 the unauthorised disclosure of Confidential Information by the Receiving Party and any person to whom disclosure of such Confidential Information is permitted under Clause 2 of this Agreement; or
+5.2 a breach by the Receiving Party of its obligations under this Agreement.
+The Parties acknowledge that damages will not normally be an adequate remedy for breach of any of the terms set out in this Agreement and that the Disclosing Party should be entitled to equitable relief including injunctions in respect of any breach by the Receiving Party.
+Any failure by the Disclosing Party in exercising any right, power or privilege hereunder shall not, nor shall any single or partial exercise thereof, preclude any exercise of any other right, power or privilege.
+6 The Receiving Party undertakes that the Confidential Information supplied to it under the terms of this Agreement shall only be copied or duplicated to the extent strictly necessary for the Permitted Purpose and that a restrictive legend shall be placed on each copy prohibiting further reproduction or transfers. Furthermore, any of the Confidential Information and copies, and any extracts, summaries or analyses thereof, shall be returned to the Disclosing Party or destroyed or expunged from any electronic storage device (with written confirmation of the same to the Disclosing Party) within five (5) working days upon written notice to do so from such Disclosing Party.
+7 The Parties acknowledge that the purpose of this Agreement is to facilitate confidential discussions for the purpose of evaluating their interest in collaboration and that nothing in this Agreement shall be construed as obliging either Party to disclose any Confidential Information to any other or to oblige either party to enter into any further agreement.
+8 The construction, validity and performance of this Agreement shall be governed by English Law and the Parties submit to the exclusive jurisdiction of the courts of England.
+9 This Agreement shall become effective on the date first written above.
+10 The Parties obligations under this Agreement shall remain in full force and effect for a period of five (5) years from the date hereof, save that the obligations of the parties as receiving parties under Clause 6 of this Agreement shall continue thereafter until fully discharged by performance.
+IN WITNESS WHEREOF the Parties have caused this Agreement to be executed by their duly authorised representatives as of the day and year first written above.
+Date:___________________ Date:___________________
+Signed for and on behalf of Signed for and on behalf of
+Microkerf Limited _______________________
+</span>
+
+<span class="s-q">Statement: &quot;Some obligations of Agreement may survive termination of Agreement.&quot;
+Does the contract entail the statement, contradict it, or not mention it?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] The contract does not mention it.
+</span><span class="s-opt gold">[2] The contract entails the statement.
+</span><span class="s-opt">[3] The contract contradicts the statement.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>2]</b> <span class="muted">(gold: entailed)</span></div></div><div class="ex"><h4>#2 · <code>contractnli:61181b8064468d69</code> · 3 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Exhibit (d)(3)
+MUTUAL NON-DISCLOSURE AGREEMENT
+THIS MUTUAL NON-DISCLOSURE AGREEMENT (“Agreement”) is made and entered into as of the 25th day of June, 2010 (“Effective Date”), between Cardiac Science Corporation, a Delaware corporation having its principal place of business at 3303 Monte Villa Parkway, Bothell, Washington 98021-8906, and Criticare Systems/Opto, a corporation having its principal place of business at 20925 Crossroads Circle, Waukesha WI 53186.
+1 . Purpose. The parties wish to engage in discussions regarding exploration of a business opportunity of mutual interest (“Authorized Purpose”) and in connection with this Authorized Purpose, each party may disclose to the other certain confidential technical and business information which Owner desires Recipient to treat as confidential. The party disclosing Confidential Information is referred to herein as the “Owner” and the party receiving Confidential Information is referred to herein as the “Recipient”.
+2. “Confidential Information” means any information (including without limitation documents, computer data, or oral communications) disclosed by either party to the other party, either directly or indirectly, that is identified as confidential or other similar designation at the time of disclosure or is known or should reasonably be known by the Recipient to be confidential in nature. The existence and subject matter of the parties’ discussions shall be treated as Confidential Information. Confidential Information may also include information disclosed to Owner by third parties. Confidential Information shall not, however, include any information which (i) was publicly known and made generally available in the public domain prior to the time of disclosure by Owner; (ii) becomes publicly known and made generally available after disclosure by Owner to Recipient through no action or inaction of Recipient; (iii) is already in the possession of Recipient at the time of disclosure by Owner as shown by Recipient’s files and records immediately prior to the time of disclosure; (iv) is obtained by Recipient from a third party without a breach of such third party’s obligations of confidentiality; or (v) is independently developed by Recipient without use of or reference to Owner’s Confidential Information, as shown by documents and other competent evidence in Recipient’s possession.
+3. Legally Compelled Disclosure. If Recipient is required to disclose Owner’s Confidential Information pursuant to a valid order by a court or other governmental body or as otherwise required by law, prior to any such compelled disclosure, Recipient will (i) notify Owner of the legal process, and allow Owner to assert the privileged and confidential nature of the Confidential Information against the third party seeking disclosure and (ii) reasonably cooperate with Owner in protecting against any such disclosure and/or obtaining a protective order narrowing the scope of such disclosure and/or use of the Confidential Information. If such protection against disclosure is not obtained, Recipient will be entitled to disclose the Confidential Information, but only as and to the extent necessary to legally comply with such compelled disclosure.
+4. Non-use and Non-disclosure. Each party agrees to use any Confidential Information of the other party solely for the Authorized Purpose and not for any third party’s benefit. Each party agrees to limit disclosures of Confidential Information of the other party to those employees and agents of Recipient who are required to have the information in order to evaluate or engage in discussions regarding the Authorized Purpose. Each party agrees that it will not disclose any of the Confidential Information to any third party without the express written consent of Owner. Neither party shall reverse engineer, disassemble or decompile any of the Confidential Information of the other party or any of the prototypes, software or other tangible objects which embody the Confidential Information of the other party and which are provided to the party hereunder. Certain Confidential Information may be considered material non-public information under Regulation FD promulgated by the Securities and Exchange Commission. Recipient acknowledges that the United States securities laws prohibit it or any person who has received material nonpublic information about the Owner from purchasing or selling securities of the Owner or from communicating such information to any other person under circumstances in which it is reasonably foreseeable that such person is likely to purchase or sell such securities in reliance on such information, and agrees not to purchase, sell or otherwise engage in transactions in Owner’s stock based on such material nonpublic information until such time as the information becomes disseminated to the public either through a press release issued by Owner or through a filing made by Owner pursuant to the Securities Exchange Act of 1934, as amended; provided, however, that Recipient may make any disclosure or use of such information to which Owner gives its prior written consent.
+5. Maintenance of Confidentiality. Each party agrees that it shall take reasonable measures to protect the secrecy of and avoid disclosure and unauthorized use of the Confidential Information of the other party. Without limiting the foregoing, each party shall take at least those measures that it takes to protect its own most highly confidential information and shall ensure that its employees and agents who have access to Confidential Information of the other party are subject to confidentiality obligations similar in scope and nature to the provisions hereof, prior to any disclosure of Confidential Information to such employees or agents. Each party shall reproduce the other party’s proprietary rights notices on any such approved copies, in the same manner in which such notices were set forth in or on the original.
+6. No Obligation. Nothing herein shall obligate either party to proceed with any transaction between them, and each party reserves the right, in its sole discretion, to terminate the discussions contemplated by this Agreement concerning the business opportunity.
+7. No Warranty. ALL CONFIDENTIAL INFORMATION IS PROVIDED “AS IS”. EACH PARTY MAKES NO WARRANTIES, EXPRESS, IMPLIED OR OTHERWISE, REGARDING ITS ACCURACY, COMPLETENESS OR PERFORMANCE, NON-INFRINGEMENT OF THIRD PARTY RIGHTS, OR ITS MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+8. Return of Materials. All documents and other tangible objects containing or representing Confidential Information which have been disclosed by either party to the other party, and all copies thereof which are in the possession of the other party, shall be and remain the property of Owner and shall be promptly returned to Owner upon Owner’s written request or upon termination of this Agreement.
+9. No License. Nothing in this Agreement is intended to grant any rights to either party under any patent, mask work right or copyright of the other party, nor shall this Agreement grant any party any rights in or to the Confidential Information of the other party except as expressly set forth herein.
+10. Term. This Agreement covers the disclosure of all Confidential Information for a period of three (3) years commencing as of the Effective Date. Recipient’s duty to protect the Confidential Information disclosed under this Agreement expires five (5) years from the date of receipt of Confidential Information (the “Confidentiality Term”). Either party may terminate this Agreement earlier by giving thirty (30) days prior written notice of termination to the other party. Upon the expiration or termination of this Agreement, the obligations of each party shall survive with respect to Confidential Information of the other party disclosed hereunder until such time as the respective Confidential Information becomes publicly known and made generally available through no action or inaction of Recipient or until the end of the Confidentiality Term, whichever occurs sooner. For the avoidance of doubt, upon termination of this Agreement, each party’s obligation to keep the Confidential Information of the other party confidential for the Confidentiality Term shall apply even in the event where one party is acquired or merged by or into a third party, and such third party shall have the right to enforce this obligation as a third party beneficiary.
+11. Remedies. Each party agrees and acknowledges that any breach of this Agreement may cause irreparable harm to the other party for which monetary damages may be inadequate. Accordingly, the harmed party may be entitled to seek injunctive or other equitable relief to remedy any threatened or actual breach of this Agreement by the other party.
+12. Notice. Any notice or other communication under this Agreement given by either party to the other party shall be deemed to be properly given if given in writing and delivered (i) by nationally recognized private courier (e.g., Federal Express), (ii) facsimile directed at the signatory of the other party (at the number below), or (iii) by mail (return receipt requested), properly addressed and stamped with the required postage, to the recipient at the address identified in its signature block to this Agreement. Either party may from time to time change its fax number or address by giving the other party notice of the change in accordance with this Section.
+13. Miscellaneous. This document contains the entire agreement between the parties with respect to the subject matter hereof and neither party shall have any obligation, express or implied by law, with respect to trade secret or proprietary information of the other party except as set forth herein. Each party represents, warrants and covenants that it has the full right and authority to enter into this Agreement and perform its obligations hereunder, that all required corporate approvals and authorizations have been obtained, and that, upon signature by its authorized representative listed below, this Agreement shall have been duly executed and be legally binding upon the respective party in all respects. This Agreement shall be governed by the laws of the State of Washington, without reference to conflict of laws principles. Any failure to enforce any provision of this Agreement shall not constitute a waiver thereof or of any other provision. This Agreement may not be amended, nor any obligation waived, except by a writing signed by both parties hereto.
+IN WITNESS WHEREOF, the parties have executed this Agreement through their duly authorized representatives as of the Effective Date.
+CARDIAC SCIENCE CORPORATION
+Signature: /s/ Mark Daniel
+Name: Mark Daniel
+Title: Controller
+Fax Number: 425-402-2012
+Date: 7/27/10
+For: CSI/Opto Circuits
+Signature: /s/ Joseph LaPorta
+Name: Joseph LaPorta
+COO
+Title: 262-798-5237
+joseph.laporta@csiusa.com
+Fax Number:
+6/25/10
+E-mail Address:
+Date:
+</span>
+
+<span class="s-q">Statement: &quot;Receiving Party may independently develop information similar to Confidential Information.&quot;
+Does the contract entail the statement, contradict it, or not mention it?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] The contract does not mention it.
+</span><span class="s-opt">[2] The contract contradicts the statement.
+</span><span class="s-opt gold">[3] The contract entails the statement.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>3]</b> <span class="muted">(gold: entailed)</span></div></div></section><section class="ds" id="musique"><p><b>MuSiQue (full v1.0)</b> · <span class="muted">1,000 train rows. Twenty Wikipedia paragraphs and a multi-hop question; yes or no, are the paragraphs enough to answer it? Answerable rows carry the supporting paragraphs as spans.</span></p><div class="ex"><h4>#1 · <code>musique:ceb5c50c8ec95f63</code> · 2 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Tomruksuyu
+Tomruksuyu is a town in Samandağ district of Hatay Province, Turkey. At it is to the north of the highway connecting Samandağ to Antakya (the capital of the province). The distance to Samandağ is and to Antakya is . The population of Tomruksuyu was 3,338 as of 2012. The settlement was founded in 1807 during the Ottoman Empire era, after an earthquake. Between 1918 and 1938, like most other settlements in Hatay Province it was under French rule. The original name was &quot;Karamanlı&quot;. But after 1960, it was renamed Tomruksuyu. In 1999 it was declared a seat of township. Vegetables and olive are the two important crop of Tomruksuyu.
+
+Adamite
+Adamite was named after the French mineralogist Gilbert-Joseph Adam (1795–1881). It was first described in 1866 for an occurrence at the type locality of Chañarcillo, Copiapó Province, Atacama Region, Chile.
+
+Digodigo
+Digodigo is an administrative ward in the Ngorongoro District of the Arusha Region of Tanzania. According to the 2002 census, the ward has a total population of 10,831. Digodigo is central part of Sale Division, it is endowed with water for irrigation system therefore able to provides all type of vegetables and fruits to the district headquarters as the other part of the district is dry. Digo digo is the second largest developed area and center of business within the districts with more than 50 retail shops,5 quest houses, and other more public services as the area is developing very fast
+
+Chumak (company)
+Chumak () is a Swedish-Ukrainian food processing company located in Kakhovka, Kherson Oblast. It is today one of Ukraine&#x27;s biggest food processing companies and has commercial offices in Kiev, Minsk and Moscow. Among its products are ketchup, mayonnaise, pasta, salad dressings, cooking sauces, canned vegetables, marinated vegetables, tomato juice and sunflower oil. Chumak is the largest tomato processing company in Central and Eastern Europe. The company currently (2010) employs about 1200 people and has a revenue of about 48 million Euros.
+
+Mont Gerbier de Jonc
+Mont Gerbier de Jonc is a mountain of volcanic origin located in the Massif Central in France. It is made of a type of rock called phonolite. It rises to an altitude of , and its base contains three springs that are the source of the Loire, France&#x27;s longest river. It is the second most-visited site in the &quot;département&quot; of Ardèche, after the Ardèche Gorges.
+
+HMS Scarborough (F63)
+HMS &quot;Scarborough&quot; was a &quot;Whitby&quot;-class or Type 12 anti-submarine frigate of the Royal Navy of the United Kingdom. She was named after the town of Scarborough in the county of North Yorkshire.
+
+Agnolotti
+Agnolotti (; ) is a type of pasta typical of the Piedmont region of Italy, made with small pieces of flattened pasta dough, folded over a filling of roasted meat or vegetables. &quot;Agnolotti&quot; is the plural form of the Italian word &quot;agnolotto&quot;. According to a legend, the origin of the name may come from a cook called Angiolino, or &quot;Angelot&quot;, an individual from Montferrat who is said to be the inventor of the recipe. Agnolotti can be &quot;di magro&quot; or &quot;di grasso&quot; depending on their filling of vegetables or meat.
+
+Lyutika
+Lyutika (, ) is a traditional vegetable mixture — salad or chunky relish, popular in the northern part of Bulgaria. It is consumed in the summer. Basic lyutika is made from roasted peppers, tomatoes, garlic, onions, and vegetable oil usually crushed with a pestle in a mortar. Often chopped parsley is added. Lyutika is served cold. The name comes from the pungent taste (&quot;lyut&quot;, meaning hot, pungent).
+
+Lohra (megalithic tomb)
+The Lohra tomb () was a megalithic monument outside Lohra near Marburg in north central Hesse, Germany. It is one of the lesser known among its type in Central Europe. It dates to the late Neolithic, probably just after 3000 BC. It belongs to the gallery graves of the Wartberg culture, but is unique among them because of its rich ceramic assemblage.
+
+Nigeria
+Everything in between the far south and the far north is savannah (insignificant tree cover, with grasses and flowers located between trees). Rainfall is more limited, to between 500 and 1,500 millimetres (20 and 60 in) per year. The savannah zone&#x27;s three categories are Guinean forest-savanna mosaic, Sudan savannah, and Sahel savannah. Guinean forest-savanna mosaic is plains of tall grass interrupted by trees. Sudan savannah is similar but with shorter grasses and shorter trees. Sahel savannah consists of patches of grass and sand, found in the northeast. In the Sahel region, rain is less than 500 millimetres (20 in) per year and the Sahara Desert is encroaching. In the dry north-east corner of the country lies Lake Chad, which Nigeria shares with Niger, Chad and Cameroon.
+
+Golden Mountains of Altai
+Golden Mountains of Altai is the name of an UNESCO World Heritage Site consisting of the Altai and Katun Natural Reserves, Lake Teletskoye, Belukha Mountain, and the Ukok Plateau. As stated in the UNESCO description of the site, &quot;the region represents the most complete sequence of altitudinal vegetation zones in central Siberia, from steppe, forest-steppe, mixed forest, subalpine vegetation to alpine vegetation&quot;. While making its decision, UNESCO also cited Russian Altai&#x27;s importance for preservation of the globally endangered mammals, such as snow leopard and the Altai argali. The site covers a vast area of 16,175 km².
+
+Type 89 torpedo
+The Type 89 torpedo (development name G-RX2) is a Japanese submarine-launched homing torpedo produced by Mitsubishi Heavy Industries. It replaced the unguided Type 72 torpedo. Development was done by the Technical Research and Development Institute, a department of the Ministry of Defense, and began in 1970, with the design completed by 1984. Developed from the Type 80 torpedo, it is similar in its capabilities to the United States Mark 48 ADCAP torpedo. After being formally approved in 1989 and named &quot;Type 89&quot;, it entered service and is currently carried aboard the &quot;Harushio&quot;, &quot;Oyashio&quot;, and &quot;Sōryū&quot; class submarines. It was also carried by the &quot;Yuushio&quot; class submarines before they were retired from active service in 2006.
+
+Bukomansimbi District
+Bukomansimbi District is a district in Central Uganda. The district is named after its main municipal center, Bukomansimbi, the location of the district headquarters.
+
+Noether inequality
+In mathematics, the Noether inequality, named after Max Noether, is a property of compact minimal complex surfaces that restricts the topological type of the underlying topological 4-manifold. It holds more generally for minimal projective surfaces of general type over an algebraically closed field.
+
+127 Johanna
+Johanna (minor planet designation: 127 Johanna) is a large, dark main-belt asteroid that was discovered by French astronomers Paul Henry and Prosper Henry on 5 November 1872, and is believed to be named after Joan of Arc. It is classified as a CX-type asteroid, indicating the spectrum shows properties of both a carbonaceous C-type asteroid and a metallic X-type asteroid.
+
+Datsun Type 12
+The 1933 Datsun Type 12 was a small car produced by the Nissan corporation. The name Datsun was used by DAT for their line of small cars. After the DAT corporation was absorbed into Nissan, these cars continued to be produced, and the original model name was maintained. The Type 12 was basically similar to the earlier 1932 Type 11, but had a larger engine.
+
+HMS Hardy (F54)
+HMS &quot;Hardy&quot; was an anti-submarine warfare frigate of the or Type 14. She was named after Thomas Masterman Hardy, Captain of at Trafalgar. &quot;Hardy&quot; was the first Type 14 frigate built, completed on 8 December 1955, by Yarrow Shipbuilders.
+
+Theodore J. Hoover Natural Preserve
+Theodore J. Hoover Natural Preserve, which includes Waddell Marsh, is located at the mouth of Waddell Creek, a coastal freshwater marsh that is one of the rarest habitats on the Central Coast of California. This marsh is one of the few relatively undisturbed bodies of fresh water left along the West coast. The land is 23 acres of wetland habitat. It is part of the Rancho del Oso Big Basin Redwoods State Park, located approximately 65 miles south of San Francisco. The elevation in the park ranges from sea level to over 2,000 feet. The area was named after William W. Waddell, who established the last of his four sawmills there in 1868. The sawmill ran down after his death in 1875. All the boilers were left in the area; they are now completely surrounded by second-growth redwoods. Other trees found in the park are conifers, and oaks. Within the park there are different vegetation types to be seen, such as chaparral, redwood forests, and riparian habitats.
+
+Sahara
+The central Sahara is hyperarid, with sparse vegetation. The northern and southern reaches of the desert, along with the highlands, have areas of sparse grassland and desert shrub, with trees and taller shrubs in wadis, where moisture collects. In the central, hyperarid region, there are many subdivisions of the great desert: Tanezrouft, the Ténéré, the Libyan Desert, the Eastern Desert, the Nubian Desert and others. These extremely arid areas often receive no rain for years.
+
+Ferronigerite-2N1S
+Ferronigerite-2N1S was first discovered in the Kabba provence of central Nigeria in 1944; it was originally named Nigerite. Its name was later changed to nigerite-6H then to nigerite-6T and in 2003 ferronigertie-2N1S was approved by the International Mineralogical Association.</span>
+
+<span class="s-q">Question: What type of vegetation is in the central region of the country Ferronigerite-2N1S is named after?
+Do the paragraphs contain enough information to answer the question?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt gold">[1] Yes: the paragraphs contain enough information to answer the question.
+</span><span class="s-opt">[2] No: the paragraphs do not contain enough information to answer the question.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>1]</b> <span class="muted">(gold: yes)</span></div></div><div class="ex"><h4>#2 · <code>musique:ca05e0b6e1f0ba6c</code> · 2 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Sino-Tibetan relations during the Ming dynasty
+Laird writes that Altan Khan abolished the native Mongol practices of shamanism and blood sacrifice, while the Mongol princes and subjects were coerced by Altan to convert to Gelug Buddhism—or face execution if they persisted in their shamanistic ways. Committed to their religious leader, Mongol princes began requesting the Dalai Lama to bestow titles on them, which demonstrated &quot;the unique fusion of religious and political power&quot; wielded by the Dalai Lama, as Laird writes. Kolmaš states that the spiritual and secular Mongol-Tibetan alliance of the 13th century was renewed by this alliance constructed by Altan Khan and Sönam Gyatso. Van Praag writes that this restored the original Mongol patronage of a Tibetan lama and &quot;to this day, Mongolians are among the most devout followers of the Gelugpa and the Dalai Lama.&quot; Angela F. Howard writes that this unique relationship not only provided the Dalai Lama and Panchen Lama with religious and political authority in Tibet, but that Altan Khan gained &quot;enormous power among the entire Mongol population.&quot;
+
+Tibet
+Tibet has various festivals that are commonly performed to worship the Buddha[citation needed] throughout the year. Losar is the Tibetan New Year Festival. Preparations for the festive event are manifested by special offerings to family shrine deities, painted doors with religious symbols, and other painstaking jobs done to prepare for the event. Tibetans eat Guthuk (barley noodle soup with filling) on New Year&#x27;s Eve with their families. The Monlam Prayer Festival follows it in the first month of the Tibetan calendar, falling between the fourth and the eleventh days of the first Tibetan month. It involves dancing and participating in sports events, as well as sharing picnics. The event was established in 1049 by Tsong Khapa, the founder of the Dalai Lama and the Panchen Lama&#x27;s order.
+
+Antonín Rezek
+Antonín Rezek (13 January 1853 in Jindřichův Hradec – 4 February 1909 in Prague) was a renowned Czech political historian, specialized in political and religious history of the 16th to 18th century.
+
+Mexico City
+Mexico City, being the seat of the powers of the Union, did not belong to any particular state but to all. Therefore, it was the president, representing the federation, who used to designate the head of government of the Federal District, a position which is sometimes presented outside Mexico as the &quot;Mayor&quot; of Mexico City.[citation needed] In the 1980s, given the dramatic increase in population of the previous decades, the inherent political inconsistencies of the system, as well as the dissatisfaction with the inadequate response of the federal government after the 1985 earthquake, residents began to request political and administrative autonomy to manage their local affairs.[citation needed] Some political groups even proposed that the Federal District be converted into the 32nd state of the federation.
+
+Tibet
+After the Xinhai Revolution (1911–12) toppled the Qing dynasty and the last Qing troops were escorted out of Tibet, the new Republic of China apologized for the actions of the Qing and offered to restore the Dalai Lama&#x27;s title. The Dalai Lama refused any Chinese title and declared himself ruler of an independent Tibet. In 1913, Tibet and Mongolia concluded a treaty of mutual recognition. For the next 36 years, the 13th Dalai Lama and the regents who succeeded him governed Tibet. During this time, Tibet fought Chinese warlords for control of the ethnically Tibetan areas in Xikang and Qinghai (parts of Kham and Amdo) along the upper reaches of the Yangtze River. In 1914 the Tibetan government signed the Simla Accord with Britain, ceding the South Tibet region to British India. The Chinese government denounced the agreement as illegal.
+
+Political corruption
+Gombeenism refers to an individual who is dishonest and corrupt for the purpose of personal gain, more often through monetary, while, parochialism which is also known as parish pump politics relates to placing local or vanity projects ahead of the national interest.For instance in Irish politics, populist left wing political parties will often apply these terms to mainstream establisment political parties and will cite the many cases of Corruption in Ireland, such as the Irish Banking crisis, which found evidence of bribery, cronyism and collusion, where in some cases politicians who were coming to the end of their political careers would receive a senior management or committee position in a company they had dealings with.
+
+Tibet
+After the Dalai Lama&#x27;s government fled to Dharamsala, India, during the 1959 Tibetan Rebellion, it established a rival government-in-exile. Afterwards, the Central People&#x27;s Government in Beijing renounced the agreement and began implementation of the halted social and political reforms. During the Great Leap Forward, between 200,000 and 1,000,000 Tibetans died, and approximately 6,000 monasteries were destroyed during the Cultural Revolution. In 1962 China and India fought a brief war over the disputed South Tibet and Aksai Chin regions. Although China won the war, Chinese troops withdrew north of the McMahon Line, effectively ceding South Tibet to India.
+
+Tibet
+The 5th Dalai Lama is known for unifying the Tibetan heartland under the control of the Gelug school of Tibetan Buddhism, after defeating the rival Kagyu and Jonang sects and the secular ruler, the Tsangpa prince, in a prolonged civil war. His efforts were successful in part because of aid from Güshi Khan, the Oirat leader of the Khoshut Khanate. With Güshi Khan as a largely uninvolved overlord, the 5th Dalai Lama and his intimates established a civil administration which is referred to by historians as the Lhasa state. This Tibetan regime or government is also referred to as the Ganden Phodrang.
+
+Sino-Tibetan relations during the Ming dynasty
+Historians Luciano Petech and Sato Hisashi argue that the Ming upheld a &quot;divide-and-rule&quot; policy towards a weak and politically fragmented Tibet after the Sakya regime had fallen. Chan writes that this was perhaps the calculated strategy of the Yongle Emperor, as exclusive patronage to one Tibetan sect would have given it too much regional power. Sperling finds no textual evidence in either Chinese or Tibetan sources to support this thesis of Petech and Hisashi. Norbu asserts that their thesis is largely based on the list of Ming titles conferred on Tibetan lamas rather than &quot;comparative analysis of developments in China and Tibet.&quot; Rossabi states that this theory &quot;attributes too much influence to the Chinese,&quot; pointing out that Tibet was already politically divided when the Ming dynasty began. Rossabi also discounts the &quot;divide-and-rule&quot; theory on the grounds of the Yongle Emperor&#x27;s failed attempt to build a strong relationship with the fifth Karmapa—one which he hoped would parallel Kublai Khan&#x27;s earlier relationship with the Sakya Phagpa lama. Instead, the Yongle Emperor followed the Karmapa&#x27;s advice of giving patronage to many different Tibetan lamas.
+
+Middle Ages
+The ecclesiastical structure of the Roman Empire survived the movements and invasions in the west mostly intact, but the papacy was little regarded, and few of the western bishops looked to the bishop of Rome for religious or political leadership. Many of the popes prior to 750 were more concerned with Byzantine affairs and eastern theological controversies. The register, or archived copies of the letters, of Pope Gregory the Great (pope 590–604) survived, and of those more than 850 letters, the vast majority were concerned with affairs in Italy or Constantinople. The only part of Western Europe where the papacy had influence was Britain, where Gregory had sent the Gregorian mission in 597 to convert the Anglo-Saxons to Christianity. Irish missionaries were most active in Western Europe between the 5th and the 7th centuries, going first to England and Scotland and then on to the continent. Under such monks as Columba (d. 597) and Columbanus (d. 615), they founded monasteries, taught in Latin and Greek, and authored secular and religious works.
+
+Tibet
+Qing dynasty rule in Tibet began with their 1720 expedition to the country when they expelled the invading Dzungars. Amdo came under Qing control in 1724, and eastern Kham was incorporated into neighbouring Chinese provinces in 1728. Meanwhile, the Qing government sent resident commissioners called Ambans to Lhasa. In 1750 the Ambans and the majority of the Han Chinese and Manchus living in Lhasa were killed in a riot, and Qing troops arrived quickly and suppressed the rebels in the next year. Like the preceding Yuan dynasty, the Manchus of the Qing dynasty exerted military and administrative control of the region, while granting it a degree of political autonomy. The Qing commander publicly executed a number of supporters of the rebels and, as in 1723 and 1728, made changes in the political structure and drew up a formal organization plan. The Qing now restored the Dalai Lama as ruler, leading the governing council called Kashag, but elevated the role of Ambans to include more direct involvement in Tibetan internal affairs. At the same time the Qing took steps to counterbalance the power of the aristocracy by adding officials recruited from the clergy to key posts.
+
+Tibet
+Tibet retained nominal power over religious and regional political affairs, while the Mongols managed a structural and administrative rule over the region, reinforced by the rare military intervention. This existed as a &quot;diarchic structure&quot; under the Yuan emperor, with power primarily in favor of the Mongols. Mongolian prince Khuden gained temporal power in Tibet in the 1240s and sponsored Sakya Pandita, whose seat became the capital of Tibet. Drogön Chögyal Phagpa, Sakya Pandita&#x27;s nephew became Imperial Preceptor of Kublai Khan, founder of the Yuan dynasty.
+
+Tuva
+Two religions are widespread among the people of Tuva: Tibetan Buddhism and shamanism. Tibetan Buddhism&#x27;s present-day spiritual leader is Tenzin Gyatso, the fourteenth Dalai Lama. In September 1992, the fourteenth Dalai Lama visited Tuva for three days. On September 20, he blessed and consecrated the new yellow-blue-white flag of Tuva, which had been officially adopted three days previously.The Tuvan people – along with the Yellow Uyghurs in China – are one of the only two Turkic groups who are mainly adherents to Tibetan Buddhism, combined with native shamanism.During the 16th and 17th centuries, Tibetan Buddhism gained popularity in Tuva. An increasing number of new and restored temples are coming into use, as well as novices being trained as monks and lamas. Religious practice declined under the restrictive policies of the Soviet period but is now flourishing.Shamanism is being revived as well, also in organized Tengrian forms.
+
+Sino-Tibetan relations during the Ming dynasty
+Starting in 1236, the Mongol prince Kublai, who later ruled as Khagan from 1260–1294, was granted a large appanage in North China by his superior, Ögedei Khan. Karma Pakshi, 2nd Karmapa Lama (1203–1283)—the head lama of the Karma Kagyu lineage of Tibetan Buddhism—rejected Kublai&#x27;s invitation, so instead Kublai invited Drogön Chögyal Phagpa (1235–1280), successor and nephew of Sakya Pandita, who came to his court in 1253. Kublai instituted a unique relationship with the Phagpa lama, which recognized Kublai as a superior sovereign in political affairs and the Phagpa lama as the senior instructor to Kublai in religious affairs. Kublai also made Drogön Chögyal Phagpa the director of the government agency known as the Bureau of Buddhist and Tibetan Affairs and the ruling priest-king of Tibet, which comprised thirteen different states ruled by myriarchies.
+
+Sino-Tibetan relations during the Ming dynasty
+Dreyfus writes that after the Phagmodrupa lost its centralizing power over Tibet in 1434, several attempts by other families to establish hegemonies failed over the next two centuries until 1642 with the 5th Dalai Lama&#x27;s effective hegemony over Tibet.
+
+Tibet
+Standing at 117 metres (384 feet) in height and 360 metres (1,180 feet) in width, the Potala Palace is the most important example of Tibetan architecture. Formerly the residence of the Dalai Lama, it contains over one thousand rooms within thirteen stories, and houses portraits of the past Dalai Lamas and statues of the Buddha. It is divided between the outer White Palace, which serves as the administrative quarters, and the inner Red Quarters, which houses the assembly hall of the Lamas, chapels, 10,000 shrines, and a vast library of Buddhist scriptures. The Potala Palace is a World Heritage Site, as is Norbulingka, the former summer residence of the Dalai Lama.
+
+Sino-Tibetan relations during the Ming dynasty
+Rawski writes that Altan Khan&#x27;s conversion to the Gelug &quot;can be interpreted as an attempt to expand his authority in his conflict with his nominal superior, Tümen Khan.&quot; To further cement the Mongol-Tibetan alliance, the great-grandson of Altan Khan—the 4th Dalai Lama (1589–1616)—was made the fourth Dalai Lama. In 1642, the 5th Dalai Lama (1617–1682) became the first to wield effective political control over Tibet.
+
+Sino-Tibetan relations during the Ming dynasty
+The Ming initiated sporadic armed intervention in Tibet during the 14th century, but did not garrison permanent troops there. At times the Tibetans also used armed resistance against Ming forays. The Wanli Emperor (r. 1572–1620) made attempts to reestablish Sino-Tibetan relations after the Mongol-Tibetan alliance initiated in 1578, which affected the foreign policy of the subsequent Qing dynasty (1644–1912) of China in their support for the Dalai Lama of the Gelug school. By the late 16th century, the Mongols were successful armed protectors of the Gelug Dalai Lama, after increasing their presence in the Amdo region. This culminated in Güshi Khan&#x27;s (1582–1655) conquest of Tibet from 1637–1642 and the establishment of the Ganden Phodrang regime by the 5th Dalai Lama with his help.
+
+Pattadakal
+Pattadakal became, along with nearby Aihole and Badami, a major cultural center and religious site for innovations in architecture and experimentation of ideas. The rule of the Gupta Empire during the 5th century brought about a period of political stability, during which Aihole became a locus of scholarship. The experimentations in architecture extended into Badami over the course of the next two centuries. This culture of learning encompassed Pattadakal in the 7th century which became a nexus where ideas from northern and southern India fused. It was during this latter period that the Chalukya empire constructed many of the temples in Aihole - Badami - Pattadakal region.
+
+Air Ministry
+The Air Ministry was a department of the Government of the United Kingdom with the responsibility of managing the affairs of the Royal Air Force, that existed from 1918 to 1964. It was under the political authority of the Secretary of State for Air.</span>
+
+<span class="s-q">Question: When did the 5th Dalai Lama gain political control over the country that managed religious and regional political affairs?
+Do the paragraphs contain enough information to answer the question?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt gold">[1] Yes: the paragraphs contain enough information to answer the question.
+</span><span class="s-opt">[2] No: the paragraphs do not contain enough information to answer the question.
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>1]</b> <span class="muted">(gold: yes)</span></div></div></section><section class="ds" id="quality"><p><b>QuALITY (v1.0.1, HTML-stripped)</b> · <span class="muted">1,000 train rows. Long story articles with a 4-option reading question; the gold answer is the annotators&#x27; majority.</span></p><div class="ex"><h4>#1 · <code>quality:6407d28c42789f1b</code> · 4 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">Transcriber&#x27;s Note: This etext was produced from Astounding Science Fiction November 1959. Extensive research did not uncover any evidence that the U.S. copyright on this publication was renewed.
+A FILBERT IS A NUT
+BY RICK RAPHAEL
+That the gentleman in question was a nut was beyond question. He was an institutionalized
+ psychotic. He was nutty enough to think he could make an atom bomb out of modeling clay!
+Illustrated by Freas
+Miss Abercrombie, the manual therapist patted the old man on the
+ shoulder. &quot;You&#x27;re doing just fine, Mr. Lieberman. Show it to me when you
+ have finished.&quot;
+
+
+ The oldster in the stained convalescent suit gave her a quick, shy smile
+ and went back to his aimless smearing in the finger paints.
+
+
+ Miss Abercrombie smoothed her smock down over trim hips and surveyed the
+ other patients working at the long tables in the hospital&#x27;s arts and
+ crafts shop. Two muscular and bored attendants in spotless whites,
+ lounged beside the locked door and chatted idly about the Dodgers&#x27;
+ prospects for the pennant.
+
+
+ Through the barred windows of the workshop, rolling green hills were
+ seen, their tree-studded flanks making a pleasant setting for the mental
+ institution. The crafts building was a good mile away from the main
+ buildings of the hospital and the hills blocked the view of the austere
+ complex of buildings that housed the main wards.
+
+
+ The therapist strolled down the line of tables, pausing to give a word
+ of advice here, and a suggestion there.
+
+
+ She stopped behind a frowning, intense patient, rapidly shaping blobs of
+ clay into odd-sized strips and forms. As he finished each piece, he
+ carefully placed it into a hollow shell hemisphere of clay.
+
+
+ &quot;And what are we making today, Mr. Funston?&quot; Miss Abercrombie asked.
+
+
+ The flying fingers continued to whip out the bits of shaped clay as the
+ patient ignored the question. He hunched closer to his table as if to
+ draw away from the woman.
+
+
+ &quot;We mustn&#x27;t be antisocial, Mr. Funston,&quot; Miss Abercrombie said lightly,
+ but firmly. &quot;You&#x27;ve been coming along famously and you must remember to
+ answer when someone talks to you. Now what are you making? It looks very
+ complicated.&quot; She stared professionally at the maze of clay parts.
+
+
+ Thaddeus Funston continued to mold the clay bits and put them in place.
+
+
+ Without looking up from his bench he muttered a reply.
+
+
+ &quot;Atom bomb.&quot;
+
+
+ A puzzled look crossed the therapist&#x27;s face. &quot;Pardon me, Mr. Funston. I
+ thought you said an &#x27;atom bomb.&#x27;&quot;
+
+
+ &quot;Did,&quot; Funston murmured.
+
+
+ Safely behind the patient&#x27;s back, Miss Abercrombie smiled ever so
+ slightly. &quot;Why that&#x27;s very good, Mr. Funston. That shows real creative
+ thought. I&#x27;m very pleased.&quot;
+
+
+ She patted him on the shoulder and moved down the line of patients.
+
+
+ A few minutes later, one of the attendants glanced at his watch, stood
+ up and stretched.
+
+
+ &quot;All right, fellows,&quot; he called out, &quot;time to go back. Put up your
+ things.&quot;
+
+
+ There was a rustle of paint boxes and papers being shuffled and chairs
+ being moved back. A tall, blond patient with a flowing mustache, put one
+ more dab of paint on his canvas and stood back to survey the meaningless
+ smears. He sighed happily and laid down his palette.
+
+
+ At the clay table, Funston feverishly fabricated the last odd-shaped bit
+ of clay and slapped it into place. With a furtive glance around him, he
+ clapped the other half of the clay sphere over the filled hemisphere and
+ then stood up. The patients lined up at the door, waiting for the walk
+ back across the green hills to the main hospital. The attendants made a
+ quick count and then unlocked the door. The group shuffled out into the
+ warm, afternoon sunlight and the door closed behind them.
+
+
+ Miss Abercrombie gazed around the cluttered room and picked up her chart
+ book of patient progress. Moving slowly down the line of benches, she
+ made short, precise notes on the day&#x27;s work accomplished by each
+ patient.
+
+
+ At the clay table, she carefully lifted the top half of the clay ball
+ and stared thoughtfully at the jumbled maze of clay strips laced through
+ the lower hemisphere. She placed the lid back in place and jotted
+ lengthily in her chart book.
+
+
+ When she had completed her rounds, she slipped out of the smock, tucked
+ the chart book under her arm and left the crafts building for the day.
+
+
+ The late afternoon sun felt warm and comfortable as she walked the mile
+ to the main administration building where her car was parked.
+
+
+ As she drove out of the hospital grounds, Thaddeus Funston stood at the
+ barred window of his locked ward and stared vacantly over the hills
+ towards the craft shop. He stood there unmoving until a ward attendant
+ came and took his arm an hour later to lead him off to the patients&#x27;
+ mess hall.
+The sun set, darkness fell over the stilled hospital grounds and the
+ ward lights winked out at nine o&#x27;clock, leaving just a single light
+ burning in each ward office. A quiet wind sighed over the still-warm
+ hills.
+
+
+ At 3:01 a.m., Thaddeus Funston stirred in his sleep and awakened. He sat
+ up in bed and looked around the dark ward. The quiet breathing and
+ occasional snores of thirty other sleeping patients filled the room.
+ Funston turned to the window and stared out across the black hills that
+ sheltered the deserted crafts building.
+
+
+ He gave a quick cry, shut his eyes and clapped his hands over his face.
+
+
+ The brilliance of a hundred suns glared in the night and threw stark
+ shadows on the walls of the suddenly-illuminated ward.
+
+
+ An instant later, the shattering roar and blast of the explosion struck
+ the hospital buildings in a wave of force and the bursting crash of a
+ thousand windows was lost in the fury of the explosion and the wild
+ screams of the frightened and demented patients.
+
+
+ It was over in an instant, and a stunned moment later, recessed ceiling
+ lights began flashing on throughout the big institution.
+
+
+ Beyond the again-silent hills, a great pillar of smoke, topped by a
+ small mushroom-shaped cloud, rose above the gaping hole that had been
+ the arts and crafts building.
+
+
+ Thaddeus Funston took his hands from his face and lay back in his bed
+ with a small, secret smile on his lips. Attendants and nurses scurried
+ through the hospital, seeing how many had been injured in the
+ explosion.
+
+
+ None had. The hills had absorbed most of the shock and apart from a
+ welter of broken glass, the damage had been surprisingly slight.
+
+
+ The roar and flash of the explosion had lighted and rocked the
+ surrounding countryside. Soon firemen and civil defense disaster units
+ from a half-dozen neighboring communities had gathered at the
+ still-smoking hole that marked the site of the vanished crafts building.
+
+
+ Within fifteen minutes, the disaster-trained crews had detected heavy
+ radiation emanating from the crater and there was a scurry of men and
+ equipment back to a safe distance, a few hundred yards away.
+
+
+ At 5:30 a.m., a plane landed at a nearby airfield and a platoon of
+ Atomic Energy Commission experts, military intelligence men, four FBI
+ agents and an Army full colonel disembarked.
+
+
+ At 5:45 a.m. a cordon was thrown around both the hospital and the blast
+ crater.
+
+
+ In Ward 4-C, Thaddeus Funston slept peacefully and happily.
+
+
+ &quot;It&#x27;s impossible and unbelievable,&quot; Colonel Thomas Thurgood said for the
+ fifteenth time, later that morning, as he looked around the group of
+ experts gathered in the tent erected on the hill overlooking the crater.
+ &quot;How can an atom bomb go off in a nut house?&quot;
+
+
+ &quot;It apparently was a very small bomb, colonel,&quot; one of the haggard AEC
+ men offered timidly. &quot;Not over three kilotons.&quot;
+
+
+ &quot;I don&#x27;t care if it was the size of a peanut,&quot; Thurgood screamed. &quot;How
+ did it get here?&quot;
+
+
+ A military intelligence agent spoke up. &quot;If we knew, sir, we wouldn&#x27;t be
+ standing around here. We don&#x27;t know, but the fact remains that it WAS an
+ atomic explosion.&quot;
+
+
+ Thurgood turned wearily to the small, white-haired man at his side.
+
+
+ &quot;Let&#x27;s go over it once more, Dr. Crane. Are you sure you knew everything
+ that was in that building?&quot; Thurgood swept his hand in the general
+ direction of the blast crater.
+
+
+ &quot;Colonel, I&#x27;ve told you a dozen times,&quot; the hospital administrator said
+ with exasperation, &quot;this was our manual therapy room. We gave our
+ patients art work. It was a means of getting out of their systems,
+ through the use of their hands, some of the frustrations and problems
+ that led them to this hospital. They worked with oil and water paints
+ and clay. If you can make an atomic bomb from vermillion pigments, then
+ Madame Curie was a misguided scrubwoman.&quot;
+
+
+ &quot;All I know is that you say this was a crafts building. O.K. So it was,&quot;
+ Thurgood sighed. &quot;I also know that an atomic explosion at 3:02 this
+ morning blew it to hell and gone.
+
+
+ &quot;And I&#x27;ve got to find out how it happened.&quot;
+
+
+ Thurgood slumped into a field chair and gazed tiredly up at the little
+ doctor.
+
+
+ &quot;Where&#x27;s that girl you said was in charge of this place?&quot;
+
+
+ &quot;We&#x27;ve already called for Miss Abercrombie and she&#x27;s on her way here
+ now,&quot; the doctor snapped.
+Outside the tent, a small army of military men and AEC technicians moved
+ around the perimeter of the crater, scintillators in hand, examining
+ every tiny scrap that might have been a part of the building at one
+ time.
+
+
+ A jeep raced down the road from the hospital and drew up in front of the
+ tent. An armed MP helped Miss Abercrombie from the vehicle.
+
+
+ She walked to the edge of the hill and looked down with a stunned
+ expression.
+
+
+ &quot;He did make an atom bomb,&quot; she cried.
+
+
+ Colonel Thurgood, who had snapped from his chair at her words, leaped
+ forward to catch her as she collapsed in a faint.
+
+
+ At 4:00 p.m., the argument was still raging in the long, narrow staff
+ room of the hospital administration building.
+
+
+ Colonel Thurgood, looking more like a patient every minute, sat on the
+ edge of his chair at the head of a long table and pounded with his fist
+ on the wooden surface, making Miss Abercrombie&#x27;s chart book bounce with
+ every beat.
+
+
+ &quot;It&#x27;s ridiculous,&quot; Thurgood roared. &quot;We&#x27;ll all be the laughingstocks of
+ the world if this ever gets out. An atomic bomb made out of clay. You
+ are all nuts. You&#x27;re in the right place, but count me out.&quot;
+
+
+ At his left, Miss Abercrombie cringed deeper into her chair at the
+ broadside. Down both sides of the long table, psychiatrists, physicists,
+ strategists and radiologists sat in various stages of nerve-shattered
+ weariness.
+
+
+ &quot;Miss Abercrombie,&quot; one of the physicists spoke up gently, &quot;you say that
+ after the patients had departed the building, you looked again at
+ Funston&#x27;s work?&quot;
+
+
+ The therapist nodded unhappily.
+
+
+ &quot;And you say that, to the best of your knowledge,&quot; the physicist
+ continued, &quot;there was nothing inside the ball but other pieces of clay.&quot;
+
+
+ &quot;I&#x27;m positive that&#x27;s all there was in it,&quot; Miss Abercrombie cried.
+
+
+ There was a renewed buzz of conversation at the table and the senior AEC
+ man present got heads together with the senior intelligence man. They
+ conferred briefly and then the intelligence officer spoke.
+
+
+ &quot;That seems to settle it, colonel. We&#x27;ve got to give this Funston
+ another chance to repeat his bomb. But this time under our supervision.&quot;
+
+
+ Thurgood leaped to his feet, his face purpling.
+
+
+ &quot;Are you crazy?&quot; he screamed. &quot;You want to get us all thrown into this
+ filbert factory? Do you know what the newspapers would do to us if they
+ ever got wind of the fact, that for one, tiny fraction of a second,
+ anyone of us here entertained the notion that a paranoidal idiot with
+ the IQ of an ape could make an atomic bomb out of kid&#x27;s modeling clay?
+
+
+ &quot;They&#x27;d crucify us, that&#x27;s what they&#x27;d do!&quot;
+
+
+ At 8:30 that night, Thaddeus Funston, swathed in an Army officer&#x27;s
+ greatcoat that concealed the strait jacket binding him and with an
+ officer&#x27;s cap jammed far down over his face, was hustled out of a small
+ side door of the hospital and into a waiting staff car. A few minutes
+ later, the car pulled into the flying field at the nearby community and
+ drove directly to the military transport plane that stood at the end of
+ the runway with propellers turning.
+
+
+ Two military policemen and a brace of staff psychiatrists sworn to
+ secrecy under the National Atomic Secrets Act, bundled Thaddeus aboard
+ the plane. They plopped him into a seat directly in front of Miss
+ Abercrombie and with a roar, the plane raced down the runway and into
+ the night skies.
+
+
+ The plane landed the next morning at the AEC&#x27;s atomic testing grounds in
+ the Nevada desert and two hours later, in a small hot, wooden shack
+ miles up the barren desert wastelands, a cluster of scientists and
+ military men huddled around a small wooden table.
+
+
+ There was nothing on the table but a bowl of water and a great lump of
+ modeling clay. While the psychiatrists were taking the strait jacket off
+ Thaddeus in the staff car outside, Colonel Thurgood spoke to the weary
+ Miss Abercrombie.
+
+
+ &quot;Now you&#x27;re positive this is just about the same amount and the same
+ kind of clay he used before?&quot;
+
+
+ &quot;I brought it along from the same batch we had in the store room at the
+ hospital,&quot; she replied, &quot;and it&#x27;s the same amount.&quot;
+
+
+ Thurgood signaled to the doctors and they entered the shack with
+ Thaddeus Funston between them. The colonel nudged Miss Abercrombie.
+
+
+ She smiled at Funston.
+
+
+ &quot;Now isn&#x27;t this nice, Mr. Funston,&quot; she said. &quot;These nice men have
+ brought us way out here just to see you make another atom bomb like the
+ one you made for me yesterday.&quot;
+
+
+ A flicker of interest lightened Thaddeus&#x27; face. He looked around the
+ shack and then spotted the clay on the table. Without hesitation, he
+ walked to the table and sat down. His fingers began working the damp
+ clay, making first the hollow, half-round shell while the nation&#x27;s top
+ atomic scientists watched in fascination.
+
+
+ His busy fingers flew through the clay, shaping odd, flat bits and clay
+ parts that were dropped almost aimlessly into the open hemisphere in
+ front of him.
+
+
+ Miss Abercrombie stood at his shoulder as Thaddeus hunched over the
+ table just as he had done the previous day. From time to time she
+ glanced at her watch. The maze of clay strips grew and as Funston
+ finished shaping the other half hemisphere of clay, she broke the tense
+ silence.
+
+
+ &quot;Time to go back now, Mr. Funston. You can work some more tomorrow.&quot; She
+ looked at the men and nodded her head.
+
+
+ The two psychiatrists went to Thaddeus&#x27; side as he put the upper lid of
+ clay carefully in place. Funston stood up and the doctors escorted him
+ from the shack.
+
+
+ There was a moment of hushed silence and then pandemonium burst. The
+ experts converged on the clay ball, instruments blossoming from nowhere
+ and cameras clicking.
+
+
+ For two hours they studied and gently probed the mass of child&#x27;s clay
+ and photographed it from every angle.
+
+
+ Then they left for the concrete observatory bunker, several miles down
+ range where Thaddeus and the psychiatrists waited inside a ring of
+ stony-faced military policemen.
+
+
+ &quot;I told you this whole thing was asinine,&quot; Thurgood snarled as the
+ scientific teams trooped into the bunker.
+
+
+ Thaddeus Funston stared out over the heads of the MPs through the open
+ door, looking uprange over the heat-shimmering desert. He gave a sudden
+ cry, shut his eyes and clapped his hands over his face.
+
+
+ A brilliance a hundred times brighter than the glaring Nevada sun lit
+ the dim interior of the bunker and the pneumatically-operated door
+ slammed shut just before the wave of the blast hit the structure.
+Six hours and a jet plane trip later, Thaddeus, once again in his strait
+ jacket, sat between his armed escorts in a small room in the Pentagon.
+ Through the window he could see the hurried bustle of traffic over the
+ Potomac and beyond, the domed roof of the Capitol.
+
+
+ In the conference room next door, the joint chiefs of staff were
+ closeted with a gray-faced and bone-weary Colonel Thurgood and his
+ baker&#x27;s dozen of AEC brains. Scraps of the hot and scornful talk drifted
+ across a half-opened transom into the room where Thaddeus Funston sat in
+ a neatly-tied bundle.
+
+
+ In the conference room, a red-faced, four-star general cast a chilling
+ glance at the rumpled figure of Colonel Thurgood.
+
+
+ &quot;I&#x27;ve listened to some silly stories in my life, colonel,&quot; the general
+ said coldly, &quot;but this takes the cake. You come in here with an insane
+ asylum inmate in a strait jacket and you have the colossal gall to sit
+ there and tell me that this poor soul has made not one, but two atomic
+ devices out of modeling clay and then has detonated them.&quot;
+
+
+ The general paused.
+
+
+ &quot;Why don&#x27;t you just tell me, colonel, that he can also make spaceships
+ out of sponge rubber?&quot; the general added bitingly.
+
+
+ In the next room, Thaddeus Funston stared out over the sweeping panorama
+ of the Washington landscape. He stared hard.
+
+
+ In the distance, a white cloud began billowing up from the base of the
+ Washington Monument, and with an ear-shattering, glass-splintering roar,
+ the great shaft rose majestically from its base and vanished into space
+ on a tail of flame.
+THE END</span>
+
+<span class="s-q">What is the significance of the Washington Monument flying into space at the end of the story?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt gold">[1] It shows the reader that it is certainly something about his gaze that causes these events
+</span><span class="s-opt">[2] It is a politically charged building which makes it a more severe issue to the men studying him
+</span><span class="s-opt">[3] The government is able to confirm their suspicions that he is able to create different types of powerful reactions, not just bombs
+</span><span class="s-opt">[4] It shows that someone else has powers similar to Thaddeus
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>1]</b> <span class="muted">(gold: 2)</span></div></div><div class="ex"><h4>#2 · <code>quality:f4f961f57c1eb072</code> · 4 options</h4><pre class="prompt"><span class="s-sys">&lt;|im_start|&gt;user
+</span><span class="s-state">State:</span> <span class="doc">COSMIC YO-YO
+By ROSS ROCKLYNNE
+&quot;Want an asteroid in your backyard? We supply
+
+ cheap. Trouble also handled without charge.&quot;
+
+ Interplanetary Hauling Company. (ADVT.)
+
+
+ [Transcriber&#x27;s Note: This etext was produced from
+
+ Planet Stories Summer 1945.
+
+ Extensive research did not uncover any evidence that
+
+ the U.S. copyright on this publication was renewed.]
+Bob Parker, looking through the photo-amplifiers at the wedge-shaped
+ asteroid, was plainly flabbergasted. Not in his wildest imaginings had
+ he thought they would actually find what they were looking for.
+
+
+ &quot;Cut the drive!&quot; he yelled at Queazy. &quot;I&#x27;ve got it, right on the nose.
+ Queazy, my boy, can you imagine it? We&#x27;re in the dough. Not only that,
+ we&#x27;re rich! Come here!&quot;
+
+
+ Queazy discharged their tremendous inertia into the motive-tubes in
+ such a manner that the big, powerful ship was moving at the same rate
+ as the asteroid below—47.05 miles per second. He came slogging back
+ excitedly, put his eyes to the eyepiece. He gasped, and his big body
+ shook with joyful ejaculations.
+
+
+ &quot;She checks down to the last dimension,&quot; Bob chortled, working with
+ slide-rule and logarithm tables. &quot;Now all we have to do is find out if
+ she&#x27;s made of tungsten, iron, quartz crystals, and cinnabar! But there
+ couldn&#x27;t be two asteroids of that shape anywhere else in the Belt, so
+ this has to be it!&quot;
+
+
+ He jerked a badly crumpled ethergram from his pocket, smoothed it out,
+ and thumbed his nose at the signature.
+
+
+ &quot;Whee! Mr. Andrew S. Burnside, you owe us five hundred and fifty
+ thousand dollars!&quot;
+
+
+ Queazy straightened. A slow, likeable smile wreathed his tanned face.
+ &quot;Better take it easy,&quot; he advised, &quot;until I land the ship and we use
+ the atomic whirl spectroscope to determine the composition of the
+ asteroid.&quot;
+
+
+ &quot;Have it your way,&quot; Bob Parker sang, happily. He threw the ethergram
+ to the winds and it fell gently to the deck-plates. While Queazy—so
+ called because his full name was Quentin Zuyler—dropped the ship
+ straight down to the smooth surface of the asteroid, and clamped it
+ tight with magnetic grapples, Bob flung open the lazarette, brought
+ out two space-suits. Moments later, they were outside the ship, with
+ star-powdered infinity spread to all sides.
+
+
+ In the ship, the ethergram from Andrew S. Burnside, of Philadelphia,
+ one of the richest men in the world, still lay on the deck-plates. It
+ was addressed to: Mr. Robert Parker, President Interplanetary Hauling &amp;amp;
+ Moving Co., 777 Main Street, Satterfield City, Fontanaland, Mars. The
+ ethergram read:
+Received your advertising literature a week ago. Would like to state
+ that yes I would like an asteroid in my back yard. Must meet following
+ specifications: 506 feet length, long enough for wedding procession;
+ 98 feet at base, tapering to 10 feet at apex; 9-12 feet thick; topside
+ smooth-plane, underside rough-plane; composed of iron ore, tungsten,
+ quartz crystals, and cinnabar. Must be in my back yard before 11:30
+ A.M. my time, for important wedding June 2, else order is void. Will
+ pay $5.00 per ton.
+Bob Parker had received that ethergram three weeks ago. And if The
+ Interplanetary Hauling &amp;amp; Moving Co., hadn&#x27;t been about to go on the
+ rocks (chiefly due to the activities of Saylor &amp;amp; Saylor, a rival firm)
+ neither Bob nor Queazy would have thought of sending an answering
+ ethergram to Burnside stating that they would fill the order. It
+ was, plainly, a hair-brained request. And yet, if by some chance
+ there was such a rigidly specified asteroid, their financial worries
+ would be over. That they had actually discovered the asteroid, using
+ their mass-detectors in a weight-elimination process, seemed like
+ an incredible stroke of luck. For there are literally millions of
+ asteroids in the asteroid belt, and they had been out in space only
+ three weeks.
+
+
+ The &quot;asteroid in your back yard&quot; idea had been Bob Parker&#x27;s originally.
+ Now it was a fad that was sweeping Earth, and Burnside wasn&#x27;t the first
+ rich man who had decided to hold a wedding on top of an asteroid.
+ Unfortunately, other interplanetary moving companies had cashed in on
+ that brainstorm, chiefly the firm of the Saylor brothers—which persons
+ Bob Parker intended to punch in the nose some day. And would have
+ before this if he hadn&#x27;t been lanky and tall while they were giants.
+ Now that he and Queazy had found the asteroid, they were desperate to
+ get it to its destination, for fear that the Saylor brothers might get
+ wind of what was going on, and try to beat them out of their profits.
+ Which was not so far-fetched, because the firm of Saylor &amp;amp; Saylor made
+ no pretense of being scrupulous.
+
+
+ Now they scuffed along the smooth-plane topside of the asteroid, the
+ magnets in their shoes keeping them from stepping off into space. They
+ came to the broad base of the asteroid-wedge, walked over the edge and
+ &quot;down&quot; the twelve-foot thickness. Here they squatted, and Bob Parker
+ happily clamped the atomic-whirl spectroscope to the rough surface.
+ By the naked eye, they could see iron ore, quartz crystals, cinnabar,
+ but he had the spectroscope and there was no reason why he shouldn&#x27;t
+ use it. He satisfied himself as to the exterior of the asteroid, and
+ then sent the twin beams deep into its heart. The beams crossed, tore
+ atoms from molecules, revolved them like an infinitely fine powder. The
+ radiations from the sundered molecules traveled back up the beams to
+ the atomic-whirl spectroscope. Bob watched a pointer which moved slowly
+ up and up—past tungsten, past iridium, past gold—
+
+
+ Bob Parker said, in astonishment, &quot;Hell! There&#x27;s something screwy about
+ this business. Look at that point—&quot;
+
+
+ Neither he nor Queazy had the opportunity to observe the pointer any
+ further. A cold, completely disagreeable feminine voice said,
+
+
+ &quot;May I ask what you interlopers are doing on my asteroid?&quot;
+
+
+ Bob started so badly that the spectroscope&#x27;s settings were jarred and
+ the lights in its interior died. Bob twisted his head around as far as
+ he could inside the &quot;aquarium&quot;—the glass helmet, and found himself
+ looking at a space-suited girl who was standing on the edge of the
+ asteroid &quot;below.&quot;
+
+
+ &quot;Ma&#x27;am,&quot; said Bob, blinking, &quot;did you say something?&quot;
+
+
+ Queazy made a gulping sound and slowly straightened. He automatically
+ reached up as if he would take off his hat and twist it in his hands.
+
+
+ &quot;I said,&quot; remarked the girl, &quot;that you should scram off of my asteroid.
+ And quit poking around at it with that spectroscope. I&#x27;ve already taken
+ a reading. Cinnabar, iron ore, quartz crystals, tungsten. Goodbye.&quot;
+Bob&#x27;s nose twitched as he adjusted his glasses, which he wore even
+ inside his suit. He couldn&#x27;t think of anything pertinent to say. He
+ knew that he was slowly working up a blush. Mildly speaking, the
+ girl was beautiful, and though only her carefully made-up face was
+ visible—cool blue eyes, masterfully coiffed, upswept, glinting brown
+ hair, wilful lips and chin—Bob suspected the rest of her compared
+ nicely.
+
+
+ Her expression darkened as she saw the completely instinctive way he
+ was looking at her and her radioed-voice rapped out, &quot;Now you two boys
+ go and play somewhere else! Else I&#x27;ll let the Interplanetary Commission
+ know you&#x27;ve infringed the law. G&#x27;bye!&quot;
+
+
+ She turned and disappeared.
+
+
+ Bob awoke from his trance, shouted desperately, &quot;Hey! Wait!
+You!
+&quot;
+
+
+ He and Queazy caught up with her on the side of the asteroid they
+ hadn&#x27;t yet examined. It was a rough plane, completing the rigid
+ qualifications Burnside had set down.
+
+
+ &quot;Wait a minute,&quot; Bob Parker begged nervously. &quot;I want to make some
+ conversation, lady. I&#x27;m sure you don&#x27;t understand the conditions—&quot;
+
+
+ The girl turned and drew a gun from a holster. It was a spasticizer,
+ and it was three times as big as her gloved hand.
+
+
+ &quot;I understand conditions better than you do,&quot; she said. &quot;You want
+ to move this asteroid from its orbit and haul it back to Earth.
+ Unfortunately, this is my home, by common law. Come back in a month. I
+ don&#x27;t expect to be here then.&quot;
+
+
+ &quot;A month!&quot; Parker burst the word out. He started to sweat, then his
+ face became grim. He took two slow steps toward the girl. She blinked
+ and lost her composure and unconsciously backed up two steps. About
+ twenty steps away was her small dumbbell-shaped ship, so shiny and
+ unscarred that it reflected starlight in highlights from its curved
+ surface. A rich girl&#x27;s ship, Bob Parker thought angrily. A month would
+ be too late!
+
+
+ He said grimly, &quot;Don&#x27;t worry. I don&#x27;t intend to pull any rough stuff.
+ I just want you to listen to reason. You&#x27;ve taken a whim to stay on
+ an asteroid that doesn&#x27;t mean anything to you one way or another. But
+ to us—to me and Queazy here—it means our business. We got an order
+ for this asteroid. Some screwball millionaire wants it for a backyard
+ wedding see? We get five hundred and fifty thousand dollars for it!
+ If we don&#x27;t take this asteroid to Earth before June 2, we go back to
+ Satterfield City and work the rest of our lives in the glass factories.
+ Don&#x27;t we, Queazy?&quot;
+
+
+ Queazy said simply, &quot;That&#x27;s right, miss. We&#x27;re in a spot. I assure you
+ we didn&#x27;t expect to find someone living here.&quot;
+
+
+ The girl holstered her spasticizer, but her completely inhospitable
+ expression did not change. She put her hands on the bulging hips of her
+ space-suit. &quot;Okay,&quot; she said. &quot;Now I understand the conditions. Now we
+ both understand each other. G&#x27;bye again. I&#x27;m staying here and—&quot; she
+ smiled sweetly &quot;—it may interest you to know that if I let you have
+ the asteroid you&#x27;ll save your business, but I&#x27;ll meet a fate worse than
+ death! So that&#x27;s that.&quot;
+
+
+ Bob recognized finality when he saw it. &quot;Come on, Queazy,&quot; he said
+ fuming. &quot;Let this brat have her way. But if I ever run across her
+ without a space-suit on I&#x27;m going to give her the licking of her life,
+ right where it&#x27;ll do the most good!&quot;
+
+
+ He turned angrily, but Queazy grabbed his arm, his mouth falling open.
+ He pointed off into space, beyond the girl.
+
+
+ &quot;What&#x27;s that?&quot; he whispered.
+
+
+ &quot;What&#x27;s wha—
+Oh!
+&quot;
+
+
+ Bob Parker&#x27;s stomach caved in. A few hundred feet away, floating
+ gently toward the asteroid, came another ship—a ship a trifle bigger
+ than their own. The girl turned, too. They heard her gasp. In another
+ second, Bob was standing next to her. He turned the audio-switch to his
+ headset off, and spoke to the girl by putting his helmet against hers.
+
+
+ &quot;Listen to me, miss,&quot; he snapped earnestly, when she tried to draw
+ away. &quot;Don&#x27;t talk by radio. That ship belongs to the Saylor brothers!
+ Oh, Lord, that this should happen! Somewhere along the line, we&#x27;ve been
+ double-crossed. Those boys are after this asteroid too, and they won&#x27;t
+ hesitate to pull any rough stuff. We&#x27;re in this together, understand?
+ We got to back each other up.&quot;
+
+
+ The girl nodded dumbly. Suddenly she seemed to be frightened.
+ &quot;It&#x27;s—it&#x27;s very important that this—this asteroid stay right where it
+ is,&quot; she said huskily. &quot;What—what will they do?&quot;
+Bob Parker didn&#x27;t answer. The big ship had landed, and little blue
+ sparks crackled between the hull and the asteroid as the magnetic
+ clamps took hold. A few seconds later, the airlocks swung down, and
+ five men let themselves down to the asteroid&#x27;s surface and stood
+ surveying the three who faced them.
+
+
+ The two men in the lead stood with their hands on their hips; their
+ darkish, twin faces were grinning broadly.
+
+
+ &quot;A pleasure,&quot; drawled Wally Saylor, looking at the girl. &quot;What do you
+ think of this situation Billy?&quot;
+
+
+ &quot;It&#x27;s obvious,&quot; drawled Billy Saylor, rocking back and forth on his
+ heels, &quot;that Bob Parker and company have double-crossed us. We&#x27;ll have
+ to take steps.&quot;
+
+
+ The three men behind the Saylor twins broke into rough, chuckling
+ laughter.
+
+
+ Bob Parker&#x27;s gorge rose. &quot;Scram,&quot; he said coldly. &quot;We&#x27;ve got an
+ ethergram direct from Andrew S. Burnside ordering this asteroid.&quot;
+
+
+ &quot;So have we,&quot; Wally Saylor smiled—and his smile remained fixed,
+ dangerous. He started moving forward, and the three men in back came
+ abreast, forming a semi-circle which slowly closed in. Bob Parker gave
+ back a step, as he saw their intentions.
+
+
+ &quot;We got here first,&quot; he snapped harshly. &quot;Try any funny stuff and we&#x27;ll
+ report you to the Interplanetary Commission!&quot;
+
+
+ It was Bob Parker&#x27;s misfortune that he didn&#x27;t carry a weapon. Each of
+ these men carried one or more, plainly visible. But he was thinking of
+ the girl&#x27;s spasticizer—a paralyzing weapon. He took a hair-brained
+ chance, jerked the spasticizer from the girl&#x27;s holster and yelled at
+ Queazy. Queazy got the idea, urged his immense body into motion. He
+ hurled straight at Billy Saylor, lifted him straight off the asteroid
+ and threw him away, into space. He yelled with triumph.
+
+
+ At the same time, the spasticizer Bob held was shot cleanly out of his
+ hand by Wally Saylor. Bob roared, started toward Wally Saylor, knocked
+ the smoking gun from his hand with a sweeping arm. Then something
+ crushing seemed to hit him in the stomach, grabbing at his solar
+ plexus. He doubled up, gurgling with agony. He fell over on his back,
+ and his boots were wrenched loose from their magnetic grip. Vaguely,
+ before the flickering points of light in his brain subsided to complete
+ darkness, he heard the girl&#x27;s scream of rage—then a scream of pain.
+
+
+ What had happened to Queazy he didn&#x27;t know. He felt so horribly sick,
+ he didn&#x27;t care. Then—lights out.
+Bob Parker came to, the emptiness of remote starlight in his face. He
+ opened his eyes. He was slowly revolving on an axis. Sometimes the Sun
+ swept across his line of vision. A cold hammering began at the base of
+ his skull, a sensation similar to that of being buried alive. There was
+ no asteroid, no girl, no Queazy. He was alone in the vastness of space.
+ Alone in a space-suit.
+
+
+ &quot;Queazy!&quot; he whispered. &quot;Queazy! I&#x27;m running out of air!&quot;
+
+
+ There was no answer from Queazy. With sick eyes, Bob studied the
+ oxygen indicator. There was only five pounds pressure. Five pounds!
+ That meant he had been floating around out here—how long? Days at
+ least—maybe weeks! It was evident that somebody had given him a dose
+ of spastic rays, enough to screw up every muscle in his body to the
+ snapping point, putting him in such a condition of suspended animation
+ that his oxygen needs were small. He closed his eyes, trying to fight
+ against panic. He was glad he couldn&#x27;t see any part of his body. He was
+ probably scrawny. And he was hungry!
+
+
+ &quot;I&#x27;ll starve,&quot; he thought. &quot;Or suffocate to death first!&quot;
+
+
+ He couldn&#x27;t keep himself from taking in great gulps of air. Minutes,
+ then hours passed. He was breathing abnormally, and there wasn&#x27;t enough
+ air in the first place. He pleaded continually for Queazy, hoping
+ that somehow Queazy could help, when probably Queazy was in the same
+ condition. He ripped out wild curses directed at the Saylor brothers.
+ Murderers, both of them! Up until this time, he had merely thought of
+ them as business rivals. If he ever got out of this—
+
+
+ He groaned. He never would get out of it! After another hour, he was
+ gasping weakly, and yellow spots danced in his eyes. He called Queazy&#x27;s
+ name once more, knowing that was the last time he would have strength
+ to call it.
+
+
+ And this time the headset spoke back!
+
+
+ Bob Parker made a gurgling sound. A voice came again, washed with
+ static, far away, burbling, but excited. Bob made a rattling sound in
+ his throat. Then his eyes started to close, but he imagined that he saw
+ a ship, shiny and small, driving toward him, growing in size against
+ the backdrop of the Milky Way. He relapsed, a terrific buzzing in his
+ ears.
+
+
+ He did not lose consciousness. He heard voices, Queazy&#x27;s and the
+ girl&#x27;s, whoever she was. Somebody grabbed hold of his foot. His
+ &quot;aquarium&quot; was unbuckled and good air washed over his streaming face.
+ The sudden rush of oxygen to his brain dizzied him. Then he was lying
+ on a bunk, and gradually the world beyond his sick body focussed in his
+ clearing eyes and he knew he was alive—and going to stay that way, for
+ awhile anyway.
+
+
+ &quot;Thanks, Queazy,&quot; he said huskily.
+
+
+ Queazy was bending over him, his anxiety clearing away from his
+ suddenly brightening face.
+
+
+ &quot;Don&#x27;t thank me,&quot; he whispered. &quot;We&#x27;d have both been goners if it
+ hadn&#x27;t been for her. The Saylor brothers left her paralyzed like
+ us, and when she woke up she was on a slow orbit around her ship.
+ She unstrapped her holster and threw it away from her and it gave
+ her enough reaction to reach the ship. She got inside and used the
+ direction-finder on the telaudio and located me first. The Saylors
+ scattered us far and wide.&quot; Queazy&#x27;s broad, normally good-humored face
+ twisted blackly. &quot;The so and so&#x27;s didn&#x27;t care if we lived or died.&quot;
+
+
+ Bob saw the girl now, standing a little behind Queazy, looking down at
+ him curiously, but unhappily. Her space-suit was off. She was wearing
+ lightly striped blue slacks and blue silk blouse and she had a paper
+ flower in her hair. Something in Bob&#x27;s stomach caved in as his eyes
+ widened on her.
+
+
+ The girl said glumly, &quot;I guess you men won&#x27;t much care for me when you
+ find out who I am and what I&#x27;ve done. I&#x27;m Starre Lowenthal—Andrew S.
+ Burnside&#x27;s granddaughter!&quot;
+Bob came slowly to his feet, and matched Queazy&#x27;s slowly growing anger.
+
+
+ &quot;Say that again?&quot; he snapped. &quot;This is some kind of dirty trick you and
+ your grandfather cooked up?&quot;
+
+
+ &quot;No!&quot; she exclaimed. &quot;No. My grandfather didn&#x27;t even know there was an
+ asteroid like this. But I did, long before he ordered it from you—or
+ from the Saylor brothers. You see—well, my granddad&#x27;s about the
+ stubbornest old hoot-owl in this universe! He&#x27;s always had his way, and
+ when people stand in his way, that&#x27;s just a challenge to him. He&#x27;s been
+ badgering me for years to marry Mac, and so has Mac—&quot;
+
+
+ &quot;Who&#x27;s Mac?&quot; Queazy demanded.
+
+
+ &quot;My fiancé, I guess,&quot; she said helplessly. &quot;He&#x27;s one of my granddad&#x27;s
+ protégés. Granddad&#x27;s always financing some likely young man and giving
+ him a start in life. Mac has become pretty famous for his Mercurian
+ water-colors—he&#x27;s an artist. Well, I couldn&#x27;t hold out any longer.
+ If you knew my grandfather, you&#x27;d know how absolutely
+impossible
+it
+ is to go against him when he&#x27;s got his mind set! I was just a mass of
+ nerves. So I decided to trick him and I came out to the asteroid belt
+ and picked out an asteroid that was shaped so a wedding could take
+ place on it. I took the measurements and the composition, then I told
+ my grandfather I&#x27;d marry Mac if the wedding was in the back yard on top
+ of an asteroid with those measurements and made of iron ore, tungsten,
+ and so forth. He agreed so fast he scared me, and just to make sure
+ that if somebody
+did
+find the asteroid in time they wouldn&#x27;t be able
+ to get it back to Earth, I came out here and decided to live here.
+ Asteroids up to a certain size belong to whoever happens to be on them,
+ by common law.... So I had everything figured out—except,&quot; she added
+ bitterly, &quot;the Saylor brothers! I guess Granddad wanted to make sure
+ the asteroid was delivered, so he gave the order to several companies.&quot;
+
+
+ Bob swore under his breath. He went reeling across to a port, and was
+ gratified to see his and Queazy&#x27;s big interplanetary hauler floating
+ only a few hundred feet away. He swung around, looked at Queazy.
+
+
+ &quot;How long were we floating around out there?&quot;
+
+
+ &quot;Three weeks, according to the chronometer. The Saylor boys gave us a
+ stiff shot.&quot;
+
+
+ &quot;
+Ouch!
+&quot; Bob groaned. Then he looked at Starre Lowenthal with
+ determination. &quot;Miss, pardon me if I say that this deal you and your
+ granddad cooked up is plain screwy! With us on the butt end. But I&#x27;m
+ going to put this to you plainly. We can catch up with the Saylor
+ brothers even if they are three weeks ahead of us. The Saylor ship and
+ ours both travel on the HH drive—inertia-less. But the asteroid has
+ plenty of inertia, and so they&#x27;ll have to haul it down to Earth by a
+ long, spiraling orbit. We can go direct and probably catch up with them
+ a few hundred thousand miles this side of Earth. And we can have a
+ fling at getting the asteroid back!&quot;
+
+
+ Her eyes sparkled. &quot;You mean—&quot; she cried. Then her attractive face
+ fell. &quot;Oh,&quot; she said. &quot;
+Oh!
+And when you get it back, you&#x27;ll land it.&quot;
+
+
+ &quot;That&#x27;s right,&quot; Bob said grimly. &quot;We&#x27;re in business. For us, it&#x27;s a
+ matter of survival. If the by-product of delivering the asteroid is
+ your marriage—sorry! But until we do get the asteroid back, we three
+ can work as a team if you&#x27;re willing. We&#x27;ll fight the other problem out
+ later. Okay?&quot;
+
+
+ She smiled tremulously. &quot;Okay, I guess.&quot;
+
+
+ Queazy looked from one to another of them. He waved his hand scornfully
+ at Bob. &quot;You&#x27;re plain nuts,&quot; he complained. &quot;How do you propose to go
+ about convincing the Saylor brothers they ought to let us have the
+ asteroid back? Remember, commercial ships aren&#x27;t allowed to carry
+ long-range weapons. And we couldn&#x27;t ram the Saylor brothers&#x27; ship—not
+ without damaging our own ship just as much. Go ahead and answer that.&quot;
+
+
+ Bob looked at Queazy dismally. &quot;The old balance-wheel,&quot; he groaned at
+ Starre. &quot;He&#x27;s always pulling me up short when I go off half-cocked. All
+ I know is, that maybe we&#x27;ll get a good idea as we go along. In the
+ meantime, Starre—ahem—none of us has eaten in three weeks...?&quot;
+
+
+ Starre got the idea. She smiled dazzlingly and vanished toward the
+ galley.
+Bob Parker was in love with Starre Lowenthal. He knew that after five
+ days out, as the ship hurled itself at breakneck speed toward Earth;
+ probably that distracting emotion was the real reason he couldn&#x27;t
+ attach any significance to Starre&#x27;s dumbbell-shaped ship, which trailed
+ astern, attached by a long cable.
+
+
+ Starre apparently knew he was in love with her, too, for on the fifth
+ day Bob was teaching her the mechanics of operating the hauler, and she
+ gently lifted his hand from a finger-switch.
+
+
+ &quot;Even
+I
+know that isn&#x27;t the control to the Holloway vacuum-feeder,
+ Bob. That switch is for the—ah—the anathern tube, you told me. Right?&quot;
+
+
+ &quot;Right,&quot; he said unsteadily. &quot;Anyway, Starre, as I was saying, this
+ ship operates according to the reverse Fitzgerald Contraction Formula.
+ All moving bodies contract in the line of motion. What Holloway
+ and Hammond did was to reverse that universal law. They caused the
+ contraction first—motion had to follow! The gravitonic field affects
+ every atom in the ship with the same speed at the same time. We could
+ go from zero speed to our top speed of two thousand miles a second just
+ like that!&quot;
+
+
+ He snapped his fingers. &quot;No acceleration effects. This type of ship,
+ necessary in our business, can stop flat, back up, ease up, move in
+ any direction, and the passengers wouldn&#x27;t have any feeling of motion
+ at—Oh, hell!&quot; Bob groaned, the serious glory of her eyes making him
+ shake. He took her hand. &quot;Starre,&quot; he said desperately, &quot;I&#x27;ve got to
+ tell you something—&quot;
+
+
+ She jerked her hand away. &quot;No,&quot; she exclaimed in an almost frightened
+ voice. &quot;You can&#x27;t tell me. There&#x27;s—there&#x27;s Mac,&quot; she finished,
+ faltering. &quot;The asteroid—&quot;
+
+
+ &quot;You
+have
+to marry him?&quot;
+
+
+ Her eyes filled with tears. &quot;I have to live up to the bargain.&quot;
+
+
+ &quot;And ruin your whole life,&quot; he ground out. Suddenly, he turned back to
+ the control board, quartered the vision plate. He pointed savagely to
+ the lower left quarter, which gave a rearward view of the dumbbell ship
+ trailing astern.
+
+
+ &quot;There&#x27;s your ship, Starre.&quot; He jabbed his finger at it. &quot;I&#x27;ve got a
+ feeling—and I can&#x27;t put the thought into concrete words—that somehow
+ the whole solution of the problem of grabbing the asteroid back lies
+ there. But how?
+How?
+&quot;
+
+
+ Starre&#x27;s blue eyes followed the long cable back to where it was
+ attached around her ship&#x27;s narrow midsection.
+
+
+ She shook her head helplessly. &quot;It just looks like a big yo-yo to me.&quot;
+
+
+ &quot;A yo-yo?&quot;
+
+
+ &quot;Yes, a yo-yo. That&#x27;s all.&quot; She was belligerent.
+
+
+ &quot;A
+yo-yo
+!&quot; Bob Parker yelled the word and almost hit the ceiling, he
+ got out of the chair so fast. &quot;Can you imagine it! A yo-yo!&quot;
+
+
+ He disappeared from the room. &quot;Queazy!&quot; he shouted. &quot;
+Queazy, I&#x27;ve got
+ it!
+&quot;
+It was Queazy who got into his space-suit and did the welding job,
+ fastening two huge supra-steel &quot;eyes&quot; onto the dumbbell-shaped ship&#x27;s
+ narrow midsection. Into these eyes cables which trailed back to
+ two winches in the big ship&#x27;s nose were inserted, welded fast, and
+ reinforced.
+
+
+ The nose of the hauler was blunt, perfectly fitted for the job. Bob
+ Parker practiced and experimented for three hours with this yo-yo of
+ cosmic dimensions, while Starre and Queazy stood over him bursting into
+ strange, delighted squeals of laughter whenever the yo-yo reached the
+ end of its double cable and started rolling back up to the ship. Queazy
+ snapped his fingers.
+
+
+ &quot;It&#x27;ll work!&quot; His gray eyes showed satisfaction. &quot;Now, if only the
+ Saylor brothers are where we calculated!&quot;
+
+
+ They weren&#x27;t where Bob and Queazy had calculated, as they had
+ discovered the next day. They had expected to pick up the asteroid
+ on their mass-detectors a few hundred thousand miles outside of the
+ Moon&#x27;s orbit. But now they saw the giant ship attached like a leech to
+ the still bigger asteroid—inside the Moon&#x27;s orbit! A mere two hundred
+ thousand miles from Earth!
+
+
+ &quot;We have to work fast,&quot; Bob stammered, sweating. He got within
+ naked-eye distance of the Saylor brothers&#x27; ship. Below, Earth was
+ spread out, a huge crescent shape, part of the Eastern hemisphere
+ vaguely visible through impeding clouds and atmosphere. The enemy ship
+ was two miles distant, a black shadow occulting part of the brilliant
+ sky. It was moving along a down-spiraling path toward Earth.
+
+
+ Queazy&#x27;s big hand gripped his shoulder. &quot;Go to it, Bob!&quot;
+
+
+ Bob nodded grimly. He backed the hauler up about thirty miles, then
+ sent it forward again, directly toward the Saylor brothers&#x27; ship at ten
+ miles per second. And resting on the blunt nose of the ship was the
+ &quot;yo-yo.&quot;
+
+
+ There was little doubt the Saylors&#x27; saw their approach. But,
+ scornfully, they made no attempt to evade. There was no possible harm
+ the oncoming ship could wreak. Or at least that was what they thought,
+ for Bob brought the hauler&#x27;s speed down to zero—and Starre Lowenthal&#x27;s
+ little ship, possessing its own inertia, kept on moving!
+
+
+ It spun away from the hauler&#x27;s blunt nose, paying out two rigid
+ lengths of cable behind it as it unwound, hurled itself forward like a
+ fantastic spinning cannon ball.
+
+
+ &quot;It&#x27;s going to hit!&quot;
+
+
+ The excited cry came from Starre. But Bob swore. The dumbbell ship
+ reached the end of its cables, falling a bare twenty feet short of
+ completing its mission. It didn&#x27;t stop spinning, but came winding back
+ up the cable, at the same terrific speed with which it had left.
+Bob sweated, having only fractions of seconds in which to maneuver
+ for the &quot;yo-yo&quot; could strike a fatal blow at the hauler too. It was
+ ticklish work completely to nullify the &quot;yo-yo&#x27;s&quot; speed. Bob used
+ exactly the same method of catching the &quot;yo-yo&quot; on the blunt nose of
+ the ship as a baseball player uses to catch a hard-driven ball in
+ his glove—namely, by matching the ball&#x27;s speed and direction almost
+ exactly at the moment of impact. And now Bob&#x27;s hours of practice paid
+ dividends, for the &quot;yo-yo&quot; came to rest snugly, ready to be released
+ again.
+
+
+ All this had happened in such a short space of time that the Saylor
+ brothers must have had only a bare realization of what was going on.
+ But by the time the &quot;yo-yo&quot; was flung at them again, this time with
+ better calculations, they managed to put the firmly held asteroid
+ between them and the deadly missile. But it was clumsy evasion, for
+ the asteroid was several times as massive as the ship which was towing
+ it, and its inertia was great. And as soon as the little ship came
+ spinning back to rest, Bob flung the hauler to a new vantage point and
+ again the &quot;yo-yo&quot; snapped out.
+
+
+ And this time—collision! Bob yelled as he saw the stern section of the
+ Saylor brothers&#x27; ship crumple like tissue paper crushed between the
+ hand. The dumbbell-shaped ship, smaller, and therefore stauncher due to
+ the principle of the arch, wound up again, wobbling a little. It had
+ received a mere dent in its starboard half.
+
+
+ Starre was chortling with glee. Queazy whispered, &quot;Attaboy, Bob! This
+ time we&#x27;ll knock &#x27;em out of the sky!&quot;
+
+
+ The &quot;yo-yo&quot; came to rest and at the same moment a gong rang excitedly.
+ Bob knew what that meant. The Saylor brothers were trying to establish
+ communication.
+
+
+ Queazy was across the room in two running strides. He threw in the
+ telaudio and almost immediately, Wally Saylor&#x27;s big body built up in
+ the plate. Wally Saylor&#x27;s face was quivering with wrath.
+
+
+ &quot;What do you damned fools think you&#x27;re trying to do?&quot; he roared.
+ &quot;You&#x27;ve crushed in our stern section. You&#x27;ve sliced away half of our
+ stern jets. Air is rushing out! You&#x27;ll kill us!&quot;
+
+
+ &quot;Now,&quot; Bob drawled, &quot;you&#x27;re getting the idea.&quot;
+
+
+ &quot;I&#x27;ll inform the Interplanetary Commission!&quot; screamed Saylor.
+
+
+ &quot;
+If
+you&#x27;re alive,&quot; Bob snarled wrathfully. &quot;And you won&#x27;t be unless
+ you release the asteroid.&quot;
+
+
+ &quot;I&#x27;ll see you in Hades first!&quot;
+
+
+ &quot;Hades,&quot; remarked Bob coldly, &quot;here you come!&quot;
+
+
+ He snapped the hauler into its mile-a-second speed again, stopped it at
+ zero. And the &quot;yo-yo&quot; went on its lone, destructive sortie.
+
+
+ For a fraction of a second Wally Saylor exhibited the countenance of a
+ doomed man. In the telaudio plate, he whirled, and diminished in size
+ with a strangled yell.
+
+
+ The &quot;yo-yo&quot; struck again, but Bob Parker maneuvered its speed in
+ such a manner that it struck in the same place as before, but not as
+ heavily, then rebounded and came spinning back with perfect, sparkling
+ precision. And even before it snugged itself into its berth, it was
+ apparent that the Saylor brothers had given up. Like a wounded terrier,
+ their ship shook itself free of the asteroid, hung in black space for
+ a second, then vanished with a flaming puff of released gravitons from
+ its still-intact jets.
+
+
+ The battle was won!</span>
+
+<span class="s-q">Had Starre not been able to rescue herself, Parker, and Queazy, what would have likely happened to them after the Saylor brothers attack?</span>
+<span class="s-state">Options:</span>
+<span class="s-opt">[1] They would have been lost in space alone forever. 
+</span><span class="s-opt">[2] They would have reached their ship for more oxygen . 
+</span><span class="s-opt gold">[3] They would have died from starvation or lack of oxygen.
+</span><span class="s-opt">[4] They would have eventually orbited back to their ship
+</span><span class="s-ins">Select one option. Answer only with its bracketed numeric identifier.</span>
+<span class="s-sys">&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+&lt;think&gt;
+
+&lt;/think&gt;
+
+</span><span class="s-pre">Best answer: [</span></pre><div class="ans">model answers <b>3]</b> <span class="muted">(gold: 3)</span></div></div></section><script>
+const tabs=[...document.querySelectorAll('.tabs button')];
+function show(id){tabs.forEach(b=>b.setAttribute('aria-selected',b.dataset.id===id));
+document.querySelectorAll('.ds').forEach(d=>d.classList.toggle('on',d.id===id));
+history.replaceState(null,'','#'+id)}
+tabs.forEach(b=>b.onclick=()=>show(b.dataset.id));
+show(tabs.some(b=>b.dataset.id===location.hash.slice(1))?location.hash.slice(1):tabs[0].dataset.id);
+</script></body></html>
