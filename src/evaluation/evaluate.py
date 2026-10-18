@@ -45,11 +45,13 @@ def subset(rows: list[dict], per: int, seed: int) -> list[dict]:
     return out
 
 
-def _batches(lengths: list[int], budget: int) -> list[list[int]]:
-    """Row indices sorted by length, packed so rows x longest <= budget."""
+def _batches(lengths: list[int], budget: int, max_rows: int) -> list[list[int]]:
+    """Row indices sorted by length, packed so rows x longest <= budget and
+    rows <= max_rows."""
     out: list[list[int]] = []
     for i in sorted(range(len(lengths)), key=lengths.__getitem__):
-        if out and (len(out[-1]) + 1) * lengths[i] <= budget:
+        if out and len(out[-1]) < max_rows \
+                and (len(out[-1]) + 1) * lengths[i] <= budget:
             out[-1].append(i)
         else:
             out.append([i])
@@ -57,11 +59,12 @@ def _batches(lengths: list[int], budget: int) -> list[list[int]]:
 
 
 def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
-             batch_tokens: int = 32768):
+             batch_tokens: int = 32768, batch_rows: int = 64):
     """Per-dataset metrics, and one example record per text-mode row.
 
     Rows are scored in batches of similar length (answers.score_batch) of at
-    most batch_tokens padded prompt tokens; text mode runs one row at a time.
+    most batch_tokens padded prompt tokens and batch_rows rows (also the cap
+    on trie nodes per forward); text mode runs one row at a time.
     """
     was_training = model.training
     model.eval()
@@ -75,10 +78,11 @@ def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
     start = last = time.time()
     done = 0
     with torch.no_grad():
-        for batch in _batches([len(p) for p in prompts], batch_tokens):
+        for batch in _batches([len(p) for p in prompts], batch_tokens, batch_rows):
             results = answers.score_batch(
                 model, [prompts[i] for i in batch], tok,
-                [encoded[i]["n_options"] for i in batch], device, batch_tokens)
+                [encoded[i]["n_options"] for i in batch], device, batch_tokens,
+                batch_rows)
             for i, res in zip(batch, results):
                 scored[i] = res
             done += len(batch)

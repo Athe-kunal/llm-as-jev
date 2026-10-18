@@ -165,13 +165,15 @@ def _select_cache(cache, rows: torch.Tensor):
 
 
 def score_batch(model, prompts: list[list[int]], tokenizer: Any,
-                ks: list[int], device: str, budget: int = 32768) -> list[tuple]:
+                ks: list[int], device: str, budget: int = 32768,
+                max_rows: int = 64) -> list[tuple]:
     """score() for several prompts: (s, root legal mass, decoded) per prompt.
 
     One left-padded prefill of all prompts (positions skip the padding).
     Then, per trie depth d, every node of that depth of every prompt runs
     on top of a copy of its prompt's cache, as one batch of d-token inputs,
-    in chunks of at most budget // (longest prompt) nodes.
+    in chunks of at most budget // (longest prompt) and max_rows nodes (each
+    copy also holds Qwen3.5's fixed-size linear-attention states).
     """
     n = max(map(len, prompts))
     ids = torch.full((len(prompts), n), tokenizer.pad_token_id, dtype=torch.long)
@@ -192,7 +194,7 @@ def score_batch(model, prompts: list[list[int]], tokenizer: Any,
             if node:
                 depths.setdefault(len(node), []).append((i, node))
     length = mask.sum(-1)                                               # [B]
-    step = max(1, budget // n)
+    step = max(1, min(max_rows, budget // n))
     for d, items in sorted(depths.items()):
         for c in range(0, len(items), step):
             chunk = items[c : c + step]

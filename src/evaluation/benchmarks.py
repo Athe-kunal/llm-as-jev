@@ -109,10 +109,11 @@ def banking77() -> list[dict]:
 
 
 def jevbench() -> list[dict]:
-    """The 231 public items; options as JevBench's own local_openjev adapter
-    builds them: noul -> no / yes described by the false / true criteria,
-    score -> levels 0..k described by their criteria, choice -> the labels
-    described by their criteria. Option text: "<label>: <criterion>"."""
+    """The 231 public items, rendered as JevBench's own LLM adapters
+    (qwen_flash_linear, openai_compat) build them: options in the item's
+    labels order, each "<label>: <criterion>" (noul: no / yes described by
+    the false / true criteria; score: levels 0..k by their criteria); dict
+    states as compact JSON."""
     rows = []
     for tier in ("easy", "original", "hard"):
         with open(ROOT / "jevbench" / f"{tier}.jsonl") as f:
@@ -129,13 +130,13 @@ def jevbench() -> list[dict]:
                     rubric = {k: v or k for k, v in (crit or {}).items()} or {
                         k: k for k in t["labels"]}
                 state = t["state"] if isinstance(t["state"], str) else \
-                    json.dumps(t["state"], indent=2, ensure_ascii=False)
+                    json.dumps(t["state"], ensure_ascii=False)
                 rows.append({
                     "id": t["id"], "source": "jevbench", "tier": tier,
                     "parts": [{"name": "State", "text": state}],
                     "question": q["instructions"],
-                    "labels": {k: v if v == k else f"{k}: {v}"
-                               for k, v in rubric.items()},
+                    "labels": {k: rubric[k] if rubric[k] == k else f"{k}: {rubric[k]}"
+                               for k in map(str, t["labels"])},
                     "label": str(t["expected"]), "spans": []})
     return rows
 
@@ -170,6 +171,8 @@ def main() -> None:
                         help="text-mode rows per benchmark")
     parser.add_argument("--batch-tokens", type=int, default=32768,
                         help="padded prompt tokens per scoring batch")
+    parser.add_argument("--batch-rows", type=int, default=64,
+                        help="rows (and trie nodes) per scoring forward")
     args = parser.parse_args()
 
     from transformers import AutoTokenizer
@@ -188,7 +191,7 @@ def main() -> None:
     else:
         model = modeling.load_base(args.model).to("cuda").eval()
     metrics, examples = evaluate.evaluate(model, tok, rows, gen_rows, "cuda",
-                                         args.batch_tokens)
+                                         args.batch_tokens, args.batch_rows)
     ext = [metrics[n]["accuracy"] for n in EXTERNAL if n in metrics]
     if len(ext) == len(EXTERNAL):
         metrics["external_macro"] = {"accuracy": sum(ext) / len(ext)}
