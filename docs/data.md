@@ -387,7 +387,7 @@ same 17 rows were over the limit and the built files are byte-identical.)
 
 ## 8. How to rebuild
 
-`make data` runs both steps below; `blogs/01_prompt_and_data/index.html` shows 2
+`make data` runs both steps below; the blog in `blogs/` shows 2 examples per
 dataset.
 
 ```bash

@@ -1,0 +1,24 @@
+{
+  "name": "llm-as-jev-blog",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "data": "cd .. && PYTHONPATH=src .venv/bin/python blogs/export_data.py",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "data:trie": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-3} PYTHONPATH=src .venv/bin/python blogs/export_trie.py",
+    "data:anchors": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-3} PYTHONPATH=src .venv/bin/python blogs/export_anchors.py",
+    "data:contextcite": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-3} PYTHONPATH=src .venv/bin/python blogs/export_contextcite.py"
+  },
+  "dependencies": {
+    "framer-motion": "11.11.17",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "5.4.11"
+  }
+}
