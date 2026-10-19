@@ -3,6 +3,7 @@ import TrieLoss from "./sections/TrieLoss.jsx";
 import Anchors from "./sections/Anchors.jsx";
 import FinalLoss from "./sections/FinalLoss.jsx";
 import ContextCite from "./sections/ContextCite.jsx";
+import AT2 from "./sections/AT2.jsx";
 
 // Sections in reading order; later ones are added as the walkthrough grows.
 const SECTIONS = [
@@ -11,6 +12,7 @@ const SECTIONS = [
   { n: 3, title: "KL anchors", id: "anchors", ready: true },
   { n: 4, title: "Final loss", id: "final", ready: true },
   { n: 5, title: "ContextCite", id: "contextcite", ready: true },
+  { n: 6, title: "AT2", id: "at2", ready: true },
 ];
 
 export default function App() {
@@ -37,6 +39,7 @@ export default function App() {
       <Anchors />
       <FinalLoss />
       <ContextCite />
+      <AT2 />
     </div>
   );
 }

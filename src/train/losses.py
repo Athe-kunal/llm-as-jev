@@ -182,3 +182,17 @@ def compute(model, ex: dict, device: str, pad: int) -> TensorDict:
         pos=0.5 * pos_anchor(sites, pos_stats(ref_sites)).sum(),        # []
         batch_size=[],
     )
+
+
+def pearson_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """AT2's loss: the negative Pearson correlation between surrogate
+    predictions and ablation targets, per row, averaged over rows (the
+    reference's PearsonCorrelationLoss). pred, target [B, M] -> [].
+
+    Invariant to a per-row affine map of pred, so the surrogate needs no
+    intercept or scale.
+    """
+    p = pred - pred.mean(1, keepdim=True)                                       # [B, M]
+    t = target - target.mean(1, keepdim=True)                                   # [B, M]
+    corr = (p * t).mean(1) / ((p ** 2).mean(1).sqrt() * (t ** 2).mean(1).sqrt() + 1e-8)  # [B]
+    return -corr.mean()

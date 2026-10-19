@@ -144,6 +144,19 @@ def encode(row: dict[str, Any], tokenizer: Any, rng: random.Random | None):
     }
 
 
+def batches(lengths: list[int], budget: int, max_rows: int) -> list[list[int]]:
+    """Row indices sorted by length, packed so rows x longest <= budget and
+    rows <= max_rows."""
+    out: list[list[int]] = []
+    for i in sorted(range(len(lengths)), key=lengths.__getitem__):
+        if out and len(out[-1]) < max_rows \
+                and (len(out[-1]) + 1) * lengths[i] <= budget:
+            out[-1].append(i)
+        else:
+            out.append([i])
+    return out
+
+
 def _select_cache(cache, rows: torch.Tensor):
     """A new cache holding the given batch rows of cache (repeats allowed).
 

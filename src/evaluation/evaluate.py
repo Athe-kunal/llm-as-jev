@@ -45,19 +45,6 @@ def subset(rows: list[dict], per: int, seed: int) -> list[dict]:
     return out
 
 
-def _batches(lengths: list[int], budget: int, max_rows: int) -> list[list[int]]:
-    """Row indices sorted by length, packed so rows x longest <= budget and
-    rows <= max_rows."""
-    out: list[list[int]] = []
-    for i in sorted(range(len(lengths)), key=lengths.__getitem__):
-        if out and len(out[-1]) < max_rows \
-                and (len(out[-1]) + 1) * lengths[i] <= budget:
-            out[-1].append(i)
-        else:
-            out.append([i])
-    return out
-
-
 def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
              batch_tokens: int = 32768, batch_rows: int = 64):
     """Per-dataset metrics, and one example record per text-mode row.
@@ -78,7 +65,7 @@ def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
     start = last = time.time()
     done = 0
     with torch.no_grad():
-        for batch in _batches([len(p) for p in prompts], batch_tokens, batch_rows):
+        for batch in answers.batches([len(p) for p in prompts], batch_tokens, batch_rows):
             results = answers.score_batch(
                 model, [prompts[i] for i in batch], tok,
                 [encoded[i]["n_options"] for i in batch], device, batch_tokens,

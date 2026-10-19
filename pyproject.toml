@@ -24,6 +24,8 @@ dependencies = [
     "causal-conv1d==1.5.3.post1",
     "loguru>=0.7.3",
     "tensordict>=0.14.3",
+    "nltk>=3.10.3",
+    "scikit-learn>=1.9.1",
 ]
 
 [project.optional-dependencies]

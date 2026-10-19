@@ -17,6 +17,7 @@ as in the paper.
 | `evaluation/evaluate.py` | metrics on the eval split (CLI) |
 | `evaluation/benchmarks.py` | the paper's external benchmarks and JevBench as rows (CLI) |
 | `modeling/span_heads.py` | evidence-span heads kept from the earlier joint trainer (not yet wired in) |
+| `modeling/context_cite.py` | ContextCite attribution of the predicted answer to context sentences (§7) |
 | `dataloader/build_data.py` | builds Reason+Long-12k (`docs/data.md`) |
 | `dataloader/prompts.py`, `prompts/decision.j2` | Jinja templates (`prompts/` at `src/prompts/`) |
 | `blogs/model_viewer.py` | trained-vs-base viewer (`scripts/view.sh`); the walkthrough blog is a React app in `blogs/` (`npm run data`, `npm run dev`) |
@@ -319,3 +320,204 @@ fp32. In bf16 they drift by up to ~0.3–1.4 nats on 77-option rows, the same
 size as between a batch of one and a batch of two identical prompts (no
 padding), i.e. bf16 rounding; on 120 benchmark rows the argmax agreed on
 115/120 (0.6B) and 119/120 (4B) with equal accuracy.
+
+## 7. Context attribution: ContextCite (`modeling/context_cite.py`)
+
+ContextCite (Cohen-Wang et al., NeurIPS 2024;
+github.com/MadryLab/context-cite, MIT) asks which context sentences an
+answer depends on: ablate random subsets of sentences, re-score the answer,
+fit a sparse linear surrogate whose weights are the attributions. Choices
+made for this repo:
+
+- **Target**: the logit of the tree probability q(answer | x) from
+  `answers.score_batch` (the q that ℒ_tree trains), not the reference's
+  full-vocabulary token probabilities.
+- **Answer**: the model's own prediction (as the reference attributes the
+  model's response), so attribution needs no label.
+- **Sources**: sentences, split with `nltk.sent_tokenize` per line as in the
+  reference.
+- **Solver**: scikit-learn's StandardScaler + Lasso(α = 0.01), as in the
+  reference.
+
+**Step 1: sources (`split_sources`, `ablate`).** The reference splits one
+context string; our rows have several `parts`, so a source is
+`{part, start, end, sep}`: the part index, the sentence's char range in that
+part (the same offsets as the row's gold `spans`), and the separator before
+it. `ablate(row, sources, keep)` rebuilds each part from the kept sentences,
+each preceded by its own separator except the first kept one of its part
+(the reference's `get_context`), and drops the row's spans. Unlike the
+reference it always keeps the text before a part's first sentence and after
+its last (whitespace): ContractNLI parts end in a newline that the
+reference would drop, which alone moved the answer's logit by 0.1. Keeping
+every sentence now rebuilds all 5,991 eval rows byte for byte.
+Sources per row (median / max): MuSiQue 96 / 122, ContractNLI 86 / 181,
+QuALITY 189 / 1,142, ProofWriter 21 / 23, the short reasoning sets 2–4,
+intent rows 1. Gold spans start and end on sentence boundaries for MuSiQue
+(74/74) and ProofWriter (161/161) but only 16/53 for ContractNLI, whose
+human spans are often clauses inside a sentence; span scoring will
+therefore use overlap, not exact boundaries.
+
+*Content merging (added after steps 1–5).* 15.7% of ContractNLI's
+sentences are blank form fields ("Agent:____"), checkbox lines or
+abbreviation fragments ("(C.A.R."), none of them gold; they cost ablation
+budget, add Lasso unknowns, and dropping them only perturbs layout. A
+sentence without content (`has_content`: fewer than `min_words` = 2 words
+of two or more letters, or under `min_alnum` = 50% letters and digits)
+now joins the previous source of its part, or the next one at a part's
+start. The text is unchanged (keep-all still rebuilds all 5,991 eval rows
+exactly). Sources on 60 eval rows per dataset: ContractNLI 5,809 → 3,882
+(−33%), QuALITY −12.6%, MuSiQue −4%, ProofWriter, ReClor, αNLI and intent
+sets unchanged; gold sources 62 → 61 (ContractNLI) and 363 → 360
+(MuSiQue), where neighbouring gold sentences merged. The numbers in steps
+2–5 and §8 were measured before this change; AT2 was retrained on merged
+sources (§8 step 6).
+
+**Step 2: masks (`ablation_masks`).** `[n, d]` booleans, True = kept. Mask
+i is drawn from its own `np.random.RandomState(seed + i)`, each source kept
+with probability `keep_prob` (default 0.5, n = 64 by default in the
+reference), exactly the reference's `_create_mask`: identical masks for the
+same seed (checked for n, d up to 256 × 1,142). With one source (intent
+rows) about half the masks drop everything, so attribution is only
+meaningful for rows with several sentences.
+
+**Step 3: targets (`ablation_targets`, `logit_q`).** For each mask: ablate
+the row, render its prompt (options in release order, so the attributed
+option keeps its index), and score all prompts with `answers.score_batch` in
+length-sorted batches (`answers.batches`, moved there from `evaluate.py`).
+The target is logit q(answer | ablated x) = log q − log(1 − q), computed as
+s_answer − logsumexp(other s_k), which stays finite when q rounds to 1 (the
+reference's correct-minus-logsumexp-of-the-rest, applied per token there).
+Checked with the 0.6B λ = 0.01 adapter: the all-kept mask reproduces the
+full-context logit to 4 decimals (MuSiQue, ContractNLI, ProofWriter); 64
+masks take 2.1 s (MuSiQue, 93 sources), 5.7 s (ContractNLI, 181) and 0.3 s
+(ProofWriter, 20) on one GPU; batched and one-at-a-time targets differ by
+≤ 0.13 (bf16 batch rounding, §6).
+
+**Step 4: surrogate (`fit_surrogate`).** The reference's
+`LassoRegression.fit`, with scikit-learn: StandardScaler on the 0/1 masks,
+Lasso(α = 0.01) with an intercept, weights and bias mapped back to the 0/1
+scale (w = coef / scale, b = intercept − (mean / scale)·coef). The
+reference divides the target by the response's token count and multiplies
+back; our target is one decision, so that count is 1. Checked on three
+rows with 64 fitting masks and 32 held-out ones (seed 64), 0.6B λ = 0.01
+adapter:
+
+| row | sentences | nonzero w | LDS (held-out Spearman) | top weights vs gold sentences |
+|---|---|---|---|---|
+| ContractNLI | 181 | 59 | 0.82 | top-1 (w = 1.92) is the one gold sentence |
+| ProofWriter | 20 | 19 | 0.91 | top-1 (w = 3.28) is the one gold sentence |
+| MuSiQue | 93 | 41 | 0.73 | 2 of the top 5 are in the 9 gold sentences (2 paragraphs) |
+
+**Step 5a: one call (`attribute`).** The reference's `get_attributions`:
+predict on the full row (argmax of `answers.score`, options in release
+order), split, draw `num_ablations` masks (64), compute the targets, fit.
+Returns the answer index, its q, every source with its weight `w` (how
+much keeping that sentence adds to logit q(answer)) and the intercept. On
+the ContractNLI row above (181 sentences, ~6 s on one GPU) the model
+answers "entailed" (q = 0.72, correct); the top sentence is the annotated
+one and the next two come from the same clause.
+
+**Step 5b: spans and scores (`select`, `gold_sentences`, `span_metrics`).**
+`select` returns the k highest-weighted sentences with w > 0 (k = 3 by
+default) in the row's span format. A sentence is gold if it overlaps any
+gold span (ContractNLI's spans are often clauses). `span_metrics` scores
+one row: precision, recall and F_β = (1+β²)PR / (β²P + R) of the top-k
+selection (β < 1 favours precision, β = 1 is F1), average precision of the
+whole weight ranking (threshold-free; ties, e.g. the many zero weights,
+broken by sentence order) and whether the top sentence is gold. 20 eval
+rows per span dataset, 0.6B λ = 0.01, 64 ablations, k = 3 (103 s in all):
+
+| dataset | answer correct | P@3 | R@3 | F1 | F0.5 | AP | AP of a random ranking | top-1 gold |
+|---|---|---|---|---|---|---|---|---|
+| ContractNLI | 0.85 | 0.25 | 0.45 | 0.30 | 0.26 | 0.44 | 0.03 | 0.50 |
+| ProofWriter | 0.90 | 0.57 | 0.51 | 0.48 | 0.51 | 0.68 | 0.22 | 0.85 |
+| MuSiQue | 0.60 | 0.33 | 0.07 | 0.12 | 0.19 | 0.26 | 0.15 | 0.50 |
+
+The attributed answer is the prediction, right or wrong (40% wrong on
+MuSiQue). MuSiQue's gold is two whole paragraphs (~9 sentences), so 3
+sentences can recall at most a third of it.
+
+## 8. Learned attribution: AT2 (`modeling/at2.py`)
+
+AT2 (Cohen-Wang et al., 2025, arXiv 2504.13752;
+github.com/MadryLab/AT2, MIT) replaces ContextCite's per-row ablations at
+inference with a learned linear model over the LM's own attention: a
+source's score is Σ_{layer, head} θ_lh · (attention from the answer's
+positions to the source's tokens), averaged over answer positions and
+summed over the source's tokens. θ (layers × heads values, 448 for
+Qwen3-0.6B, initialised to their average) is fitted on precomputed
+ablations of training rows: for each row, 32 masks (each sentence kept with
+probability ½) and their targets; the loss is the negative Pearson
+correlation, across a row's masks, between the summed scores of the kept
+sentences and the answer's logit q. The reference trains with Adam (lr
+1e-3, cosine schedule, 1,000 steps of 512 rows, gradient clip 1) and
+L1-normalises θ afterwards. As with ContextCite (§7), the attributed answer
+is the model's own prediction and the target is logit q of the trie.
+
+**Step 1: attention (`attention_weights`).** `[L, H, Q, N]` attention
+probabilities from Q query positions to all N tokens, for every layer and
+head, for Qwen3 (all full attention). One forward pass with the model's own
+sdpa attention; forward hooks on each layer's `q_norm` / `k_norm` keep the
+normalised queries of the Q rows and all keys, then RoPE and a causal
+softmax give the Q rows of each attention matrix. The reference's
+`get_attention_weights` recomputes q and k from the hidden states instead;
+the hooks avoid that (2,827 tokens: 51 ms against 42 ms for the bare
+forward pass, where recomputing took 68 ms), and the N × N matrix is never
+stored. The query rows for an answer are the positions whose logits predict
+its suffix tokens (`ex["path"]` positions). Checked in fp32 against the
+model's own eager attention (the reference's `test_attention.py`) on a
+ProofWriter (213 tokens) and a MuSiQue (2,827 tokens) row: largest
+difference 7.5e-6. In bf16 the replay differs by up to 0.02 (mean 4e-5)
+because the model rounds the scaled scores to bf16 before its softmax while
+the replay scales in fp32.
+
+**Step 2: sentence tokens (`source_token_ranges`).** Each ContextCite
+sentence's `[start, end)` token range in the prompt. The prompt is
+`answers.build_prompt` with options in release order (the tokens
+`answers.encode` produces without shuffling); its part offsets place the
+sentence's char range in the prompt. As the reference: from the token
+holding the sentence's first character to the one holding its last
+(`char_to_token`), so a token straddling two sentences belongs to both.
+Checked on 40 eval rows per dataset (29,194 sentences): every decoded range
+contains its sentence, every prompt matches `answers.encode`, and 7 tokens
+(all MuSiQue) are shared by neighbouring sentences.
+
+**Step 3: features (`source_features`).** `[S, L·H]` per row: the
+attention from step 1 averaged over the answer's positions and summed over
+each sentence's tokens (step 2), feature l·H + h being layer l, head h (the
+reference's `features_by_target_source`); 448 features for Qwen3-0.6B. A
+cumulative sum gives the per-sentence sums (equal to direct slicing to
+2e-7). The query positions are those predicting the attributed answer's
+suffix, so the prompt is followed by the **predicted** suffix, not the gold
+one `answers.encode` appends. Untrained AT2 (uniform θ) is the paper's
+"average attention" baseline; on the 20 rows per dataset of §7 step 5b its
+average precision is 0.10 (ContractNLI), 0.20 (MuSiQue), 0.41
+(ProofWriter), against 0.03 / 0.15 / 0.22 for a random ranking and
+0.44 / 0.26 / 0.68 for ContextCite.
+
+**Step 4: training data (`example_data`, `dataloader/at2_data.py`).** Per row:
+the predicted answer (`context_cite.predict`), the features Φ of the
+unablated prompt followed by that answer's suffix, 32 masks and their
+targets (`context_cite.ablation_targets`); stored as X = (2V − 1)Φ
+(32 × 448, float16) and y (32), so training never needs the LM. 2,000
+training rows with at least two sentences, 250 from each of 8 datasets
+(PIQA rows almost never have two), from the 0.6B λ = 0.01 adapter. About
+0.9 s per row: 80–85% of a long row is scoring the 32 ablated prompts
+(MuSiQue ≈ 40k prompt tokens per row).
+
+**Step 5: estimator and loss (`ScoreEstimator`, `losses.pearson_loss`).**
+The reference's `LinearScoreEstimator` (`nn.Linear(448, 1, bias=False)`
+initialised to 1/448; `theta()` returns it L1-normalised) and its
+`PearsonCorrelationLoss`: −mean over rows of the Pearson correlation, across
+masks, between X θ and y. Checked: the loss is −1 for p vs 3p + 1 and +1
+for p vs −p; on synthetic data with a known θ the fit reaches 0.99 on
+held-out rows.
+
+**Step 6: training (`train/train_at2.py`).** As the reference's trainer:
+batches of 512 rows without replacement, Adam (lr 1e-3, cosine schedule),
+1,000 steps, gradient clipping at 1; 10% of rows held out to report the
+Pearson correlation on unseen rows; θ saved to `theta.pt`.
+`at2.attribute(model, tok, row, theta)` scores a row's sentences from one
+forward pass, in `context_cite.attribute`'s format, and
+`evaluation/attribution.py` scores both against the gold spans with
+`span_metrics`.

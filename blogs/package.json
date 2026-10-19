@@ -10,10 +10,12 @@
     "preview": "vite preview",
     "data:trie": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-3} PYTHONPATH=src .venv/bin/python blogs/export_trie.py",
     "data:anchors": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-3} PYTHONPATH=src .venv/bin/python blogs/export_anchors.py",
-    "data:contextcite": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-3} PYTHONPATH=src .venv/bin/python blogs/export_contextcite.py"
+    "data:contextcite": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-3} PYTHONPATH=src .venv/bin/python blogs/export_contextcite.py",
+    "data:at2": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-3} PYTHONPATH=src .venv/bin/python blogs/export_at2.py"
   },
   "dependencies": {
     "framer-motion": "11.11.17",
+    "katex": "^0.16.11",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
