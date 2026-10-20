@@ -52,7 +52,7 @@ def curves(adapter: str) -> list[list[float]]:
 
 def with_off_path(ex: dict, tok, seed: int = 0) -> dict:
     """ex plus OFF_PATH off-path nodes, sampled as answers.encode does."""
-    _, nodes = answers._candidates(tok, ex["n_options"])
+    _, nodes = answers.candidates(tok, ex["n_options"])
     gold = [g for _, _, g in ex["path"]]
     on = {tuple(gold[:t]) for t in range(len(gold))}
     off = [n for n in nodes if n not in on]

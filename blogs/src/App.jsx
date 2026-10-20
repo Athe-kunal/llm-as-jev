@@ -4,6 +4,8 @@ import Anchors from "./sections/Anchors.jsx";
 import FinalLoss from "./sections/FinalLoss.jsx";
 import ContextCite from "./sections/ContextCite.jsx";
 import AT2 from "./sections/AT2.jsx";
+import TryIt from "./sections/TryIt.jsx";
+import SpanPipeline from "./sections/SpanPipeline.jsx";
 
 // Sections in reading order; later ones are added as the walkthrough grows.
 const SECTIONS = [
@@ -13,6 +15,8 @@ const SECTIONS = [
   { n: 4, title: "Final loss", id: "final", ready: true },
   { n: 5, title: "ContextCite", id: "contextcite", ready: true },
   { n: 6, title: "AT2", id: "at2", ready: true },
+  { n: 7, title: "Try it", id: "try", ready: true },
+  { n: 8, title: "Span data", id: "spans", ready: true },
 ];
 
 export default function App() {
@@ -40,6 +44,8 @@ export default function App() {
       <FinalLoss />
       <ContextCite />
       <AT2 />
+      <TryIt />
+      <SpanPipeline />
     </div>
   );
 }

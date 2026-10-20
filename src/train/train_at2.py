@@ -23,6 +23,18 @@ from modeling import at2
 from train import losses
 
 
+def split(Y: torch.Tensor, val_frac: float, seed: int):
+    """The rows kept (targets that vary across masks: Pearson needs it) and a
+    seeded train / held-out split of them, shared with train.train_citation so
+    both are scored on the same rows. Returns (keep [R] bool, train indices,
+    held-out indices, the generator for later shuffling)."""
+    keep = Y.std(1) > 0
+    gen = torch.Generator().manual_seed(seed)
+    perm = torch.randperm(int(keep.sum()), generator=gen)
+    n_val = int(len(perm) * val_frac)
+    return keep, perm[n_val:], perm[:n_val], gen
+
+
 def main() -> None:
     """Writes <out>/theta.pt and <out>/train_at2.log."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -43,12 +55,8 @@ def main() -> None:
     d = np.load(args.data)
     X = torch.tensor(d["features"], dtype=torch.float32)                      # [R, M, F]
     Y = torch.tensor(d["targets"], dtype=torch.float32)                       # [R, M]
-    keep = Y.std(1) > 0                                                        # Pearson needs varying targets
+    keep, tr, val, gen = split(Y, args.val_frac, args.seed)
     X, Y, sources = X[keep], Y[keep], d["sources"][keep.numpy()]
-    gen = torch.Generator().manual_seed(args.seed)
-    perm = torch.randperm(len(Y), generator=gen)
-    n_val = int(len(Y) * args.val_frac)
-    val, tr = perm[:n_val], perm[n_val:]
     logger.info("{} rows ({} without target variance dropped): {} train, {} val; {} masks, {} features",
                 len(Y), int((~keep).sum()), len(tr), len(val), X.shape[1], X.shape[2])
     X, Y = X.to(args.device), Y.to(args.device)

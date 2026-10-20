@@ -82,7 +82,7 @@ def main() -> None:
     ex = answers.encode(row, tok, None)
     order = list(row["labels"])
     prompt = ex["input_ids"][: ex["path"][0][0] + 1]
-    suffixes, nodes = answers._candidates(tok, len(order))
+    suffixes, nodes = answers.candidates(tok, len(order))
     segs, n_tokens = segments(row, order, tok)
 
     models = {}

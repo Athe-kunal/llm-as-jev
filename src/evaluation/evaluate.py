@@ -8,11 +8,12 @@ Usage (a trained run, or the base model without --adapter):
 (data.load_rows); external benchmarks are in benchmarks.py.
 
 Metrics per dataset (and their mean, "ALL"): accuracy of argmax s_k (Eq. 1),
-mean log P(gold), the root's legal mass, and text mode on a subset (the
-paper's check: greedy generation after "Best answer: [", up to 32 tokens):
-the share that starts with a valid "k]", is correct, and ends right after
-the "]". Writes eval_<tag>.json and eval_<tag>_examples.jsonl (one record
-per text-mode row, for reading the outputs by hand).
+mean log P(gold), the root's legal mass, and text mode on a subset:
+unguided greedy generation after "Best answer: [", stopped at the first
+"]" and capped at the longest suffix's length (a decision model writes
+nothing after its answer): the share that is a valid "k]" and the share
+that is correct. Writes eval_<tag>.json and eval_<tag>_examples.jsonl (one
+record per text-mode row, for reading the outputs by hand).
 """
 
 import argparse
@@ -85,9 +86,12 @@ def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
             st["root_legal_mass"] += mass
             if id(r) not in gen_ids:
                 continue
+            # unguided greedy text, stopped at "]": at most the longest
+            # suffix's length, never past the answer
+            longest = max(map(len, answers.candidates(tok, ex["n_options"])[0]))
             out = model.generate(
-                torch.tensor([prompt], device=device), max_new_tokens=32,
-                do_sample=False, eos_token_id=stop,
+                torch.tensor([prompt], device=device), max_new_tokens=longest,
+                do_sample=False, eos_token_id=stop, stop_strings=["]"], tokenizer=tok,
                 pad_token_id=tok.pad_token_id, use_cache=True,
             )[0, len(prompt):].tolist()
             text = tok.decode([t for t in out if t not in stop])
@@ -95,8 +99,6 @@ def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
             ok = bool(m) and 1 <= int(m.group(1)) <= ex["n_options"]
             st["gen_rows"] += 1
             st["gen_valid"] += float(ok)
-            st["gen_ends_after_bracket"] += float(ok and text == m.group(0)
-                                                  and out[-1] in stop)
             st["gen_correct"] += float(ok and int(m.group(1)) == ex["gold"] + 1)
             options = [r["labels"][label] for label in r["labels"]]
             top = torch.softmax(s, 0).topk(min(3, len(options)))
@@ -164,10 +166,7 @@ def main() -> None:
     rows = subset(data.load_rows(args.data, args.split), args.eval_per,
                   args.seed)
     gen_rows = subset(rows, args.gen_per, args.seed)
-    if args.adapter:
-        model = modeling.load_trained(args.model, args.adapter)
-    else:
-        model = modeling.load_base(args.model).to("cuda").eval()
+    model = modeling.load(args.model, args.adapter, merge=False)
     metrics, examples = evaluate(model, tok, rows, gen_rows, "cuda")
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

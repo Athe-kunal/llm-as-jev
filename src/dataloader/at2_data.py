@@ -1,7 +1,7 @@
 """Builds AT2's training data: per-row ablation features and targets.
 
 Usage:
-  CUDA_VISIBLE_DEVICES=3 PYTHONPATH=src .venv/bin/python -m train.at2_data \
+  CUDA_VISIBLE_DEVICES=3 PYTHONPATH=src .venv/bin/python -m dataloader.at2_data \
       --model Qwen/Qwen3-0.6B --adapter runs/qwen3_0.6b_lam0.01/adapter \
       --out runs/at2_qwen3_0.6b/data.npz
 
@@ -58,8 +58,7 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     logger.add(out.with_suffix(".log"))
     tok = AutoTokenizer.from_pretrained(args.model)
-    model = (modeling.load_trained(args.model, args.adapter).merge_and_unload() if args.adapter
-             else modeling.load_base(args.model).to("cuda").eval())
+    model = modeling.load(args.model, args.adapter)
     rows = sample_rows(data.load_rows(args.data, args.split), args.rows, args.seed)
     logger.info("{} rows: {}", len(rows), dict(collections.Counter(r["source"] for r in rows)))
     feats, targets = [], []

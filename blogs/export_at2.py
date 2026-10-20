@@ -19,7 +19,7 @@ import torch
 import transformers
 from loguru import logger
 
-from dataloader import answers, data
+from dataloader import data
 from modeling import at2, context_cite as cc, modeling
 
 _HERE = pathlib.Path(__file__).parent
@@ -33,11 +33,10 @@ _EVAL = pathlib.Path("runs/at2_qwen3_0.6b/eval_attribution.json")
 def main() -> None:
     """Writes data/at2.json."""
     tok = transformers.AutoTokenizer.from_pretrained(_MODEL)
-    model = modeling.load_trained(_MODEL, _ADAPTER).merge_and_unload()
+    model = modeling.load(_MODEL, _ADAPTER)
     row = next(r for r in data.load_rows(split="eval") if r["source"] == "contractnli" and r["spans"])
     prompt, answer, _ = cc.predict(model, tok, row)
-    suffix = answers._candidates(tok, len(row["labels"]))[0][answer]
-    queries = list(range(len(prompt) - 1, len(prompt) - 1 + len(suffix)))
+    suffix, queries = cc.answer_positions(tok, row, prompt, answer)
     sources = cc.split_sources(row)
     ranges = at2.source_token_ranges(row, tok, sources)
     attn = at2.attention_weights(model, prompt + suffix, queries)              # [L, H, Q, N]

@@ -10,10 +10,8 @@ spans; the table scores 20 eval rows per span dataset. Writes
 blogs/data/contextcite.json (real dataset rows: git-ignored, local only).
 """
 
-import collections
 import json
 import pathlib
-import random
 import time
 
 import numpy as np
@@ -24,7 +22,8 @@ from sklearn.linear_model import Lasso
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from dataloader import answers, data
+from dataloader import data
+from evaluation import attribution
 from modeling import context_cite as cc, modeling
 
 _HERE = pathlib.Path(__file__).parent
@@ -40,7 +39,7 @@ def spearman(a, b) -> float:
 def main() -> None:
     """Writes data/contextcite.json."""
     tok = transformers.AutoTokenizer.from_pretrained(_MODEL)
-    model = modeling.load_trained(_MODEL, _ADAPTER).merge_and_unload()
+    model = modeling.load(_MODEL, _ADAPTER)
     rows = data.load_rows(split="eval")
     row = next(r for r in rows if r["source"] == "contractnli" and r["spans"])
 
@@ -80,23 +79,10 @@ def main() -> None:
     # one ablation drawn out: which sentences the first mask keeps, and the prompt it gives
     example = cc.ablate(row, sources, V[0])
 
-    # eval table: 20 rows per span dataset, as docs/architecture.md §7 step 5b
-    by = collections.defaultdict(list)
-    for r in rows:
-        if r["spans"]:
-            by[r["source"]].append(r)
-    table = {}
-    for src, rs in sorted(by.items()):
-        m = collections.defaultdict(list)
-        for r in random.Random(0).sample(rs, min(20, len(rs))):
-            res = cc.attribute(model, tok, r)
-            met = cc.span_metrics(r, res, k=3, beta=1.0)
-            for key, v in met.items():
-                m[key].append(v)
-            m["random_ap"].append(len(cc.gold_sentences(r, res["sources"])) / len(res["sources"]))
-            m["correct"].append(res["answer"] == list(r["labels"]).index(r["label"]))
-            m["sentences"].append(len(res["sources"]))
-        table[src] = {k: float(np.mean(v)) for k, v in m.items()}
+    # eval table: the same 20 rows per span dataset as evaluation/attribution.py
+    table = {src: attribution.score(lambda r: cc.attribute(model, tok, r), sample)
+             for src, sample in attribution.span_rows(rows, 20).items()}
+    for src in table:
         logger.info("{}: {}", src, {k: round(v, 2) for k, v in table[src].items()})
 
     options = [row["labels"][k] for k in row["labels"]]

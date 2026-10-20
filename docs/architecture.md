@@ -263,12 +263,16 @@ in-domain `eval.jsonl` (the paper evaluates on external benchmarks only):
 
 - accuracy of argmax s_k (Eq. 1), mean log P(gold), mean legal mass at the
   root;
-- text mode on 20 rows per dataset: greedy generation of up to 32 tokens
-  after `Best answer: [`; the share that starts with a valid `k]`
-  (`gen_valid`), that is correct, and that ends right after the `]`
-  (`gen_ends_after_bracket`). Base Qwen3-0.6B usually continues after the
-  bracket (e.g. `44] balance`, `1]\n\n**Explanation:** …`), so the last
-  number is compared with the base model's, not with 1.
+- text mode on 20 rows per dataset: unguided greedy generation after
+  `Best answer: [`, stopped at the first `]` (`stop_strings`) and capped at
+  the longest suffix's length, so nothing is generated after the answer; the
+  share that is a valid `k]` (`gen_valid`) and the share that is correct
+  (`gen_correct`). Answers themselves always come from the guided decoder
+  (§6), which ends at the trie's leaf. Until 2026-10-19 text mode generated
+  up to 32 tokens and also reported `gen_ends_after_bracket` (whether the
+  reply ended right after `]`; runs before that date carry it); it was
+  dropped because a decision model should never spend tokens after its
+  answer.
 
 Cost (Qwen3.5-4B, one GPU): 47.2M training tokens per epoch including the
 off-path sequences; the longest row (8,851 tokens, 4 sequences) takes 16.5 s
@@ -521,3 +525,22 @@ Pearson correlation on unseen rows; θ saved to `theta.pt`.
 forward pass, in `context_cite.attribute`'s format, and
 `evaluation/attribution.py` scores both against the gold spans with
 `span_metrics`.
+
+**Results (merged sources, 0.6B λ = 0.01, 20 eval rows per span dataset).**
+θ trained on 2,000 rows: the Pearson correlation with held-out ablation
+targets goes from 0.21 (uniform θ) to 0.27 (train 0.38; per dataset 0.04
+QuALITY to 0.44 αNLI). Average precision against gold sentences, before →
+after content merging (sources changed, so the random baseline shifts too,
+e.g. ContractNLI 0.03 → 0.04):
+
+| AP | average attention | AT2 | ContextCite | s/row: AT2 / ContextCite |
+|---|---|---|---|---|
+| ContractNLI | 0.10 → 0.12 | 0.37 → 0.32 | 0.44 → 0.51 | 0.18 / 2.5 |
+| MuSiQue | 0.20 → 0.21 | 0.30 → 0.31 | 0.26 → 0.25 | 0.14 / 2.2 |
+| ProofWriter | 0.41 → 0.41 | 0.48 → 0.48 | 0.68 → 0.68 | 0.11 / 0.4 |
+
+Merging helps ContextCite on ContractNLI (top-1 gold 0.50 → 0.60) and
+changes little elsewhere (few merges). AT2 recovers most of ContextCite's
+AP on ContractNLI and MuSiQue at 5–15× less time per row but stays well
+below it on ProofWriter (top-1 0.40 vs 0.85); with 20 rows per dataset,
+differences under ~0.05 are noise.

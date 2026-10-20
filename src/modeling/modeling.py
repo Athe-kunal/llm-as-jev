@@ -41,6 +41,15 @@ def load_trained(model_id: str, adapter: str, device: str = "cuda"):
     return PeftModel.from_pretrained(base, adapter).eval()
 
 
+def load(model_id: str, adapter: str | None = None, merge: bool = True, device: str = "cuda"):
+    """A model for inference, in eval mode on device: the base model, or with
+    a saved LoRA adapter, merged into the weights unless merge=False."""
+    if adapter is None:
+        return load_base(model_id).to(device).eval()
+    model = load_trained(model_id, adapter, device)
+    return model.merge_and_unload() if merge else model
+
+
 def batched_hidden(model, seqs: list[list[int]], device: str, pad: int):
     """Last-layer states and last-position logits for several sequences.
 

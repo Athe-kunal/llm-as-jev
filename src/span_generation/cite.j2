@@ -1,0 +1,11 @@
+Below is a context split into numbered sentences, a question, and its correct answer.
+
+Context:
+{% for s in sentences %}
+[{{ loop.index }}] {{ s }}
+{% endfor %}
+
+{{ question }}
+Correct answer: {{ answer }}
+
+Which sentences are the evidence for this answer? Cite the smallest set of sentences that, read on their own, lets a reader reach the answer, and without which the answer is no longer supported. Reply with JSON only: {"sentences": [numbers]}.

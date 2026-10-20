@@ -80,6 +80,13 @@ def source_token_ranges(row: dict, tok, sources: list[dict]) -> list[tuple[int, 
     return out
 
 
+def range_sums(x: torch.Tensor, ranges: list[tuple[int, int]]) -> torch.Tensor:
+    """Sums of x [N, ...] over each [a, b) range of its first dimension -> [S, ...]
+    (one cumulative sum, then differences)."""
+    cum = torch.cat([x.new_zeros(1, *x.shape[1:]), x.cumsum(0)])
+    return torch.stack([cum[b] - cum[a] for a, b in ranges])
+
+
 def source_features(attn: torch.Tensor, ranges: list[tuple[int, int]]) -> torch.Tensor:
     """[S, L*H]: each source's attention features (the reference's
     features_by_target_source).
@@ -88,9 +95,7 @@ def source_features(attn: torch.Tensor, ranges: list[tuple[int, int]]) -> torch.
     positions and summed over each source's tokens; feature l*H + h is layer
     l, head h, as the reference orders them.
     """
-    per_token = attn.mean(2).flatten(0, 1).T                                   # [N, L*H]
-    cum = torch.cat([per_token.new_zeros(1, per_token.shape[1]), per_token.cumsum(0)])
-    return torch.stack([cum[b] - cum[a] for a, b in ranges])                   # [S, L*H]
+    return range_sums(attn.mean(2).flatten(0, 1).T, ranges)                    # [N, L*H] -> [S, L*H]
 
 
 def example_data(model, tok, row: dict, num_masks: int = 32, seed: int = 0,
@@ -106,8 +111,7 @@ def example_data(model, tok, row: dict, num_masks: int = 32, seed: int = 0,
     out.
     """
     prompt, answer, _ = context_cite.predict(model, tok, row, device)
-    suffix = answers._candidates(tok, len(row["labels"]))[0][answer]
-    queries = list(range(len(prompt) - 1, len(prompt) - 1 + len(suffix)))
+    suffix, queries = context_cite.answer_positions(tok, row, prompt, answer)
     sources = context_cite.split_sources(row)
     feats = source_features(attention_weights(model, prompt + suffix, queries, device),
                             source_token_ranges(row, tok, sources))                # [S, L*H]
@@ -144,8 +148,7 @@ def attribute(model, tok, row: dict, theta: torch.Tensor, device: str = "cuda") 
     "sources" each with its score "w"}. One forward pass: the attention from
     the predicted answer's positions, scored with theta."""
     prompt, answer, s = context_cite.predict(model, tok, row, device)
-    suffix = answers._candidates(tok, len(row["labels"]))[0][answer]
-    queries = list(range(len(prompt) - 1, len(prompt) - 1 + len(suffix)))
+    suffix, queries = context_cite.answer_positions(tok, row, prompt, answer)
     sources = context_cite.split_sources(row)
     phi = source_features(attention_weights(model, prompt + suffix, queries, device),
                           source_token_ranges(row, tok, sources))                  # [S, L*H]

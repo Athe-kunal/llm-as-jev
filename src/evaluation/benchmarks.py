@@ -185,11 +185,8 @@ def main() -> None:
                                           for n in args.benchmarks})
     gen_rows = evaluate.subset(rows, args.gen_per, SEED)
     tok = AutoTokenizer.from_pretrained(args.model)
-    if args.adapter:
-        # merged into the weights: no per-layer adapter calls at inference
-        model = modeling.load_trained(args.model, args.adapter).merge_and_unload()
-    else:
-        model = modeling.load_base(args.model).to("cuda").eval()
+    # an adapter is merged into the weights: no per-layer adapter calls at inference
+    model = modeling.load(args.model, args.adapter)
     metrics, examples = evaluate.evaluate(model, tok, rows, gen_rows, "cuda",
                                          args.batch_tokens, args.batch_rows)
     ext = [metrics[n]["accuracy"] for n in EXTERNAL if n in metrics]

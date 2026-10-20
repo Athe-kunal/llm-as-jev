@@ -184,6 +184,13 @@ def predict(model, tok, row: dict[str, Any], device: str = "cuda") -> tuple[list
     return prompt, int(s.argmax()), s
 
 
+def answer_positions(tok, row: dict[str, Any], prompt: list[int], answer: int) -> tuple[list[int], list[int]]:
+    """Option `answer`'s suffix tokens ("k]") and the positions whose logits
+    predict them, in the prompt followed by that suffix."""
+    suffix = answers.candidates(tok, len(row["labels"]))[0][answer]
+    return suffix, list(range(len(prompt) - 1, len(prompt) - 1 + len(suffix)))
+
+
 def attribute(model, tok, row: dict[str, Any], num_ablations: int = 64, keep_prob: float = 0.5,
               alpha: float = 0.01, seed: int = 0, device: str = "cuda") -> dict[str, Any]:
     """ContextCite on one row (the reference's get_attributions).
@@ -203,16 +210,22 @@ def attribute(model, tok, row: dict[str, Any], num_ablations: int = 64, keep_pro
             "sources": [{**src, "w": float(v)} for src, v in zip(sources, w)], "bias": b}
 
 
-def select(row: dict[str, Any], result: dict[str, Any], k: int = 3) -> list[dict[str, Any]]:
-    """The predicted evidence: the k highest-weighted sentences with w > 0,
-    in the row's span format {"part": part name, "start", "end", "text"}."""
-    top = sorted((s for s in result["sources"] if s["w"] > 0), key=lambda s: -s["w"])[:k]
+def to_spans(row: dict[str, Any], sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sources in the row's span format {"part": part name, "start", "end",
+    "text"}, in document order."""
     out = []
-    for s in sorted(top, key=lambda s: (s["part"], s["start"])):
+    for s in sorted(sources, key=lambda s: (s["part"], s["start"])):
         part = row["parts"][s["part"]]
         out.append({"part": part["name"], "start": s["start"], "end": s["end"],
                     "text": part["text"][s["start"]:s["end"]]})
     return out
+
+
+def select(row: dict[str, Any], result: dict[str, Any], k: int = 3) -> list[dict[str, Any]]:
+    """The predicted evidence: the k highest-weighted sentences with w > 0,
+    in the row's span format (to_spans)."""
+    top = sorted((s for s in result["sources"] if s["w"] > 0), key=lambda s: -s["w"])[:k]
+    return to_spans(row, top)
 
 
 def gold_sentences(row: dict[str, Any], sources: list[dict[str, Any]]) -> set[int]:

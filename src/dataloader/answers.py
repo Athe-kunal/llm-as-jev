@@ -90,7 +90,7 @@ def trie(suffixes: list[list[int]]) -> dict[tuple[int, ...], list[int]]:
 
 
 @functools.cache
-def _candidates(tokenizer: Any, k: int):
+def candidates(tokenizer: Any, k: int):
     """suffix_ids and their trie, once per tokenizer and option count."""
     suffixes = suffix_ids(tokenizer, k)
     return suffixes, trie(suffixes)
@@ -122,7 +122,7 @@ def encode(row: dict[str, Any], tokenizer: Any, rng: random.Random | None):
         rng.shuffle(order)
     text, _ = build_prompt(row, order, tokenizer)
     prompt = tokenizer(text, add_special_tokens=False)["input_ids"]
-    suffixes, nodes = _candidates(tokenizer, len(order))
+    suffixes, nodes = candidates(tokenizer, len(order))
     gold = order.index(row["label"])
     s = suffixes[gold]
     path = [
@@ -200,7 +200,7 @@ def score_batch(model, prompts: list[list[int]], tokenizer: Any,
                 use_cache=True, logits_to_keep=1)
     root = torch.log_softmax(out.logits[:, -1].float(), -1)             # [B, V]
     logp = [{(): lp} for lp in root]
-    tries = [_candidates(tokenizer, k) for k in ks]
+    tries = [candidates(tokenizer, k) for k in ks]
     depths: dict[int, list] = {}
     for i, (_, nodes) in enumerate(tries):
         for node in nodes:
