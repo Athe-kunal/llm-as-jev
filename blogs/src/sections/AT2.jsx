@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import t from "../../data/at2.json";
 import c from "../../data/contextcite.json";
 import { Stepper, Toggle } from "../components/Controls.jsx";
-import { Doc, Part, Tex } from "../components/Math.jsx";
+import { Doc, Part, Tex, TokenDoc } from "../components/Math.jsx";
 
 const S = c.sentences;
 const d = S.length;
@@ -256,11 +256,47 @@ function Visual({ step, sel, setSel, scale, setScale }) {
     <div className="cc2">
       <span className="viz-label">learned θ (layers × heads)</span>
       <Heat values={t.theta} diverging unit="weight" />
-      <span className="viz-label">trained scores over the document</span>
-      <Doc sentences={S} value={t.trained} maxHeight={260} />
+      <TrainedView />
     </div>
   ) : (
     <div className="pending">training data in progress; the learned weights appear here after training</div>
+  );
+}
+
+/** The trained θ's scores on the worked row: per token (as the paper) or summed per sentence. */
+function TrainedView() {
+  const [view, setView] = useState("tokens");
+  const tokens = t.tokenScores ?? [];
+  const top = new Set([...tokens].sort((a, b) => b.w - a.w).slice(0, 10).map((x) => x.index));
+  const gold = S.flatMap((s, j) => (s.gold ? [j] : []));
+  // gold char ranges for the token view, rebuilt from the sentences' order in the part
+  const ranges = [];
+  let at = 0;
+  S.forEach((s, j) => {
+    const start = t.partText.indexOf(s.text, at);
+    if (start >= 0) {
+      if (gold.includes(j)) ranges.push({ start, end: start + s.text.length });
+      at = start + s.text.length;
+    }
+  });
+  return (
+    <>
+      <div className="heat-head">
+        <span className="viz-label">trained scores over the document</span>
+        {t.tokenScores && (
+          <div className="ex-tabs view-toggle" role="tablist" aria-label="Highlight">
+            {["tokens", "sentences"].map((v) => (
+              <button key={v} role="tab" aria-selected={v === view} onClick={() => setView(v)}>{v}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      {t.tokenScores && view === "tokens" ? (
+        <TokenDoc text={t.partText} tokens={tokens} top={top} gold={ranges} maxHeight={260} />
+      ) : (
+        <Doc sentences={S} value={t.trained} maxHeight={260} />
+      )}
+    </>
   );
 }
 

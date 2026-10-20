@@ -87,6 +87,23 @@ def range_sums(x: torch.Tensor, ranges: list[tuple[int, int]]) -> torch.Tensor:
     return torch.stack([cum[b] - cum[a] for a, b in ranges])
 
 
+def token_features(attn: torch.Tensor) -> torch.Tensor:
+    """[N, L*H]: each token's attention features, attn [L, H, Q, N] averaged
+    over the answer's Q positions; feature l*H + h is layer l, head h (the
+    reference's order). A token's AT2 score is theta . token_features."""
+    return attn.mean(2).flatten(0, 1).T
+
+
+def answer_attention(model, tok, row: dict, device: str = "cuda") -> dict:
+    """The model's predicted answer and the attention from its positions:
+    {"prompt", "answer", "s" (option scores), "attn" [L, H, Q, N]}, for the
+    prompt (options in release order) followed by the answer's suffix."""
+    prompt, answer, s = context_cite.predict(model, tok, row, device)
+    suffix, queries = context_cite.answer_positions(tok, row, prompt, answer)
+    return {"prompt": prompt, "answer": answer, "s": s,
+            "attn": attention_weights(model, prompt + suffix, queries, device)}
+
+
 def source_features(attn: torch.Tensor, ranges: list[tuple[int, int]]) -> torch.Tensor:
     """[S, L*H]: each source's attention features (the reference's
     features_by_target_source).
@@ -95,7 +112,7 @@ def source_features(attn: torch.Tensor, ranges: list[tuple[int, int]]) -> torch.
     positions and summed over each source's tokens; feature l*H + h is layer
     l, head h, as the reference orders them.
     """
-    return range_sums(attn.mean(2).flatten(0, 1).T, ranges)                    # [N, L*H] -> [S, L*H]
+    return range_sums(token_features(attn), ranges)                            # [N, L*H] -> [S, L*H]
 
 
 def example_data(model, tok, row: dict, num_masks: int = 32, seed: int = 0,
@@ -110,13 +127,11 @@ def example_data(model, tok, row: dict, num_masks: int = 32, seed: int = 0,
     surrogate's prediction is features @ theta and the sentence count drops
     out.
     """
-    prompt, answer, _ = context_cite.predict(model, tok, row, device)
-    suffix, queries = context_cite.answer_positions(tok, row, prompt, answer)
+    a = answer_attention(model, tok, row, device)
     sources = context_cite.split_sources(row)
-    feats = source_features(attention_weights(model, prompt + suffix, queries, device),
-                            source_token_ranges(row, tok, sources))                # [S, L*H]
+    feats = source_features(a["attn"], source_token_ranges(row, tok, sources))     # [S, L*H]
     masks = context_cite.ablation_masks(num_masks, len(sources), 0.5, seed)
-    y = context_cite.ablation_targets(model, tok, row, sources, masks, answer, device)
+    y = context_cite.ablation_targets(model, tok, row, sources, masks, a["answer"], device)
     signed = torch.tensor(masks, device=feats.device, dtype=feats.dtype) * 2 - 1    # [M, S]
     return signed @ feats, y
 
@@ -147,11 +162,34 @@ def attribute(model, tok, row: dict, theta: torch.Tensor, device: str = "cuda") 
     """AT2 on one row, in context_cite.attribute's format: {"answer", "q",
     "sources" each with its score "w"}. One forward pass: the attention from
     the predicted answer's positions, scored with theta."""
-    prompt, answer, s = context_cite.predict(model, tok, row, device)
-    suffix, queries = context_cite.answer_positions(tok, row, prompt, answer)
+    a = answer_attention(model, tok, row, device)
     sources = context_cite.split_sources(row)
-    phi = source_features(attention_weights(model, prompt + suffix, queries, device),
-                          source_token_ranges(row, tok, sources))                  # [S, L*H]
+    phi = source_features(a["attn"], source_token_ranges(row, tok, sources))      # [S, L*H]
     w = (phi @ theta.to(phi)).tolist()
-    return {"answer": answer, "q": torch.softmax(s.float(), 0)[answer].item(),
+    return {"answer": a["answer"], "q": torch.softmax(a["s"].float(), 0)[a["answer"]].item(),
             "sources": [{**src, "w": v} for src, v in zip(sources, w)]}
+
+
+@torch.no_grad()
+def token_scores(model, tok, row: dict, theta: torch.Tensor, device: str = "cuda") -> dict:
+    """AT2 per document token, as the paper attributes: theta . phi_i for every
+    token of the row's parts, with its char range in its part. AT2's score is
+    linear, so a sentence's score (attribute) is the sum of its tokens'
+    scores; theta was fitted on sentence ablations, not token ablations.
+    Returns {"answer", "tokens": [{"part", "index" (prompt position), "start",
+    "end", "w"}]}."""
+    a = answer_attention(model, tok, row, device)
+    w = (token_features(a["attn"]) @ theta.to(a["attn"].device).float()).tolist()   # [N]
+    text, where = answers.build_prompt(row, list(row["labels"]), tok)
+    enc = tok(text, add_special_tokens=False, return_offsets_mapping=True)
+    if enc["input_ids"] != a["prompt"]:
+        raise ValueError(f"{row['id']}: prompt tokens differ from answers.encode's")
+    tokens = []
+    for p, part in enumerate(row["parts"]):
+        lo, hi = where[part["name"]]
+        # every token overlapping the part, its range clipped to the part: a
+        # token that straddles the part's edge (" CALIFORNIA", ".\n\n") counts,
+        # as in source_token_ranges
+        tokens += [{"part": p, "index": i, "start": max(s, lo) - lo, "end": min(e, hi) - lo, "w": w[i]}
+                   for i, (s, e) in enumerate(enc["offset_mapping"]) if s < hi and e > lo]
+    return {"answer": a["answer"], "tokens": tokens}

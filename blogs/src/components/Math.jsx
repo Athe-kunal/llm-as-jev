@@ -50,3 +50,38 @@ export function Doc({ sentences, value = null, keep = null, selected = null, mar
     </div>
   );
 }
+
+/** One part's text with every token tinted by its score w (green +, red −),
+ *  scaled to the 99th percentile of |w| so a few attention-sink tokens do not
+ *  wash out the rest; tokens inside a gold range get the gold underline, the
+ *  `top` token indices are outlined, and the box scrolls to the first of them. */
+export function TokenDoc({ text, tokens, gold = [], top = new Set(), maxHeight = 380 }) {
+  const box = useRef(null);
+  const abs = tokens.map((t) => Math.abs(t.w)).sort((a, b) => a - b);
+  const scale = abs[Math.floor(0.99 * (abs.length - 1))] || 1e-12;
+  useEffect(() => {
+    const el = box.current?.querySelector(".tk.marked");
+    if (el) box.current.scrollTo({ top: Math.max(el.offsetTop - 40, 0), behavior: "smooth" });
+  }, [tokens]);
+  const out = [];
+  let cur = 0;
+  [...tokens].sort((a, b) => a.start - b.start).forEach((t, i) => {
+    if (t.start > cur) out.push(text.slice(cur, t.start));
+    const v = Math.max(-1, Math.min(1, t.w / scale));
+    const isGold = gold.some((g) => t.start < g.end && t.end > g.start);
+    out.push(
+      <span key={i} className={["tk", isGold ? "gold" : "", top.has(t.index) ? "marked" : ""].join(" ")}
+            title={`${t.w.toExponential(2)}`}
+            style={{ background: `color-mix(in srgb, ${v >= 0 ? "var(--c6)" : "var(--c5)"} ${Math.round(Math.abs(v) * 75)}%, transparent)` }}>
+        {text.slice(Math.max(t.start, cur), t.end)}
+      </span>,
+    );
+    cur = Math.max(cur, t.end);
+  });
+  if (cur < text.length) out.push(text.slice(cur));
+  return (
+    <div className="doc tokdoc" style={{ maxHeight }} ref={box}>
+      {out}
+    </div>
+  );
+}

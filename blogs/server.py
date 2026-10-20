@@ -7,7 +7,8 @@ Endpoints (the Vite dev server proxies /api here):
   GET /api/datasets                         eval datasets, their row counts and rows with gold spans
   GET /api/sample?source=&spans=1           a random eval row id
   GET /api/row?id=                          the row, the model's tree q, guided answer, sentences
-  GET /api/attribute?id=&method=at2|contextcite   one weight per sentence, top-k, span metrics
+  GET /api/attribute?id=&method=at2|contextcite   one weight per sentence, top-k, span metrics;
+                                                  AT2 also one score per document token
 """
 
 import argparse
@@ -77,8 +78,9 @@ def make_app() -> fastapi.FastAPI:
             "options": [r["labels"][k] for k in options], "gold": options.index(r["label"]),
             "answer": answer, "q": torch.softmax(s.float(), 0).tolist(),
             "parts": [p["name"] for p in r["parts"]], "hasSpans": bool(r["spans"]),
-            "sentences": [{"part": x["part"], "sep": x["sep"], "gold": j in gold,
-                           "text": r["parts"][x["part"]]["text"][x["start"]:x["end"]]}
+            "partTexts": [p["text"] for p in r["parts"]],
+            "sentences": [{"part": x["part"], "start": x["start"], "end": x["end"], "sep": x["sep"],
+                           "gold": j in gold, "text": r["parts"][x["part"]]["text"][x["start"]:x["end"]]}
                           for j, x in enumerate(sources)],
             "seconds": time.time() - t0,
         }
@@ -93,10 +95,12 @@ def make_app() -> fastapi.FastAPI:
         t0 = time.time()
         with gpu:
             res = at2.attribute(model, tok, r, theta) if method == "at2" else cc.attribute(model, tok, r)
+            # AT2 is linear in its token scores, so it can highlight tokens as the paper does
+            tokens = at2.token_scores(model, tok, r, theta)["tokens"] if method == "at2" else None
         seconds = time.time() - t0
         w = [x["w"] for x in res["sources"]]
         top = [j for j in sorted(range(len(w)), key=lambda j: -w[j])[:_K] if w[j] > 0]
-        return {"method": method, "w": w, "top": top, "seconds": seconds,
+        return {"method": method, "w": w, "top": top, "seconds": seconds, "tokens": tokens,
                 "metrics": cc.span_metrics(r, res, k=_K) if r["spans"] else None}
 
     @app.exception_handler(Exception)

@@ -544,3 +544,18 @@ changes little elsewhere (few merges). AT2 recovers most of ContextCite's
 AP on ContractNLI and MuSiQue at 5–15× less time per row but stays well
 below it on ProofWriter (top-1 0.40 vs 0.85); with 20 rows per dataset,
 differences under ~0.05 are noise.
+
+**Token-level scores (`token_features`, `token_scores`).** The paper
+attributes to individual tokens. AT2's score is linear, so a token's score
+is θ·φᵢ with φᵢ the token's attention features (`token_features`: attention
+averaged over the answer's positions), and a sentence's score is exactly
+the sum of its tokens' scores (checked: equal to 1e-7 on ContractNLI,
+MuSiQue and ProofWriter rows). `token_scores` returns every token of the
+row's parts with its char range, counting tokens that straddle a part's
+edge (" CALIFORNIA", ".\n\n") as `source_token_ranges` does. Our θ was
+fitted on sentence ablations, not token ablations as in the paper, so token
+scores show how the sentence-trained estimator distributes a sentence's
+score; in practice they concentrate on sentence-final punctuation and on
+the document's opening tokens (the position bias of §8's results).
+`answer_attention` (prediction + attention from its positions) is shared
+by `example_data`, `attribute` and `token_scores`.

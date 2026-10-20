@@ -74,6 +74,10 @@ def main() -> None:
         out["trained"] = (phi.cpu() @ theta).tolist()
         out["predTrained"] = (x.float().cpu() @ theta).tolist()
         out["pearsonTrained"] = pearson((x.float().cpu() @ theta).numpy(), y)
+        # token-level scores, as the paper highlights (a sentence's score is their sum)
+        out["partText"] = row["parts"][0]["text"]
+        out["tokenScores"] = [{**t, "w": round(t["w"], 9)} for t in at2.token_scores(model, tok, row, theta)["tokens"]
+                         if t["part"] == 0]
     path = _HERE / "data" / "at2.json"
     path.write_text(json.dumps(out))
     logger.info("wrote {} ({:.0f} KB): uniform Pearson {:.2f}", path, path.stat().st_size / 1024,

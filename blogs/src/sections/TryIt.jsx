@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Doc } from "../components/Math.jsx";
+import { Doc, TokenDoc } from "../components/Math.jsx";
 
 // The model behind /api (blogs/server.py): the 0.6B λ = 0.01 adapter AT2's θ was trained for.
 const MODEL = "Qwen3-0.6B, λ = 0.01 adapter";
@@ -135,8 +135,12 @@ function Answer({ row }) {
   );
 }
 
+const TOP_TOKENS = 10; // tokens outlined in the token view
+
 function Explain({ method, row, res }) {
   const loading = res === "loading" || res === undefined;
+  const [view, setView] = useState("tokens"); // AT2 only: tokens (as the paper) or sentences
+  const tokens = !loading && res.tokens;
   return (
     <div className="try-panel">
       <div className="try-head">
@@ -144,7 +148,16 @@ function Explain({ method, row, res }) {
           <h3>{method.name}</h3>
           <span className="viz-label">{method.note}</span>
         </div>
-        {res && res !== "loading" && res.w && <span className="try-time">{res.seconds.toFixed(2)} s</span>}
+        <div className="try-head-right">
+          {tokens && (
+            <div className="ex-tabs view-toggle" role="tablist" aria-label="Highlight">
+              {["tokens", "sentences"].map((v) => (
+                <button key={v} role="tab" aria-selected={v === view} onClick={() => setView(v)}>{v}</button>
+              ))}
+            </div>
+          )}
+          {res && res !== "loading" && res.w && <span className="try-time">{res.seconds.toFixed(2)} s</span>}
+        </div>
       </div>
       {loading ? (
         <div className="try-loading">
@@ -155,7 +168,9 @@ function Explain({ method, row, res }) {
       ) : (
         <>
           <Metrics m={res.metrics} />
-          {row.parts.map((name, p) => {
+          {tokens && view === "tokens" ? (
+            <TokenView row={row} tokens={tokens} />
+          ) : row.parts.map((name, p) => {
             const idx = row.sentences.flatMap((s, j) => (s.part === p ? [j] : []));
             if (!idx.length) return null;
             const local = new Set(idx.flatMap((j, i) => (res.top.includes(j) ? [i] : [])));
@@ -169,6 +184,23 @@ function Explain({ method, row, res }) {
         </>
       )}
     </div>
+  );
+}
+
+/** AT2's score for every document token, part by part; the top tokens outlined. */
+function TokenView({ row, tokens }) {
+  const top = new Set([...tokens].sort((a, b) => b.w - a.w).slice(0, TOP_TOKENS).map((t) => t.index));
+  return (
+    <>
+      <span className="viz-label">token scores θ·φᵢ; a sentence's score is the sum of its tokens'; top {TOP_TOKENS} outlined</span>
+      {row.partTexts.map((text, p) => (
+        <div key={p} className="try-part">
+          {row.parts.length > 1 && <span className="viz-label">{row.parts[p]}</span>}
+          <TokenDoc text={text} tokens={tokens.filter((t) => t.part === p)} top={top}
+                    gold={row.sentences.filter((s) => s.part === p && s.gold)} />
+        </div>
+      ))}
+    </>
   );
 }
 

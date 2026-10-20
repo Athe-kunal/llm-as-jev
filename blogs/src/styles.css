@@ -654,3 +654,10 @@ a.sec { text-decoration: none; }
 .pipe-detail p { margin: 0 0 10px; color: var(--fg); font-size: 14.5px; max-width: 85ch; }
 .pipe-meta { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--muted); }
 .pipe-meta b { color: var(--fg); font-weight: 600; margin-right: 6px; }
+.try-head-right { display: flex; align-items: center; gap: 10px; }
+.view-toggle { padding: 3px; }
+.view-toggle button { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
+.view-toggle button[aria-selected="true"] { background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
+.tokdoc .tk { border-radius: 2px; }
+.tokdoc .tk.gold { box-shadow: inset 0 -3px 0 var(--c2); }
+.tokdoc .tk.marked { outline: 2px solid var(--accent); outline-offset: 0; }
