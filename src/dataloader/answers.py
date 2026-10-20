@@ -220,17 +220,20 @@ def score_batch(model, prompts: list[list[int]], tokenizer: Any,
                 use_cache=True, logits_to_keep=1)
             for (i, node), lp in zip(chunk, torch.log_softmax(o.logits[:, -1].float(), -1)):
                 logp[i][node] = lp
-    results = []
-    for lp, (suffixes, nodes) in zip(logp, tries):
-        s = torch.stack([
-            sum(lp[tuple(x[:t])][x[t]] for t in range(len(x))) for x in suffixes
-        ])
-        node: tuple = ()
-        while node in nodes:  # greedy over the legal tokens, down to a leaf
-            node += (max(nodes[node], key=lambda t: lp[node][t].item()),)
-        results.append((s, lp[()][nodes[()]].exp().sum().item(),
-                        suffixes.index(list(node))))
-    return results
+    return [read_trie(lp, suffixes, nodes) for lp, (suffixes, nodes) in zip(logp, tries)]
+
+
+def read_trie(lp: dict[tuple[int, ...], torch.Tensor], suffixes: list[list[int]],
+              nodes: dict[tuple[int, ...], list[int]]) -> tuple:
+    """(s, root legal mass, decoded) from each trie node's next-token
+    log-probabilities lp[node] [V]: s_k sums the log-probabilities along
+    suffix k (Eq. 1); decoded takes the most likely legal token at each node
+    from the root until the closing "]"."""
+    s = torch.stack([sum(lp[tuple(x[:t])][x[t]] for t in range(len(x))) for x in suffixes])
+    node: tuple = ()
+    while node in nodes:  # greedy over the legal tokens, down to a leaf
+        node += (max(nodes[node], key=lambda t: lp[node][t].item()),)
+    return s, lp[()][nodes[()]].exp().sum().item(), suffixes.index(list(node))
 
 
 def score(model, prompt: list[int], tokenizer: Any, k: int, device: str):

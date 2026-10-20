@@ -1,4 +1,4 @@
-"""Local API for the blog's "Try it" section: a trained decision model with ContextCite and AT2.
+"""Local API for the blog's "Try it" section: a trained decision model with one-pass ContextCite.
 
 Usage (from the repo root; needs a GPU; serves 127.0.0.1 only, real rows):
   CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src .venv/bin/python blogs/server.py --port 8767
@@ -7,8 +7,12 @@ Endpoints (the Vite dev server proxies /api here):
   GET /api/datasets                         eval datasets, their row counts and rows with gold spans
   GET /api/sample?source=&spans=1           a random eval row id
   GET /api/row?id=                          the row, the model's tree q, guided answer, sentences
-  GET /api/attribute?id=&method=at2|contextcite   one weight per sentence, top-k, span metrics;
-                                                  AT2 also one score per document token
+  GET /api/attribute?id=                    ContextCite: one weight per sentence, top-k, span metrics
+
+ContextCite is masked_cite.attribute: the decision and its 64 ablations from
+one packed forward (dropped sentences hidden from the reader, not deleted),
+on a flex-attention copy of the model compiled at startup. The answer shown
+by /api/row comes from the usual SDPA scorer (answers.score).
 """
 
 import argparse
@@ -24,22 +28,27 @@ import torch
 import uvicorn
 
 from dataloader import data
-from modeling import at2, context_cite as cc, modeling
+from modeling import context_cite as cc, masked_cite, modeling
 
 _MODEL = "Qwen/Qwen3-0.6B"
 _ADAPTER = "runs/qwen3_0.6b_lam0.01/adapter"
-_THETA = "runs/at2_qwen3_0.6b/theta.pt"
 _K = 3
 
 
 def make_app() -> fastapi.FastAPI:
-    """Loads the model, AT2's theta and the eval rows; returns the app."""
+    """Loads the model twice (SDPA for the answer, compiled flex attention
+    for ContextCite) and the eval rows; returns the app."""
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(_MODEL)
     model = modeling.load(_MODEL, _ADAPTER)
-    theta = torch.load(_THETA, map_location="cpu").float()
+    flex = modeling.load(_MODEL, _ADAPTER)
+    flex.set_attn_implementation("flex_attention")
+    flex = torch.compile(flex, dynamic=True)
     rows = {r["id"]: r for r in data.load_rows(split="eval")}
+    t0 = time.time()  # compile now, not on the first request
+    masked_cite.attribute(flex, tok, next(r for r in rows.values() if r["source"] == "contractnli"))
+    logger.info("compiled flex attention in {:.0f} s", time.time() - t0)
     by = collections.defaultdict(list)
     for r in rows.values():
         by[r["source"]].append(r["id"])
@@ -86,21 +95,17 @@ def make_app() -> fastapi.FastAPI:
         }
 
     @app.get("/api/attribute")
-    def attribute(id: str, method: str = "at2"):
+    def attribute(id: str):
         r = get(id)
-        if method not in ("at2", "contextcite"):
-            raise fastapi.HTTPException(400, "method is at2 or contextcite")
         if len(cc.split_sources(r)) < 2:
-            return {"method": method, "w": None, "reason": "fewer than two sentences: nothing to attribute"}
+            return {"w": None, "reason": "fewer than two sentences: nothing to attribute"}
         t0 = time.time()
         with gpu:
-            res = at2.attribute(model, tok, r, theta) if method == "at2" else cc.attribute(model, tok, r)
-            # AT2 is linear in its token scores, so it can highlight tokens as the paper does
-            tokens = at2.token_scores(model, tok, r, theta)["tokens"] if method == "at2" else None
+            res = masked_cite.attribute(flex, tok, r)
         seconds = time.time() - t0
         w = [x["w"] for x in res["sources"]]
         top = [j for j in sorted(range(len(w)), key=lambda j: -w[j])[:_K] if w[j] > 0]
-        return {"method": method, "w": w, "top": top, "seconds": seconds, "tokens": tokens,
+        return {"w": w, "top": top, "seconds": seconds, "answer": res["answer"],
                 "metrics": cc.span_metrics(r, res, k=_K) if r["spans"] else None}
 
     @app.exception_handler(Exception)

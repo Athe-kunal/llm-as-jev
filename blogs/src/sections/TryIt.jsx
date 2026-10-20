@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Doc, TokenDoc } from "../components/Math.jsx";
+import { Doc } from "../components/Math.jsx";
 
-// The model behind /api (blogs/server.py): the 0.6B λ = 0.01 adapter AT2's θ was trained for.
+// The model behind /api (blogs/server.py): the 0.6B λ = 0.01 adapter.
 const MODEL = "Qwen3-0.6B, λ = 0.01 adapter";
-const METHODS = [
-  { id: "at2", name: "AT2", note: "one forward pass, learned head weights" },
-  { id: "contextcite", name: "ContextCite", note: "64 ablated passes + Lasso" },
-];
+const NOTE = "one packed forward: the decision + 64 ablations (sentences hidden from the reader), then Lasso";
 const SHOW_OPTIONS = 8; // options listed: the most probable ones, plus gold and the answer
 
 async function api(path) {
@@ -21,7 +18,7 @@ export default function TryIt() {
   const [source, setSource] = useState("contractnli");
   const [spansOnly, setSpansOnly] = useState(true);
   const [row, setRow] = useState(null);
-  const [attr, setAttr] = useState({});
+  const [attr, setAttr] = useState();
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -29,38 +26,39 @@ export default function TryIt() {
     api("/api/datasets").then(setDatasets).catch((e) => setError(e.message));
   }, []);
 
+  const chosen = datasets.find((d) => d.id === source);
+  // the evidence filter applies only where the dataset's eval rows have gold spans
+  const withSpans = spansOnly && Boolean(chosen?.withSpans);
+
   const next = useCallback(async () => {
     setBusy(true);
     setError(null);
-    setAttr({});
+    setAttr(undefined);
     try {
-      const { id } = await api(`/api/sample?source=${source}&spans=${spansOnly ? 1 : 0}`);
+      const { id } = await api(`/api/sample?source=${source}&spans=${withSpans ? 1 : 0}`);
       setRow(await api(`/api/row?id=${encodeURIComponent(id)}`));
-      // AT2 first (≈0.2 s), then ContextCite (seconds); the server runs one at a time
-      for (const m of METHODS) {
-        setAttr((a) => ({ ...a, [m.id]: "loading" }));
-        const res = await api(`/api/attribute?id=${encodeURIComponent(id)}&method=${m.id}`);
-        setAttr((a) => ({ ...a, [m.id]: res }));
-      }
+      setAttr("loading");
+      setAttr(await api(`/api/attribute?id=${encodeURIComponent(id)}`));
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
     }
-  }, [source, spansOnly]);
+  }, [source, withSpans]);
 
   useEffect(() => {
     if (datasets.length) next();
   }, [datasets.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const chosen = datasets.find((d) => d.id === source);
   return (
     <section className="trie-section" id="try">
       <p className="eyebrow">7 · Try it</p>
       <h2>Random eval rows, live</h2>
       <p className="lede small">
-        {MODEL}, running on this machine. Each row is answered with the guided decoder, then explained by both attribution
-        methods. Amber underline: the dataset's gold evidence; outlined: each method's top 3 sentences, scrolled into view; green and red tint: positive and negative weights.
+        {MODEL}, running on this machine. Each row is answered with the guided decoder, then explained by ContextCite in its
+        one-pass form: the prompt is packed with 64 copies of the question, each blind to a random half of the sentences. Amber
+        underline: the dataset's gold evidence; outlined: the top 3 sentences, scrolled into view; green and red tint: sentences
+        that raise and lower the answer's logit.
       </p>
       <div className="try-bar">
         <label className="try-field">
@@ -75,7 +73,7 @@ export default function TryIt() {
           </select>
         </label>
         <label className="try-check">
-          <input id="try-spans" type="checkbox" checked={spansOnly} disabled={!chosen?.withSpans}
+          <input id="try-spans" type="checkbox" checked={withSpans} disabled={!chosen?.withSpans}
                  onChange={(e) => setSpansOnly(e.target.checked)} />
           only rows with gold evidence
         </label>
@@ -86,18 +84,17 @@ export default function TryIt() {
       </div>
       {error && (
         <div className="pending">
-          {error}. Is the model API running? Start it with <code>npm run api</code> in <code>blogs/</code>.
+          {error}
+          {/fetch|NetworkError|50[234]/.test(error) && (
+            <>. Is the model API running? Start it with <code>npm run api</code> in <code>blogs/</code>.</>
+          )}
         </div>
       )}
       <AnimatePresence mode="wait">
         {row && (
           <motion.div key={row.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
             <Answer row={row} />
-            <div className="try-grid">
-              {METHODS.map((m) => (
-                <Explain key={m.id} method={m} row={row} res={attr[m.id]} />
-              ))}
-            </div>
+            <Explain row={row} res={attr} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -135,72 +132,53 @@ function Answer({ row }) {
   );
 }
 
-const TOP_TOKENS = 10; // tokens outlined in the token view
-
-function Explain({ method, row, res }) {
+function Explain({ row, res }) {
   const loading = res === "loading" || res === undefined;
-  const [view, setView] = useState("tokens"); // AT2 only: tokens (as the paper) or sentences
-  const tokens = !loading && res.tokens;
   return (
     <div className="try-panel">
       <div className="try-head">
         <div>
-          <h3>{method.name}</h3>
-          <span className="viz-label">{method.note}</span>
+          <h3>ContextCite</h3>
+          <span className="viz-label">{NOTE}</span>
         </div>
-        <div className="try-head-right">
-          {tokens && (
-            <div className="ex-tabs view-toggle" role="tablist" aria-label="Highlight">
-              {["tokens", "sentences"].map((v) => (
-                <button key={v} role="tab" aria-selected={v === view} onClick={() => setView(v)}>{v}</button>
-              ))}
-            </div>
-          )}
-          {res && res !== "loading" && res.w && <span className="try-time">{res.seconds.toFixed(2)} s</span>}
-        </div>
+        {!loading && res.w && <span className="try-time">{res.seconds.toFixed(2)} s</span>}
       </div>
       {loading ? (
         <div className="try-loading">
-          <span className="spinner" /> {method.id === "contextcite" ? "scoring 64 ablated prompts…" : "reading attention…"}
+          <span className="spinner" /> scoring the decision and 64 ablations in one pass…
         </div>
       ) : res.w === null ? (
-        <div className="pending">{res.reason}</div>
+        <>
+          <div className="pending">{res.reason}</div>
+          {row.partTexts.map((text, p) => (
+            <div key={p} className="try-part">
+              <span className="viz-label">{row.parts[p]}</span>
+              <div className="try-plain">{text}</div>
+            </div>
+          ))}
+        </>
       ) : (
         <>
           <Metrics m={res.metrics} />
-          {tokens && view === "tokens" ? (
-            <TokenView row={row} tokens={tokens} />
-          ) : row.parts.map((name, p) => {
+          {res.answer !== row.answer && (
+            <span className="viz-label">
+              the packed pass picks answer {res.answer + 1}] (the decoder above: {row.answer + 1}]): a near tie, bf16 rounding
+            </span>
+          )}
+          {row.parts.map((name, p) => {
             const idx = row.sentences.flatMap((s, j) => (s.part === p ? [j] : []));
             if (!idx.length) return null;
             const local = new Set(idx.flatMap((j, i) => (res.top.includes(j) ? [i] : [])));
             return (
               <div key={p} className="try-part">
                 {row.parts.length > 1 && <span className="viz-label">{name}</span>}
-                <Doc sentences={idx.map((j) => row.sentences[j])} value={idx.map((j) => res.w[j])} marked={local} maxHeight={380} scrollToMarked />
+                <Doc sentences={idx.map((j) => row.sentences[j])} value={idx.map((j) => res.w[j])} marked={local} maxHeight={520} scrollToMarked />
               </div>
             );
           })}
         </>
       )}
     </div>
-  );
-}
-
-/** AT2's score for every document token, part by part; the top tokens outlined. */
-function TokenView({ row, tokens }) {
-  const top = new Set([...tokens].sort((a, b) => b.w - a.w).slice(0, TOP_TOKENS).map((t) => t.index));
-  return (
-    <>
-      <span className="viz-label">token scores θ·φᵢ; a sentence's score is the sum of its tokens'; top {TOP_TOKENS} outlined</span>
-      {row.partTexts.map((text, p) => (
-        <div key={p} className="try-part">
-          {row.parts.length > 1 && <span className="viz-label">{row.parts[p]}</span>}
-          <TokenDoc text={text} tokens={tokens.filter((t) => t.part === p)} top={top}
-                    gold={row.sentences.filter((s) => s.part === p && s.gold)} />
-        </div>
-      ))}
-    </>
   );
 }
 

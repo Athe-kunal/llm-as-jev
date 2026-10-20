@@ -205,6 +205,14 @@ def attribute(model, tok, row: dict[str, Any], num_ablations: int = 64, keep_pro
     sources = split_sources(row)
     masks = ablation_masks(num_ablations, len(sources), keep_prob, seed)
     y = ablation_targets(model, tok, row, sources, masks, answer, device)
+    return result(s, answer, sources, masks, y, alpha)
+
+
+def result(s: torch.Tensor, answer: int, sources: list[dict[str, Any]], masks: np.ndarray,
+           y: np.ndarray, alpha: float = 0.01) -> dict[str, Any]:
+    """attribute's output from the full prompt's candidate scores s [K], the
+    attributed answer and the ablation targets y [n] of masks [n, S]: the
+    surrogate's weight per source and its intercept."""
     w, b = fit_surrogate(masks, y, alpha)
     return {"answer": answer, "q": torch.softmax(s.float(), 0)[answer].item(),
             "sources": [{**src, "w": float(v)} for src, v in zip(sources, w)], "bias": b}
