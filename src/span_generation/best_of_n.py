@@ -28,6 +28,7 @@ import collections
 import json
 import pathlib
 import re
+import time
 from typing import Any
 
 from loguru import logger
@@ -145,7 +146,9 @@ async def run(args) -> None:
     from openai import AsyncOpenAI
     from transformers import AutoTokenizer
 
-    clients = [AsyncOpenAI(base_url=u, api_key="local") for u in args.base_url]
+    # 8 long thinking replies in one request can take well over the client's default 600 s
+    clients = [AsyncOpenAI(base_url=u, api_key="local", timeout=args.timeout, max_retries=2)
+               for u in args.base_url]
     tok = AutoTokenizer.from_pretrained(args.model)
     rows = [r for r in data.load_rows(args.data, args.split)
             if (not args.source or r["source"] in args.source) and (not args.with_spans or r["spans"])
@@ -160,23 +163,37 @@ async def run(args) -> None:
 
     async def one(i, r):
         async with gate:
-            return await label(clients[i % len(clients)], args.served_name, tok, r, args)
+            try:
+                return await label(clients[i % len(clients)], args.served_name, tok, r, args)
+            except Exception as e:  # one bad row must not stop the run; it is retried on resume
+                logger.warning("{}: skipped ({}: {})", r["id"], type(e).__name__, str(e)[:200])
+                return None
 
-    with open(out, "w") as f:
+    # resume: rows already labelled in --out are skipped; new records are appended
+    done = {json.loads(line)["id"] for line in open(out)} if out.exists() else set()
+    rows = [r for r in rows if r["id"] not in done]
+    logger.info("{} rows to label ({} already in {})", len(rows), len(done), out)
+    start, finished = time.time(), 0
+    with open(out, "a") as f:
         for task in asyncio.as_completed([one(i, r) for i, r in enumerate(rows)]):
             rec = await task
+            finished += 1
             if rec is not None:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                logger.info("{}: {} sets, best reward {:.2f}, q(gold) {:.2f}", rec["id"], len(rec["candidates"]),
-                            max(c["reward"] for c in rec["candidates"]), float(np.exp(rec["log_q_gold"])))
+                f.flush()
+            if finished % 50 == 0 or finished == len(rows):
+                el = time.time() - start
+                logger.info("{}/{} rows, {:.1f} rows/min, eta {:.1f} h", finished, len(rows), finished / el * 60,
+                            el / finished * (len(rows) - finished) / 3600)
     logger.info("wrote {}", out)
 
 
 def main() -> None:
     """Labels --limit rows per dataset with at least two sentences, one JSON line each.
 
-    TODO: which rows first (the rows with human spans, to validate against
-    them), the q(gold) cut-off, and resuming a partial run.
+    Re-running with the same --out resumes: rows already in it are skipped.
+    TODO: the q(gold) cut-off and the picker (reward, vote) are chosen after
+    the run from the stored candidates.
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default="Qwen/Qwen3.6-27B", help="HF id, for the tokenizer")
@@ -192,6 +209,7 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=16384, help="per completion, thinking included")
     parser.add_argument("--max-model-len", type=int, default=32768, help="the server's context (serve.sh)")
     parser.add_argument("--concurrency", type=int, default=16, help="rows in flight")
+    parser.add_argument("--timeout", type=float, default=3600, help="seconds per request")
     parser.add_argument("--source", nargs="*", help="only these datasets")
     parser.add_argument("--with-spans", action="store_true",
                         help="only rows with human spans (to validate the labels against them)")
