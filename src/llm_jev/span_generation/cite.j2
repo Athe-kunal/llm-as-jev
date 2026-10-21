@@ -1,0 +1,13 @@
+Below is a context split into tagged sentences, a question, and its correct answer.
+
+Context:
+{% for s in sentences %}
+<c{{ loop.index }}> {{ s }}
+{% endfor %}
+
+{{ question }}
+Correct answer: {{ answer }}
+
+Which sentences are the evidence for this answer? Cite the smallest set of sentences that, read on their own, lets a reader reach the answer, and without which the answer is no longer supported.
+After thinking, reply with the tags of those sentences inside a citations block and nothing else, for example:
+<citations><c2><c7></citations>

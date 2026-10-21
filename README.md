@@ -59,6 +59,7 @@ The console scripts run the same modules as `python -m llm_jev.<module>`:
 | `llm-jev-benchmarks` | `llm_jev.evaluation.benchmarks` | external benchmarks (BoolQ, MMLU, ARC-C, ... and JevBench) |
 | `llm-jev-merge` | `llm_jev.serving.merge` | merges a LoRA adapter into its base model for SGLang |
 | `llm-jev-sglang-cite` | `llm_jev.serving.sglang_client` | decisions and ContextCite through an SGLang server |
+| `llm-jev-spans` | `llm_jev.span_generation.best_of_n` | best-of-N evidence labels from a vLLM server (`span_generation/serve.sh`; `uv sync --extra spans`) |
 | `llm-jev-build-data` | `llm_jev.dataloader.build_data` | builds Reason+Long-12k (`--download` fetches the sources) |
 
 Attribution with the packed paths, from Python:
@@ -123,6 +124,8 @@ src/llm_jev/
   train/         losses.py (L_tree, KL anchors), train.py
   serving/       merge.py (LoRA merged into the weights), sglang_client.py (decisions and ContextCite
                  over SGLang's /v1/score)
+  span_generation/  best_of_n.py (best-of-N evidence labels, SelfCite reward), cite.j2, serve.sh
+                 (vLLM labelling server)
   evaluation/    evaluate.py (eval split metrics), benchmarks.py (external benchmarks)
   prompts/       decision.j2 (the decision prompt; package data)
 scripts/         train.sh, evaluate.sh, sglang_serve.sh (launchers, one GPU each)

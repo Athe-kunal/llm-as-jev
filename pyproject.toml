@@ -25,6 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+spans = ["openai>=1.50"]               # llm_jev.span_generation (vLLM server, OpenAI API)
 dev = ["pytest", "hypothesis"]
 
 [project.scripts]
@@ -33,6 +34,7 @@ llm-jev-evaluate = "llm_jev.evaluation.evaluate:main"
 llm-jev-benchmarks = "llm_jev.evaluation.benchmarks:main"
 llm-jev-build-data = "llm_jev.dataloader.build_data:main"
 llm-jev-merge = "llm_jev.serving.merge:main"
+llm-jev-spans = "llm_jev.span_generation.best_of_n:main"
 llm-jev-sglang-cite = "llm_jev.serving.sglang_client:main"
 
 # CUDA 12.8 wheels: run on the 550 driver and on 580+.
@@ -58,6 +60,7 @@ include = ["llm_jev*"]
 
 [tool.setuptools.package-data]
 llm_jev = ["prompts/*.j2"]
+"llm_jev.span_generation" = ["*.j2", "*.sh"]
 
 [tool.black]
 line-length = 80
