@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DATA=${DATA:-data/splits/reason_long_12k}  # local folder or Hub dataset id
+DATA=${DATA:-data/splits/reason_long_12k_v2}  # local folder (Parquet) or Hub dataset id
 BATCH_SIZE=${BATCH_SIZE:-32}               # rows per optimizer step
 LR=${LR:-1e-4}                             # peak learning rate
 WARMUP_STEPS=${WARMUP_STEPS:-100}          # linear warmup

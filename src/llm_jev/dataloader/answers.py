@@ -9,11 +9,13 @@ tokens that stay inside it.
 import copy
 import functools
 import random
+from collections.abc import Sequence
 from typing import Any
 
 import torch
 
 from llm_jev.dataloader import prompts
+from llm_jev.dataloader import schema
 
 ANSWER_PREFIX = "Best answer: ["
 # The assistant turn up to the answer, as the chat template renders it with
@@ -24,33 +26,54 @@ OFF_PATH = 3
 
 
 def user_message(
-    row: dict[str, Any], order: list[str]
-) -> tuple[str, dict[str, tuple[int, int]]]:
+    example: schema.Example, order: Sequence[int]
+) -> tuple[str, list[tuple[int, int]]]:
     """The paper's user message (prompts/decision.j2) and each part's range in it.
 
-    The state is the row's part texts (no names), then the question, on
-    every row (like the paper's MMBench state: the hint, then the
-    question). Options are numbered from 1 in the given order.
+    The state is the example's part texts (no names), then the question
+    (like the paper's MMBench state: the hint, then the question). Options
+    are numbered from 1 in the given order.
+
+    Args:
+      example: The example.
+      order: The option indices in the order they are shown.
+
+    Returns:
+      (the message, the (start, end) character range of every part, indexed
+      like `Example.parts`).
     """
     text = prompts.render(
         "decision",
-        parts=row["parts"],
-        question=row["question"],
-        options=[row["labels"][label] for label in order],
+        parts=example.parts,
+        question=example.question,
+        options=[example.options[i] for i in order],
     )
-    where, cursor = {}, 0
-    for p in row["parts"]:  # rendered in order, so search after the last one
-        start = text.index(p["text"], cursor)
-        where[p["name"]] = (start, start + len(p["text"]))
-        cursor = start + len(p["text"])
+    where, cursor = [], 0
+    for part in example.parts:  # rendered in order, so search after the last one
+        start = text.index(part.text, cursor)
+        where.append((start, start + len(part.text)))
+        cursor = start + len(part.text)
     return text, where
 
 
 def build_prompt(
-    row: dict[str, Any], order: list[str], tokenizer: Any
-) -> tuple[str, dict[str, tuple[int, int]]]:
-    """Prompt text up to "Best answer: [", and each part's range in it."""
-    content, where = user_message(row, order)
+    example: schema.Example, order: Sequence[int], tokenizer: Any
+) -> tuple[str, list[tuple[int, int]]]:
+    """Prompt text up to "Best answer: [", and each part's range in it.
+
+    Args:
+      example: The example.
+      order: The option indices in the order they are shown.
+      tokenizer: The tokenizer whose chat template builds the prompt.
+
+    Returns:
+      (the prompt, the (start, end) character range of every part in it,
+      indexed like `Example.parts`).
+
+    Raises:
+      ValueError: If the chat template's assistant turn is not _TAIL.
+    """
+    content, where = user_message(example, order)
     text = tokenizer.apply_chat_template(
         [{"role": "user", "content": content}],
         tokenize=False,
@@ -60,7 +83,7 @@ def build_prompt(
     if not text.endswith(_TAIL):  # suffix_ids assumes this tail
         raise ValueError("the chat template's assistant turn is not _TAIL")
     start = text.index(content)
-    return text, {n: (start + s, start + e) for n, (s, e) in where.items()}
+    return text, [(start + a, start + b) for a, b in where]
 
 
 def suffix_ids(tokenizer: Any, k: int) -> list[list[int]]:
@@ -106,7 +129,9 @@ def _prefix_len(tokenizer: Any) -> int:
     return len(full) - len(bare["input_ids"])
 
 
-def encode(row: dict[str, Any], tokenizer: Any, rng: random.Random | None):
+def encode(
+    example: schema.Example, tokenizer: Any, rng: random.Random | None
+) -> dict[str, Any]:
     """Prompt + gold suffix token ids, the gold path, and the anchor sites.
 
     The input is the prompt followed by the whole gold suffix (teacher
@@ -117,13 +142,13 @@ def encode(row: dict[str, Any], tokenizer: Any, rng: random.Random | None):
     off_path holds OFF_PATH sampled trie nodes off the gold path, each as
     (node tokens, legal tokens); without rng it is empty.
     """
-    order = list(row["labels"])
+    order = list(range(len(example.options)))
     if rng is not None:
         rng.shuffle(order)
-    text, _ = build_prompt(row, order, tokenizer)
+    text, _ = build_prompt(example, order, tokenizer)
     prompt = tokenizer(text, add_special_tokens=False)["input_ids"]
     suffixes, nodes = candidates(tokenizer, len(order))
-    gold = order.index(row["label"])
+    gold = order.index(example.gold)
     s = suffixes[gold]
     path = [
         (len(prompt) - 1 + t, nodes[tuple(s[:t])], s[t]) for t in range(len(s))

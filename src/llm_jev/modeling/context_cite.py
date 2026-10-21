@@ -2,13 +2,14 @@
 
 Cohen-Wang et al., "ContextCite: Attributing Model Generation to Context"
 (NeurIPS 2024), following github.com/MadryLab/context-cite (MIT). Sources
-are the sentences of the row's parts; ablated rows keep a random subset of
+are the sentences of the example's parts; ablated examples keep a random subset of
 them, the model's predicted answer is re-scored on each, and a sparse linear
 surrogate gives one weight per sentence. The target is the logit of the tree
 probability q(answer | x) (answers.score_batch), not raw token
 probabilities.
 """
 
+import dataclasses
 import functools
 import re
 from typing import Any
@@ -21,6 +22,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from llm_jev.dataloader import answers
+from llm_jev.dataloader import schema
 
 
 @functools.cache
@@ -45,9 +47,9 @@ def has_content(text: str, min_words: int = 2, min_alnum: float = 0.5) -> bool:
     return len(_WORD.findall(text)) >= min_words and alnum >= min_alnum
 
 
-def split_sources(row: dict[str, Any], min_words: int = 2,
+def split_sources(example: schema.Example, min_words: int = 2,
                   min_alnum: float = 0.5) -> list[dict[str, Any]]:
-    """The row's sources: the sentences of every part, in order, each with content.
+    """The example's sources: the sentences of every part, in order, each with content.
 
     As the reference's split_text: each line of a part is split with
     nltk.sent_tokenize and each sentence is located after the previous one.
@@ -55,19 +57,19 @@ def split_sources(row: dict[str, Any], min_words: int = 2,
     previous source of its part, or the next one at the start of a part (a
     part with no content sentence is one source), so every source can carry
     evidence and the text is unchanged. A source is {"part": part index,
-    "start", "end": its char range in that part's text (the row's spans use
+    "start", "end": its char range in that part's text (the example's spans use
     the same offsets), "sep": the text between the previous source of the
     part, or the part start, and it}.
     """
     _punkt()
     sources = []
-    for i, part in enumerate(row["parts"]):
-        text, cur, own, lead = part["text"], 0, [], None
+    for i, part in enumerate(example.parts):
+        text, cur, own, lead = part.text, 0, [], None
         for line in text.splitlines():
             for sentence in nltk.sent_tokenize(line):
                 start = text.find(sentence, cur)
                 if start < 0:
-                    raise ValueError(f"{row['id']}: sentence not found in part {i}")
+                    raise ValueError(f"{example.id}: sentence not found in part {i}")
                 s = {"part": i, "start": start, "end": start + len(sentence), "sep": text[cur:start]}
                 cur = s["end"]
                 if not has_content(sentence, min_words, min_alnum):
@@ -86,27 +88,28 @@ def split_sources(row: dict[str, Any], min_words: int = 2,
     return sources
 
 
-def ablate(row: dict[str, Any], sources: list[dict[str, Any]], keep: list[bool]) -> dict[str, Any]:
-    """The row with only the kept sources (the reference's get_context).
+def ablate(example: schema.Example, sources: list[dict[str, Any]],
+           keep: list[bool]) -> schema.Example:
+    """The example with only the kept sources (the reference's get_context).
 
     Each kept sentence is preceded by its own separator, except the first
     kept one of its part. Unlike the reference, the text before a part's
     first sentence and after its last (whitespace) is always kept, so keeping
-    every source rebuilds the row exactly. Spans are dropped: their offsets
+    every source rebuilds the example exactly. Spans are dropped: their offsets
     no longer hold.
     """
-    kept: list[list[str]] = [[] for _ in row["parts"]]
+    kept: list[list[str]] = [[] for _ in example.parts]
     for s, k in zip(sources, keep):
         if k:
-            text = row["parts"][s["part"]]["text"]
+            text = example.parts[s["part"]].text
             kept[s["part"]].append((s["sep"] if kept[s["part"]] else "") + text[s["start"]:s["end"]])
     parts = []
-    for i, p in enumerate(row["parts"]):
+    for i, p in enumerate(example.parts):
         own = [s for s in sources if s["part"] == i]
-        lead = p["text"][: own[0]["start"]] if own else p["text"]
-        tail = p["text"][own[-1]["end"]:] if own else ""
-        parts.append({**p, "text": lead + "".join(kept[i]) + tail})
-    return {**row, "parts": parts, "spans": []}
+        lead = p.text[: own[0]["start"]] if own else p.text
+        tail = p.text[own[-1]["end"]:] if own else ""
+        parts.append(schema.Part(p.name, lead + "".join(kept[i]) + tail))
+    return dataclasses.replace(example, parts=tuple(parts), spans=())
 
 
 def ablation_masks(n: int, d: int, keep_prob: float = 0.5, seed: int = 0) -> np.ndarray:
@@ -132,7 +135,7 @@ def logit_q(s: torch.Tensor, answer: int) -> float:
 
 
 @torch.no_grad()
-def ablation_targets(model, tok, row: dict[str, Any], sources: list[dict[str, Any]],
+def ablation_targets(model, tok, example: schema.Example, sources: list[dict[str, Any]],
                      masks: np.ndarray, answer: int, device: str = "cuda",
                      batch_tokens: int = 32768, batch_rows: int = 64) -> np.ndarray:
     """[n] float: logit q(answer | ablated prompt) for every mask.
@@ -145,9 +148,9 @@ def ablation_targets(model, tok, row: dict[str, Any], sources: list[dict[str, An
     """
     prompts = []
     for keep in masks:
-        ex = answers.encode(ablate(row, sources, keep), tok, None)
+        ex = answers.encode(ablate(example, sources, keep), tok, None)
         prompts.append(ex["input_ids"][: ex["path"][0][0] + 1])
-    k = len(row["labels"])
+    k = len(example.options)
     y = np.empty(len(prompts))
     for batch in answers.batches([len(p) for p in prompts], batch_tokens, batch_rows):
         scored = answers.score_batch(model, [prompts[i] for i in batch], tok, [k] * len(batch),
@@ -175,36 +178,38 @@ def fit_surrogate(masks: np.ndarray, y: np.ndarray, alpha: float = 0.01,
     return weight * num_output_tokens, float(bias * num_output_tokens)
 
 
-def predict(model, tok, row: dict[str, Any], device: str = "cuda") -> tuple[list[int], int, torch.Tensor]:
+def predict(model, tok, example: schema.Example,
+            device: str = "cuda") -> tuple[list[int], int, torch.Tensor]:
     """The prompt (options in release order), the predicted option (argmax
     of answers.score) and the candidate scores s [K]."""
-    ex = answers.encode(row, tok, None)
+    ex = answers.encode(example, tok, None)
     prompt = ex["input_ids"][: ex["path"][0][0] + 1]
     s, _, _ = answers.score(model, prompt, tok, ex["n_options"], device)
     return prompt, int(s.argmax()), s
 
 
-def answer_positions(tok, row: dict[str, Any], prompt: list[int], answer: int) -> tuple[list[int], list[int]]:
+def answer_positions(tok, example: schema.Example, prompt: list[int],
+                     answer: int) -> tuple[list[int], list[int]]:
     """Option `answer`'s suffix tokens ("k]") and the positions whose logits
     predict them, in the prompt followed by that suffix."""
-    suffix = answers.candidates(tok, len(row["labels"]))[0][answer]
+    suffix = answers.candidates(tok, len(example.options))[0][answer]
     return suffix, list(range(len(prompt) - 1, len(prompt) - 1 + len(suffix)))
 
 
-def attribute(model, tok, row: dict[str, Any], num_ablations: int = 64, keep_prob: float = 0.5,
+def attribute(model, tok, example: schema.Example, num_ablations: int = 64, keep_prob: float = 0.5,
               alpha: float = 0.01, seed: int = 0, device: str = "cuda") -> dict[str, Any]:
-    """ContextCite on one row (the reference's get_attributions).
+    """ContextCite on one example (the reference's get_attributions).
 
-    The attributed answer is the model's prediction on the full row (argmax
+    The attributed answer is the model's prediction on the full example (argmax
     of answers.score, options in release order). Returns {"answer": its
-    option index, "q": its tree probability, "sources": split_sources(row)
+    option index, "q": its tree probability, "sources": split_sources(example)
     with each source's weight "w", "bias": the surrogate's intercept}. A
     weight is how much keeping that sentence adds to logit q(answer).
     """
-    _, answer, s = predict(model, tok, row, device)
-    sources = split_sources(row)
+    _, answer, s = predict(model, tok, example, device)
+    sources = split_sources(example)
     masks = ablation_masks(num_ablations, len(sources), keep_prob, seed)
-    y = ablation_targets(model, tok, row, sources, masks, answer, device)
+    y = ablation_targets(model, tok, example, sources, masks, answer, device)
     return result(s, answer, sources, masks, y, alpha)
 
 
@@ -218,42 +223,36 @@ def result(s: torch.Tensor, answer: int, sources: list[dict[str, Any]], masks: n
             "sources": [{**src, "w": float(v)} for src, v in zip(sources, w)], "bias": b}
 
 
-def to_spans(row: dict[str, Any], sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Sources in the row's span format {"part": part name, "start", "end",
-    "text"}, in document order."""
-    out = []
-    for s in sorted(sources, key=lambda s: (s["part"], s["start"])):
-        part = row["parts"][s["part"]]
-        out.append({"part": part["name"], "start": s["start"], "end": s["end"],
-                    "text": part["text"][s["start"]:s["end"]]})
-    return out
+def to_spans(sources: list[dict[str, Any]]) -> tuple[schema.Span, ...]:
+    """Sources as spans of the example, in document order."""
+    return tuple(schema.Span(s["part"], s["start"], s["end"])
+                 for s in sorted(sources, key=lambda s: (s["part"], s["start"])))
 
 
-def select(row: dict[str, Any], result: dict[str, Any], k: int = 3) -> list[dict[str, Any]]:
+def select(result: dict[str, Any], k: int = 3) -> tuple[schema.Span, ...]:
     """The predicted evidence: the k highest-weighted sentences with w > 0,
-    in the row's span format (to_spans)."""
+    as spans of the example (to_spans)."""
     top = sorted((s for s in result["sources"] if s["w"] > 0), key=lambda s: -s["w"])[:k]
-    return to_spans(row, top)
+    return to_spans(top)
 
 
-def gold_sentences(row: dict[str, Any], sources: list[dict[str, Any]]) -> set[int]:
-    """Indices of the sources that overlap any of the row's gold spans."""
-    names = [p["name"] for p in row["parts"]]
-    return {i for i, s in enumerate(sources) for sp in row["spans"]
-            if names.index(sp["part"]) == s["part"] and s["start"] < sp["end"] and s["end"] > sp["start"]}
+def gold_sentences(example: schema.Example, sources: list[dict[str, Any]]) -> set[int]:
+    """Indices of the sources that overlap any of the example's gold spans."""
+    return {i for i, s in enumerate(sources) for sp in example.spans
+            if sp.part == s["part"] and s["start"] < sp.end and s["end"] > sp.start}
 
 
-def span_metrics(row: dict[str, Any], result: dict[str, Any], k: int = 3,
+def span_metrics(example: schema.Example, result: dict[str, Any], k: int = 3,
                  beta: float = 1.0) -> dict[str, float] | None:
     """Sentence-level scores of the attributions against the gold spans
-    (None for a row without gold spans).
+    (None for an example without gold spans).
 
     precision, recall and f_beta = (1 + beta^2) P R / (beta^2 P + R) of the
     top-k selection (beta < 1 favours precision; beta = 1 is F1); ap: average
     precision of the full weight ranking (threshold-free; ties broken by
     sentence order); top1: whether the highest-weighted sentence is gold.
     """
-    gold = gold_sentences(row, result["sources"])
+    gold = gold_sentences(example, result["sources"])
     if not gold:
         return None
     ranked = sorted(range(len(result["sources"])), key=lambda i: -result["sources"][i]["w"])

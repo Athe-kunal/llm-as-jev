@@ -45,7 +45,7 @@ first use (`llm_jev.modeling.fa2`).
 ## Quickstart
 
 ```bash
-make data                                   # Reason+Long-12k -> data/splits/reason_long_12k (CPU, ~10 min)
+make data                                   # download the pinned sources, build Reason+Long-12k -> data/splits/reason_long_12k_v2/{train,eval}.parquet (CPU, ~6 min)
 scripts/train.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2       # one GPU; logs to runs/qwen3_0.6b.log
 scripts/evaluate.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2    # eval split + external benchmarks
 ```
@@ -60,20 +60,20 @@ The console scripts run the same modules as `python -m llm_jev.<module>`:
 | `llm-jev-merge` | `llm_jev.serving.merge` | merges a LoRA adapter into its base model for SGLang |
 | `llm-jev-sglang-cite` | `llm_jev.serving.sglang_client` | decisions and ContextCite through an SGLang server |
 | `llm-jev-spans` | `llm_jev.span_generation.best_of_n` | best-of-N evidence labels from a vLLM server (`span_generation/serve.sh`; `uv sync --extra spans`) |
-| `llm-jev-build-data` | `llm_jev.dataloader.build_data` | builds Reason+Long-12k (`--download` fetches the sources) |
+| `llm-jev-build-data` | `llm_jev.dataloader.build` | builds Reason+Long-12k (`--download` fetches the pinned sources into the Hugging Face cache) |
 
 Attribution with the packed paths, from Python:
 
 ```python
 from transformers import AutoTokenizer
-from llm_jev.dataloader import data
+from llm_jev.dataloader import storage
 from llm_jev.modeling import fa2, masked_cite, modeling
 
 tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
 model = modeling.load("Qwen/Qwen3-0.6B", "runs/qwen3_0.6b/adapter")
 fa2.use(model)                                   # flex attention and FA2 dispatch
-row = data.load_rows(split="eval")[0]
-res = masked_cite.attribute(model, tok, row, removal="full")   # or removal="reader"
+example = storage.load_examples(split="eval")[0]
+res = masked_cite.attribute(model, tok, example, removal="full")   # or removal="reader"
 top = sorted(res["sources"], key=lambda s: -s["w"])[:3]         # per-sentence weights w
 ```
 
@@ -116,8 +116,10 @@ res = sglang_client.attribute("http://127.0.0.1:30000", tok, row)   # same outpu
 
 ```
 src/llm_jev/
-  dataloader/    data.py (rows from a folder, .jsonl or the Hub), answers.py (prompt, candidate trie,
-                 scoring), prompts.py (Jinja loader), build_data.py (Reason+Long-12k)
+  dataloader/    schema.py (the `Example` every dataset becomes), storage.py (Parquet / Hub datasets),
+                 sources/ (one registered source per dataset, pinned downloads), processing.py + build.py
+                 (Reason+Long-12k as a `Dataset.map` pipeline), answers.py (prompt, candidate trie, scoring),
+                 prompts.py (Jinja loader)
   modeling/      modeling.py (base and LoRA models, batched forward), context_cite.py (ContextCite by
                  deletion), masked_cite.py (one-pass ContextCite: reader and full masking), fa2.py
                  (FlashAttention-2 varlen next to flex attention)

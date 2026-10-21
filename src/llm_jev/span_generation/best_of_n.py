@@ -6,7 +6,7 @@ Usage (servers from serve.sh; no local GPU needed):
       --limit 20 --out runs/span_generation/labels.jsonl
 
 Chuang et al., "SelfCite" (arXiv 2502.09604): the same model proposes and
-scores. Per row, the context's sentences (context_cite.split_sources) are
+scores. Per example, the context's sentences (context_cite.split_sources) are
 tagged <c1>, <c2>, ... in cite.j2 with the question and the gold answer; the
 model thinks, then cites <citations><c2><c7></citations>; N citation
 sets are sampled (the paper: N = 10, temperature 1.2, top-p 0.9; duplicates
@@ -16,8 +16,8 @@ tree probability q of the gold answer, from the server's echoed prompt
 log-probabilities:
   reward(S) = log q(gold | S only) - log q(gold | x without S)
             = sufficiency + necessity,
-and the highest-reward set becomes the row's spans. Unlike the paper, which
-scores the model's own response, we score the gold answer, so each row also
+and the highest-reward set becomes the example's spans. Unlike the paper, which
+scores the model's own response, we score the gold answer, so each example also
 records q(gold | x) and the model's own answer: the reward is uninformative
 where the model does not believe the gold answer (cut-off to be chosen).
 """
@@ -25,6 +25,7 @@ where the model does not believe the gold answer (cut-off to be chosen).
 import argparse
 import asyncio
 import collections
+import dataclasses
 import json
 import pathlib
 import re
@@ -35,14 +36,14 @@ from loguru import logger
 import numpy as np
 import torch
 
-from llm_jev.dataloader import answers, data, prompts
+from llm_jev.dataloader import answers, prompts, schema, storage
 from llm_jev.modeling import context_cite
 
 _HERE = pathlib.Path(__file__).parent
 
 
-def sentences(row: dict[str, Any], sources: list[dict[str, Any]]) -> list[str]:
-    return [row["parts"][s["part"]]["text"][s["start"]:s["end"]] for s in sources]
+def sentences(example: schema.Example, sources: list[dict[str, Any]]) -> list[str]:
+    return [example.parts[s["part"]].text[s["start"]:s["end"]] for s in sources]
 
 
 _CITATIONS = re.compile(r"<citations>(.*?)</citations>", re.S)
@@ -65,15 +66,15 @@ def parse_citations(reply: str, d: int, thinking: bool = True) -> tuple[int, ...
     return tuple(sorted({i - 1 for i in idx}))
 
 
-async def propose(client, model: str, row: dict[str, Any], sources: list[dict[str, Any]], n: int,
+async def propose(client, model: str, example: schema.Example, sources: list[dict[str, Any]], n: int,
                   temperature: float, top_p: float, max_tokens: int) -> tuple[list[tuple[int, ...]], dict]:
     """n sampled citation sets (0-based sentence indices) and reply stats;
     replies without a valid citations block (e.g. cut off while thinking) are
     dropped. The model thinks first (Qwen's <think> block), then cites.
     TODO: sampling settings for thinking mode (Qwen suggests T 0.6, top-p 0.95;
     the paper uses 1.2 / 0.9 for diversity); retry when few parse."""
-    text = prompts.render("cite", directory=_HERE, sentences=sentences(row, sources),
-                          question=row["question"], answer=row["labels"][row["label"]])
+    text = prompts.render("cite", directory=_HERE, sentences=sentences(example, sources),
+                          question=example.question, answer=example.answer)
     reply = await client.chat.completions.create(
         model=model, messages=[{"role": "user", "content": text}], n=n, temperature=temperature,
         top_p=top_p, max_tokens=max_tokens, extra_body={"chat_template_kwargs": {"enable_thinking": True}})
@@ -97,7 +98,7 @@ async def option_scores(client, model: str, prompt: list[int], suffixes: list[li
     return torch.tensor(await asyncio.gather(*(one(s) for s in suffixes)), dtype=torch.float64)
 
 
-async def rewards(client, model: str, tok, row: dict[str, Any], sources: list[dict[str, Any]],
+async def rewards(client, model: str, tok, example: schema.Example, sources: list[dict[str, Any]],
                   sets: list[tuple[int, ...]]) -> tuple[dict[str, Any], list[dict[str, float]]]:
     """Scores the full context, each set removed and each set alone on the
     decision prompt; returns the full-context record (q of gold, the model's
@@ -107,11 +108,11 @@ async def rewards(client, model: str, tok, row: dict[str, Any], sources: list[di
     for S in sets:
         keep = np.isin(np.arange(d), S)
         masks += [~keep, keep]
-    suffixes = answers.candidates(tok, len(row["labels"]))[0]
-    gold = list(row["labels"]).index(row["label"])
+    suffixes = answers.candidates(tok, len(example.options))[0]
+    gold = example.gold
     prompts_ = []
     for keep in masks:
-        ex = answers.encode(context_cite.ablate(row, sources, keep), tok, None)
+        ex = answers.encode(context_cite.ablate(example, sources, keep), tok, None)
         prompts_.append(ex["input_ids"][: ex["path"][0][0] + 1])
     s = await asyncio.gather(*(option_scores(client, model, p, suffixes) for p in prompts_))
     log_q = [float(torch.log_softmax(x, 0)[gold]) for x in s]
@@ -121,25 +122,26 @@ async def rewards(client, model: str, tok, row: dict[str, Any], sources: list[di
     return full, scored
 
 
-async def label(client, model: str, tok, row: dict[str, Any], args) -> dict[str, Any] | None:
+async def label(client, model: str, tok, example: schema.Example, args) -> dict[str, Any] | None:
     """One row's record: the distinct proposed sets with their rewards and the
     best one as spans (None if no reply parsed or no set survives the cap)."""
-    sources = context_cite.split_sources(row)
-    prompt_len = len(tok(prompts.render("cite", directory=_HERE, sentences=sentences(row, sources),
-                                        question=row["question"], answer=row["labels"][row["label"]]))["input_ids"])
+    sources = context_cite.split_sources(example)
+    prompt_len = len(tok(prompts.render("cite", directory=_HERE, sentences=sentences(example, sources),
+                                        question=example.question, answer=example.answer))["input_ids"])
     budget = min(args.max_tokens, args.max_model_len - prompt_len - 256)  # 256: chat template margin
-    proposed, stats = await propose(client, model, row, sources, args.n, args.temperature, args.top_p, budget)
-    lengths = [len(tok(t, add_special_tokens=False)["input_ids"]) for t in sentences(row, sources)]
+    proposed, stats = await propose(client, model, example, sources, args.n, args.temperature, args.top_p, budget)
+    lengths = [len(tok(t, add_special_tokens=False)["input_ids"]) for t in sentences(example, sources)]
     sets = [S for S in collections.Counter(proposed)                          # distinct, first-seen order
             if len(S) == 1 or sum(lengths[i] for i in S) <= args.max_cited_tokens]
     if not sets:
         return None
-    full, scored = await rewards(client, model, tok, row, sources, sets)
+    full, scored = await rewards(client, model, tok, example, sources, sets)
     best = max(range(len(sets)), key=lambda i: scored[i]["reward"])
-    return {"id": row["id"], "source": row["source"], **full, "n_parsed": len(proposed), **stats,
+    return {"id": example.id, "source": example.source, **full, "n_parsed": len(proposed), **stats,
             "candidates": [{"sentences": list(S), "votes": proposed.count(S), **r}
                            for S, r in zip(sets, scored)],
-            "spans": context_cite.to_spans(row, [sources[i] for i in sets[best]])}
+            "spans": [dataclasses.asdict(s)
+                      for s in context_cite.to_spans([sources[i] for i in sets[best]])]}
 
 
 async def run(args) -> None:
@@ -150,12 +152,12 @@ async def run(args) -> None:
     clients = [AsyncOpenAI(base_url=u, api_key="local", timeout=args.timeout, max_retries=2)
                for u in args.base_url]
     tok = AutoTokenizer.from_pretrained(args.model)
-    rows = [r for r in data.load_rows(args.data, args.split)
-            if (not args.source or r["source"] in args.source) and (not args.with_spans or r["spans"])
+    rows = [r for r in storage.load_examples(args.data, args.split)
+            if (not args.source or r.source in args.source) and (not args.with_spans or r.has_spans)
             and len(context_cite.split_sources(r)) >= 2]
     by: dict[str, list] = collections.defaultdict(list)                     # --limit rows per dataset
     for r in rows:
-        by[r["source"]].append(r)
+        by[r.source].append(r)
     rows = [r for rs in by.values() for r in rs[: args.limit]]
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -166,12 +168,12 @@ async def run(args) -> None:
             try:
                 return await label(clients[i % len(clients)], args.served_name, tok, r, args)
             except Exception as e:  # one bad row must not stop the run; it is retried on resume
-                logger.warning("{}: skipped ({}: {})", r["id"], type(e).__name__, str(e)[:200])
+                logger.warning("{}: skipped ({}: {})", r.id, type(e).__name__, str(e)[:200])
                 return None
 
     # resume: rows already labelled in --out are skipped; new records are appended
     done = {json.loads(line)["id"] for line in open(out)} if out.exists() else set()
-    rows = [r for r in rows if r["id"] not in done]
+    rows = [r for r in rows if r.id not in done]
     logger.info("{} rows to label ({} already in {})", len(rows), len(done), out)
     start, finished = time.time(), 0
     with open(out, "a") as f:
@@ -200,7 +202,7 @@ def main() -> None:
     parser.add_argument("--served-name", default="labeller", help="the name serve.sh gives the model")
     parser.add_argument("--base-url", nargs="+", default=["http://127.0.0.1:8011/v1"],
                         help="one or more servers (rows are spread round-robin)")
-    parser.add_argument("--data", default=data.TRAIN_EVAL)
+    parser.add_argument("--data", default=storage.DEFAULT_SOURCE)
     parser.add_argument("--split", default="train")
     parser.add_argument("--n", type=int, default=10)
     parser.add_argument("--temperature", type=float, default=1.2)

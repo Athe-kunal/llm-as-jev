@@ -16,8 +16,9 @@ flag (scripts/train.sh). The reference model p0 is the same model with the
 adapter disabled (no cache).
 
 Evaluates (evaluate.py) before training, every --eval-every steps (also
-saving the adapter there) and at the end. --data is a local folder or a
-Hugging Face dataset id with train and eval splits (data.load_rows).
+saving the adapter there) and at the end. --data is a local folder of
+Parquet splits (built by dataloader.build) or a Hugging Face dataset id with
+train and eval splits of `Example`s (storage.load_examples).
 """
 
 import argparse
@@ -34,7 +35,7 @@ from torch.optim.lr_scheduler import LinearLR
 from torch.optim.lr_scheduler import SequentialLR
 
 from llm_jev.dataloader import answers
-from llm_jev.dataloader import data
+from llm_jev.dataloader import storage
 from llm_jev.evaluation import evaluate
 from llm_jev.train import losses
 from llm_jev.modeling import modeling
@@ -44,7 +45,7 @@ def main() -> None:
     """Trains one epoch and evaluates before and after."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", required=True)
-    parser.add_argument("--data", default=data.TRAIN_EVAL,
+    parser.add_argument("--data", default=storage.DEFAULT_SOURCE,
                         help="local folder, or a Hub dataset id")
     parser.add_argument("--train-split", default="train")
     parser.add_argument("--eval-split", default="eval")
@@ -84,8 +85,8 @@ def main() -> None:
         indent=2))
     tok = AutoTokenizer.from_pretrained(args.model)
     pad = tok.pad_token_id
-    train = data.load_rows(args.data, args.train_split)
-    evals = evaluate.subset(data.load_rows(args.data, args.eval_split),
+    train = storage.load_examples(args.data, args.train_split)
+    evals = evaluate.subset(storage.load_examples(args.data, args.eval_split),
                             args.eval_per, args.seed)
     gen_rows = evaluate.subset(evals, args.gen_per, args.seed)
 
@@ -133,7 +134,8 @@ def main() -> None:
         sums = collections.Counter()
         n = 0
         for i in batch:
-            ex = answers.encode(train[i], tok, random.Random(f"{args.seed}:{i}"))
+            ex = answers.encode(
+                train[i], tok, random.Random(f"{args.seed}:{i}"))
             if len(ex["input_ids"]) > args.max_tokens:
                 too_long += 1
                 continue

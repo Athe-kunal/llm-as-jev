@@ -36,7 +36,7 @@ from loguru import logger
 import numpy as np
 import torch
 
-from llm_jev.dataloader import answers, data
+from llm_jev.dataloader import answers, schema, storage
 from llm_jev.modeling import context_cite, masked_cite
 
 
@@ -88,29 +88,29 @@ def score_prompts(url: str, tok, prompts: list[list[int]], ks: list[int], chunk:
     return out
 
 
-def prompt_ids(tok, row: dict[str, Any]) -> list[int]:
-    """The row's prompt up to "Best answer: [", options in release order."""
-    ex = answers.encode(row, tok, None)
+def prompt_ids(tok, example: schema.Example) -> list[int]:
+    """The example's prompt up to "Best answer: [", options in release order."""
+    ex = answers.encode(example, tok, None)
     return ex["input_ids"][: ex["path"][0][0] + 1]
 
 
-def predict(url: str, tok, row: dict[str, Any]) -> tuple[int, torch.Tensor]:
+def predict(url: str, tok, example: schema.Example) -> tuple[int, torch.Tensor]:
     """The predicted option (argmax s) and the candidate scores s [K]."""
-    s, _, _ = score_prompts(url, tok, [prompt_ids(tok, row)], [len(row["labels"])])[0]
+    s, _, _ = score_prompts(url, tok, [prompt_ids(tok, example)], [len(example.options)])[0]
     return int(s.argmax()), s
 
 
-def attribute(url: str, tok, row: dict[str, Any], num_ablations: int | None = None,
+def attribute(url: str, tok, example: schema.Example, num_ablations: int | None = None,
               keep_prob: float = 0.5, alpha: float = 0.01, seed: int = 0, **request) -> dict[str, Any]:
     """context_cite.attribute through the server: the predicted answer, then
     one ablated prompt per mask (sentences deleted), all scored in one
     score_prompts call. num_ablations None: masked_cite.ablation_count."""
-    answer, s = predict(url, tok, row)
-    sources = context_cite.split_sources(row)
+    answer, s = predict(url, tok, example)
+    sources = context_cite.split_sources(example)
     n = num_ablations or masked_cite.ablation_count(len(sources))
     masks = context_cite.ablation_masks(n, len(sources), keep_prob, seed)
-    prompts = [prompt_ids(tok, context_cite.ablate(row, sources, keep)) for keep in masks]
-    scored = score_prompts(url, tok, prompts, [len(row["labels"])] * n, **request)
+    prompts = [prompt_ids(tok, context_cite.ablate(example, sources, keep)) for keep in masks]
+    scored = score_prompts(url, tok, prompts, [len(example.options)] * n, **request)
     y = np.array([context_cite.logit_q(s_i, answer) for s_i, _, _ in scored])
     return context_cite.result(s, answer, sources, masks, y, alpha)
 
@@ -121,7 +121,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", default="http://127.0.0.1:30000")
     parser.add_argument("--tokenizer", required=True, help="the served model's folder or HF id")
-    parser.add_argument("--data", default=data.TRAIN_EVAL)
+    parser.add_argument("--data", default=storage.DEFAULT_SOURCE)
     parser.add_argument("--split", default="eval")
     parser.add_argument("--source", nargs="*", help="only these datasets")
     parser.add_argument("--per", type=int, default=5, help="rows per dataset")
@@ -132,11 +132,12 @@ def main() -> None:
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(args.tokenizer)
-    rows = [r for r in data.load_rows(args.data, args.split)
-            if (not args.source or r["source"] in args.source) and len(context_cite.split_sources(r)) >= 2]
+    rows = [r for r in storage.load_examples(args.data, args.split)
+            if (not args.source or r.source in args.source)
+            and len(context_cite.split_sources(r)) >= 2]
     by: dict[str, list] = {}
     for r in rows:
-        by.setdefault(r["source"], []).append(r)
+        by.setdefault(r.source, []).append(r)
     out = open(args.out, "w") if args.out else None
     for source, rs in sorted(by.items()):
         for row in random.Random(0).sample(rs, min(args.per, len(rs))):
@@ -144,11 +145,11 @@ def main() -> None:
             res = attribute(args.url, tok, row, args.ablations)
             took = time.time() - t0
             top = sorted(res["sources"], key=lambda x: -x["w"])[:3]
-            logger.info("{} {}: {} sentences, {:.2f} s, q {:.3f}, top w {}, {}", source, row["id"],
+            logger.info("{} {}: {} sentences, {:.2f} s, q {:.3f}, top w {}, {}", source, row.id,
                         len(res["sources"]), took, res["q"], [round(x["w"], 3) for x in top],
                         context_cite.span_metrics(row, res))
             if out:
-                out.write(json.dumps({"id": row["id"], "seconds": took, **res}) + "\n")
+                out.write(json.dumps({"id": row.id, "seconds": took, **res}) + "\n")
     if out:
         out.close()
         logger.info("wrote {}", pathlib.Path(args.out))

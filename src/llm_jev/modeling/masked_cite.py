@@ -20,10 +20,12 @@ import numpy as np
 import torch
 
 from llm_jev.dataloader import answers
+from llm_jev.dataloader import schema
 from llm_jev.modeling import context_cite
 
 
-def token_owners(tok, row: dict[str, Any], sources: list[dict[str, Any]]) -> tuple[list[int], np.ndarray, int]:
+def token_owners(tok, example: schema.Example,
+                 sources: list[dict[str, Any]]) -> tuple[list[int], np.ndarray, int]:
     """The prompt's token ids, each token's source and where the reader starts.
 
     The prompt is answers.build_prompt with options in release order (as
@@ -34,17 +36,16 @@ def token_owners(tok, row: dict[str, Any], sources: list[dict[str, Any]]) -> tup
     "State:", the text around a part's sentences, the reader). The reader is
     every token from the first one starting after the last part.
     """
-    text, where = answers.build_prompt(row, list(row["labels"]), tok)
+    text, where = answers.build_prompt(example, range(len(example.options)), tok)
     enc = tok(text, add_special_tokens=False, return_offsets_mapping=True)
-    names = [p["name"] for p in row["parts"]]
     by_char = np.full(len(text) + 1, -1)                                # [chars + 1]
     for i, s in enumerate(sources):
-        offset = where[names[s["part"]]][0]
+        offset = where[s["part"]][0]
         by_char[offset + s["start"] - len(s["sep"]): offset + s["end"]] = i
     owner = np.array([next((o for o in by_char[a:b] if o >= 0), -1)    # [P]
                       for a, b in enc["offset_mapping"]])
     starts = np.array([a for a, _ in enc["offset_mapping"]])            # [P]
-    reader = int(np.searchsorted(starts, where[names[-1]][1]))
+    reader = int(np.searchsorted(starts, where[-1][1]))
     return enc["input_ids"], owner, reader
 
 
@@ -230,13 +231,14 @@ def score_full(model, batch: dict[str, Any], tok, k: int, device: str = "cuda") 
             for row in logits]
 
 
-def predict(model, tok, row: dict[str, Any], device: str = "cuda") -> tuple[int, torch.Tensor]:
+def predict(model, tok, example: schema.Example,
+            device: str = "cuda") -> tuple[int, torch.Tensor]:
     """The decision on the full prompt through the packed scorer (one copy
     that keeps every source): the predicted option and the scores s [K]; the
     same as copy 0 of attribute. The model must use flex_attention."""
-    sources = context_cite.split_sources(row)
-    ids, owner, reader = token_owners(tok, row, sources)
-    k = len(row["labels"])
+    sources = context_cite.split_sources(example)
+    ids, owner, reader = token_owners(tok, example, sources)
+    k = len(example.options)
     packed = pack(ids, reader, 1, list(answers.candidates(tok, k)[1]))
     keep = np.ones((1, len(sources)), bool)
     with torch.no_grad():
@@ -252,7 +254,7 @@ def ablation_count(num_sources: int, low: int = 32, high: int = 256) -> int:
     return min(high, max(low, 1 << math.ceil(math.log2(2 * num_sources))))
 
 
-def attribute(model, tok, row: dict[str, Any], num_ablations: int | None = None, keep_prob: float = 0.5,
+def attribute(model, tok, example: schema.Example, num_ablations: int | None = None, keep_prob: float = 0.5,
               alpha: float = 0.01, seed: int = 0, removal: str = "reader", budget: int = 65536,
               device: str = "cuda") -> dict[str, Any]:
     """context_cite.attribute with the decision and every ablation from packed forwards.
@@ -268,12 +270,12 @@ def attribute(model, tok, row: dict[str, Any], num_ablations: int | None = None,
     tokens. The model must use modeling.fa2. num_ablations None: chosen
     from the row's source count (ablation_count).
     """
-    sources = context_cite.split_sources(row)
+    sources = context_cite.split_sources(example)
     n = num_ablations or ablation_count(len(sources))
     masks = context_cite.ablation_masks(n, len(sources), keep_prob, seed)
-    ids, owner, reader = token_owners(tok, row, sources)
+    ids, owner, reader = token_owners(tok, example, sources)
     keep = np.vstack([np.ones(len(sources), bool), masks])              # [1 + n, S]
-    k = len(row["labels"])
+    k = len(example.options)
     nodes = list(answers.candidates(tok, k)[1])
     if removal == "reader":
         packed = pack(ids, reader, len(keep), nodes)

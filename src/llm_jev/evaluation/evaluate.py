@@ -4,8 +4,8 @@ Usage (a trained run, or the base model without --adapter):
   CUDA_VISIBLE_DEVICES=1 .venv/bin/python -m llm_jev.evaluation.evaluate \
       --model Qwen/Qwen3-0.6B --adapter runs/qwen3_0.6b/adapter \
       --out runs/qwen3_0.6b --tag final
---data is a local folder / .jsonl file or a Hugging Face dataset id
-(data.load_rows); external benchmarks are in benchmarks.py.
+--data is a local folder / .parquet file of examples or a Hugging Face
+dataset id (storage.load_examples); external benchmarks are in benchmarks.py.
 
 Metrics per dataset (and their mean, "ALL"): accuracy of argmax s_k (Eq. 1),
 mean log P(gold), the root's legal mass, and text mode on a subset:
@@ -28,17 +28,20 @@ from loguru import logger
 import torch
 
 from llm_jev.dataloader import answers
-from llm_jev.dataloader import data
+from llm_jev.dataloader import schema
+from llm_jev.dataloader import storage
 from llm_jev.modeling import modeling
 
 SEED = 20260922
 
 
-def subset(rows: list[dict], per: int, seed: int) -> list[dict]:
-    """A fixed sample of `per` rows per dataset."""
+def subset(
+    rows: list[schema.Example], per: int, seed: int
+) -> list[schema.Example]:
+    """A fixed sample of `per` examples per dataset."""
     by: dict[str, list] = collections.defaultdict(list)
     for r in rows:
-        by[r["source"]].append(r)
+        by[r.source].append(r)
     rng = random.Random(seed)
     out = []
     for name in sorted(by):
@@ -46,7 +49,8 @@ def subset(rows: list[dict], per: int, seed: int) -> list[dict]:
     return out
 
 
-def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
+def evaluate(model, tok, rows: list[schema.Example],
+             gen_rows: list[schema.Example], device: str,
              batch_tokens: int = 32768, batch_rows: int = 64):
     """Per-dataset metrics, and one example record per text-mode row.
 
@@ -79,7 +83,7 @@ def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
                 logger.info("scored {}/{} rows, {:.1f}m, eta {:.1f}m", done,
                             len(rows), el / 60, el / done * (len(rows) - done) / 60)
         for r, ex, prompt, (s, mass, _) in zip(rows, encoded, prompts, scored):
-            st = stats[r["source"]]
+            st = stats[r.source]
             st["rows"] += 1
             st["accuracy"] += float(s.argmax().item() == ex["gold"])
             st["log_p_gold"] += torch.log_softmax(s, 0)[ex["gold"]].item()
@@ -100,12 +104,12 @@ def evaluate(model, tok, rows: list[dict], gen_rows: list[dict], device: str,
             st["gen_rows"] += 1
             st["gen_valid"] += float(ok)
             st["gen_correct"] += float(ok and int(m.group(1)) == ex["gold"] + 1)
-            options = [r["labels"][label] for label in r["labels"]]
+            options = list(r.options)
             top = torch.softmax(s, 0).topk(min(3, len(options)))
             examples.append({
-                "source": r["source"], "id": r["id"],
-                "state": " / ".join(part["text"] for part in r["parts"])[:400],
-                "question": r["question"],
+                "source": r.source, "id": r.id,
+                "state": " / ".join(part.text for part in r.parts)[:400],
+                "question": r.question,
                 "options": options if len(options) <= 10 else options[:10] + ["…"],
                 "gold": f"[{ex['gold'] + 1}] {options[ex['gold']]}",
                 "scored_top3": [f"[{k + 1}] {options[k]} ({v:.3f})"
@@ -150,8 +154,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", required=True)
     parser.add_argument("--adapter", help="a saved LoRA adapter (else the base)")
-    parser.add_argument("--data", default=data.TRAIN_EVAL,
-                        help="local folder / .jsonl, or a Hub dataset id")
+    parser.add_argument("--data", default=storage.DEFAULT_SOURCE,
+                        help="local folder / .parquet, or a Hub dataset id")
     parser.add_argument("--split", default="eval")
     parser.add_argument("--out", required=True)
     parser.add_argument("--tag", default="base")
@@ -163,7 +167,7 @@ def main() -> None:
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(args.model)
-    rows = subset(data.load_rows(args.data, args.split), args.eval_per,
+    rows = subset(storage.load_examples(args.data, args.split), args.eval_per,
                   args.seed)
     gen_rows = subset(rows, args.gen_per, args.seed)
     model = modeling.load(args.model, args.adapter, merge=False)

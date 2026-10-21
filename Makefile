@@ -1,5 +1,5 @@
 PY := .venv/bin/python
-DATA := data/splits/reason_long_12k
+DATA := data/splits/reason_long_12k_v2
 # make sglang-merge / sglang-serve: the trained adapter, its base model, the merged checkpoint
 BASE ?= Qwen/Qwen3-4B
 ADAPTER ?= runs/qwen3_4b/adapter
@@ -10,7 +10,7 @@ PORT ?= 30000
 .PHONY: help download data sglang-install sglang-merge sglang-serve sglang-stop
 
 help:
-	@echo "make download        fetch the Reason+Long-12k sources (and the benchmarks used to decontaminate them) into data/external"
+	@echo "make download        fetch the pinned Reason+Long-12k sources (and the benchmarks used to decontaminate them) from the internet into the Hugging Face cache"
 	@echo "make data            build $(DATA)/{train,eval}.jsonl and manifest.json (CPU, ~10 min)"
 	@echo "make sglang-install  SGLang as a uv tool (its own environment)"
 	@echo "make sglang-merge    merge ADAPTER into BASE -> MERGED (CPU)"
@@ -19,10 +19,10 @@ help:
 	@echo "training and evaluation: scripts/train.sh, scripts/evaluate.sh"
 
 download:
-	$(PY) -m llm_jev.dataloader.build_data --download
+	$(PY) -m llm_jev.dataloader.build --download
 
 data: download
-	$(PY) -m llm_jev.dataloader.build_data
+	$(PY) -m llm_jev.dataloader.build --out $(DATA)
 
 sglang-install:
 	uv tool install --prerelease=allow --python 3.11 sglang==0.5.22
