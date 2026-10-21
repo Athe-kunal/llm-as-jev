@@ -196,3 +196,20 @@ def pearson_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     t = target - target.mean(1, keepdim=True)                                   # [B, M]
     corr = (p * t).mean(1) / ((p ** 2).mean(1).sqrt() * (t ** 2).mean(1).sqrt() + 1e-8)  # [B]
     return -corr.mean()
+
+
+def diffmask_loss(open_prob: torch.Tensor, s: torch.Tensor, s_masked: torch.Tensor,
+                  lam: float, margin: float) -> TensorDict:
+    """DiffMask's constrained objective for one row, as a Lagrangian.
+
+    Minimise the expected fraction of open gates subject to
+    KL(q || q~) <= margin, where q = softmax(s) is the tree distribution of
+    the unmasked decision and q~ = softmax(s_masked) that of the masked one;
+    lam >= 0 is the multiplier (updated by dual ascent in the trainer).
+    open_prob [T] = P(z_t > 0) per gated token, s, s_masked [K] -> loss and
+    its parts, all [].
+    """
+    l0 = open_prob.mean()                                                       # []
+    lq = torch.log_softmax(s.detach().float(), -1)                              # [K] the target, fixed
+    kl = (lq.exp() * (lq - torch.log_softmax(s_masked.float(), -1))).sum()      # []
+    return TensorDict({"loss": l0 + lam * (kl - margin), "l0": l0, "kl": kl})

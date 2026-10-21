@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Doc } from "../components/Math.jsx";
+import { Toggle } from "../components/Controls.jsx";
 
-// The model behind /api (blogs/server.py): the 0.6B λ = 0.01 adapter.
-const MODEL = "Qwen3-0.6B, λ = 0.01 adapter";
-const NOTE = "one packed forward: the decision + 64 ablations (sentences hidden from the reader), then Lasso";
+// auto: about two per sentence, a power of two in [32, 256] (masked_cite.ablation_count); or fixed
+const ABLATIONS = [["auto", "auto"], ["64", "64"], ["256", "256"]];
+// reader: a dropped sentence is hidden from the question and answer only (the document is shared, one pass);
+// full: hidden from every later token, the document included (the document recomputed per ablation)
+const REMOVAL = [["reader", "reader-only"], ["full", "full masking"]];
 const SHOW_OPTIONS = 8; // options listed: the most probable ones, plus gold and the answer
 
 async function api(path) {
@@ -19,6 +22,9 @@ export default function TryIt() {
   const [spansOnly, setSpansOnly] = useState(true);
   const [row, setRow] = useState(null);
   const [attr, setAttr] = useState();
+  const [ablations, setAblations] = useState("auto");
+  const [removal, setRemoval] = useState("reader");
+  const query = (id, a, m) => `/api/attribute?id=${encodeURIComponent(id)}&ablations=${a}&removal=${m}`;
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,13 +44,30 @@ export default function TryIt() {
       const { id } = await api(`/api/sample?source=${source}&spans=${withSpans ? 1 : 0}`);
       setRow(await api(`/api/row?id=${encodeURIComponent(id)}`));
       setAttr("loading");
-      setAttr(await api(`/api/attribute?id=${encodeURIComponent(id)}`));
+      setAttr(await api(query(id, ablations, removal)));
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
     }
-  }, [source, withSpans]);
+  }, [source, withSpans, ablations, removal]);
+
+  // re-run ContextCite on the current row with another ablation count or removal
+  const rerun = useCallback(async (n, m) => {
+    setAblations(n);
+    setRemoval(m);
+    if (!row) return;
+    setBusy(true);
+    setError(null);
+    setAttr("loading");
+    try {
+      setAttr(await api(query(row.id, n, m)));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [row]);
 
   useEffect(() => {
     if (datasets.length) next();
@@ -55,8 +78,9 @@ export default function TryIt() {
       <p className="eyebrow">7 · Try it</p>
       <h2>Random eval rows, live</h2>
       <p className="lede small">
-        {MODEL}, running on this machine. Each row is answered with the guided decoder, then explained by ContextCite in its
-        one-pass form: the prompt is packed with 64 copies of the question, each blind to a random half of the sentences. Amber
+        {row ? row.model : "The trained decision model"}, running on this machine. Each row is answered with the guided decoder, then explained by ContextCite in its
+        one-pass form: the prompt is packed with many copies of the question (about two per sentence, 32 to 256), each blind to a
+        random half of the sentences. Amber
         underline: the dataset's gold evidence; outlined: the top 3 sentences, scrolled into view; green and red tint: sentences
         that raise and lower the answer's logit.
       </p>
@@ -94,7 +118,7 @@ export default function TryIt() {
         {row && (
           <motion.div key={row.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
             <Answer row={row} />
-            <Explain row={row} res={attr} />
+            <Explain row={row} res={attr} ablations={ablations} removal={removal} onRerun={rerun} busy={busy} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -132,20 +156,33 @@ function Answer({ row }) {
   );
 }
 
-function Explain({ row, res }) {
+function Explain({ row, res, ablations, removal, onRerun, busy }) {
   const loading = res === "loading" || res === undefined;
   return (
     <div className="try-panel">
       <div className="try-head">
         <div>
           <h3>ContextCite</h3>
-          <span className="viz-label">{NOTE}</span>
+          <span className="viz-label">
+            one packed forward: the decision + {loading ? (ablations === "auto" ? "auto" : ablations) : res.ablations} ablations
+            {ablations === "auto" && !loading && res.w && ` (auto, ${row.sentences.length} sentences)`}
+            {removal === "full"
+              ? " (sentences hidden from every later token: each ablation's kept tokens, FA2, shared prefixes once)"
+              : " (sentences hidden from the question and answer; the document shared)"}, then Lasso
+          </span>
         </div>
-        {!loading && res.w && <span className="try-time">{res.seconds.toFixed(2)} s</span>}
+        <div className="try-head-right">
+          <Toggle id="removal" label="Removal" value={removal} options={REMOVAL}
+                  onChange={(m) => !busy && m !== removal && onRerun(ablations, m)} />
+          <Toggle id="ablations" label="Ablations" value={ablations} options={ABLATIONS}
+                  onChange={(n) => !busy && n !== ablations && onRerun(n, removal)} />
+          {!loading && res.w && <span className="try-time">{res.seconds.toFixed(2)} s</span>}
+        </div>
       </div>
       {loading ? (
         <div className="try-loading">
-          <span className="spinner" /> scoring the decision and 64 ablations in one pass…
+          <span className="spinner" /> scoring the decision and {ablations === "auto" ? "its" : ablations} ablations
+          {removal === "full" ? " (full masking: the kept tokens of each ablation, FA2 with shared prefixes; long rows take 5–15 s)…" : " in one pass…"}
         </div>
       ) : res.w === null ? (
         <>
