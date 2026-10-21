@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launches one training run in the background (one GPU; docs/architecture.md).
+# Launches one training run in the background (one GPU).
 #
 #   scripts/train.sh <model> <run dir> [gpu] [extra train.py args ...]
 #   scripts/train.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2
@@ -28,7 +28,7 @@ SEED=${SEED:-20260922}
 
 model=${1:?model id}; out=${2:?run dir}; gpu=${3:-0}; shift $(( $# < 3 ? $# : 3 ))
 mkdir -p "$(dirname "$out")"
-CUDA_VISIBLE_DEVICES=$gpu PYTHONPATH=src nohup .venv/bin/python -m train.train \
+CUDA_VISIBLE_DEVICES=$gpu nohup .venv/bin/python -m llm_jev.train.train \
     --model "$model" --out "$out" --data "$DATA" \
     --batch-size "$BATCH_SIZE" --lr "$LR" --warmup-steps "$WARMUP_STEPS" \
     --min-lr-ratio "$MIN_LR_RATIO" --weight-decay "$WEIGHT_DECAY" \

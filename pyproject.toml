@@ -1,19 +1,15 @@
 [project]
-name = "spanjudge"
+name = "llm-jev"
 version = "0.1.0"
-description = "Span-highlighting judge: synthetic span data and a joint label + span model"
+description = "Train LLMs as Jev decision models and attribute their decisions with fast ContextCite"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2",
-    "openai>=1.50",
     "datasets",
-    "fastapi",
-    "uvicorn",
     "nvitop>=1.7.1",
     "torch==2.9.0",
     "torchvision==0.24.0",
-    # Nimble's training stack (third_party/nimble/requirements/training.txt).
     "transformers==5.17.0",
     "peft==0.21.0",
     "accelerate==1.15.0",
@@ -30,6 +26,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "hypothesis"]
+
+[project.scripts]
+llm-jev-train = "llm_jev.train.train:main"
+llm-jev-evaluate = "llm_jev.evaluation.evaluate:main"
+llm-jev-benchmarks = "llm_jev.evaluation.benchmarks:main"
+llm-jev-build-data = "llm_jev.dataloader.build_data:main"
 
 # CUDA 12.8 wheels: run on the 550 driver and on 580+.
 [[tool.uv.index]]
@@ -50,9 +52,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["llm_jev*"]
 
-[tool.pytest.ini_options]
-pythonpath = ["src"]
+[tool.setuptools.package-data]
+llm_jev = ["prompts/*.j2"]
 
 [tool.black]
 line-length = 80

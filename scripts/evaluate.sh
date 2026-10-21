@@ -13,8 +13,8 @@ cd "$(dirname "$0")/.."
 model=${1:?model id}; out=${2:?run dir}; gpu=${3:-0}; tag=${4:-final}
 adapter=()
 [[ $tag != base ]] && adapter=(--adapter "$out/adapter")
-export CUDA_VISIBLE_DEVICES=$gpu PYTHONPATH=src
-.venv/bin/python -m evaluation.evaluate --model "$model" "${adapter[@]}" \
+export CUDA_VISIBLE_DEVICES=$gpu
+.venv/bin/python -m llm_jev.evaluation.evaluate --model "$model" "${adapter[@]}" \
     --out "$out" --tag "$tag"
-.venv/bin/python -m evaluation.benchmarks --model "$model" "${adapter[@]}" \
+.venv/bin/python -m llm_jev.evaluation.benchmarks --model "$model" "${adapter[@]}" \
     --out "$out" --tag "$tag"
