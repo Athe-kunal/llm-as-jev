@@ -32,6 +32,8 @@ llm-jev-train = "llm_jev.train.train:main"
 llm-jev-evaluate = "llm_jev.evaluation.evaluate:main"
 llm-jev-benchmarks = "llm_jev.evaluation.benchmarks:main"
 llm-jev-build-data = "llm_jev.dataloader.build_data:main"
+llm-jev-merge = "llm_jev.serving.merge:main"
+llm-jev-sglang-cite = "llm_jev.serving.sglang_client:main"
 
 # CUDA 12.8 wheels: run on the 550 driver and on 580+.
 [[tool.uv.index]]

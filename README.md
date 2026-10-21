@@ -57,6 +57,8 @@ The console scripts run the same modules as `python -m llm_jev.<module>`:
 | `llm-jev-train` | `llm_jev.train.train` | one epoch of L_tree + KL anchors, evaluated before and after |
 | `llm-jev-evaluate` | `llm_jev.evaluation.evaluate` | eval split metrics |
 | `llm-jev-benchmarks` | `llm_jev.evaluation.benchmarks` | external benchmarks (BoolQ, MMLU, ARC-C, ... and JevBench) |
+| `llm-jev-merge` | `llm_jev.serving.merge` | merges a LoRA adapter into its base model for SGLang |
+| `llm-jev-sglang-cite` | `llm_jev.serving.sglang_client` | decisions and ContextCite through an SGLang server |
 | `llm-jev-build-data` | `llm_jev.dataloader.build_data` | builds Reason+Long-12k (`--download` fetches the sources) |
 
 Attribution with the packed paths, from Python:
@@ -79,6 +81,36 @@ The launchers in `scripts/` take the GPU index as an argument and set
 `CUDA_VISIBLE_DEVICES` directly. Runs and data live in `runs/` and `data/`,
 which are git-ignored.
 
+## Serving with SGLang
+
+SGLang runs in its own environment (a uv tool, `make sglang-install`), since
+its torch and transformers pins differ from training's. Its score API cannot
+select a LoRA adapter, so the adapter is merged into the weights first.
+
+```bash
+make sglang-install                                                  # once
+make sglang-serve BASE=Qwen/Qwen3-4B ADAPTER=runs/qwen3_4b/adapter GPU=0 PORT=30000
+llm-jev-sglang-cite --url http://127.0.0.1:30000 --tokenizer runs/qwen3_4b/merged --source contractnli --per 5
+make sglang-stop PORT=30000
+```
+
+`make sglang-serve` merges `ADAPTER` into `runs/qwen3_4b/merged` when it is
+missing, then starts `scripts/sglang_serve.sh` and waits for the server. The
+client (`llm_jev.serving.sglang_client`) sends our own prompt as token ids to
+`/v1/score`; it does not use `/v1/decisions`, which renders its own A-Z
+prompt. ContextCite there deletes the dropped sentences (the reference
+method): the radix cache reuses each ablated prompt's prefix, and the trie's
+deeper nodes are sent after the prompts so they hit the cache.
+
+```python
+from transformers import AutoTokenizer
+from llm_jev.serving import sglang_client
+
+tok = AutoTokenizer.from_pretrained("runs/qwen3_4b/merged")
+answer, s = sglang_client.predict("http://127.0.0.1:30000", tok, row)
+res = sglang_client.attribute("http://127.0.0.1:30000", tok, row)   # same output as masked_cite.attribute
+```
+
 ## Module map
 
 ```
@@ -89,8 +121,10 @@ src/llm_jev/
                  deletion), masked_cite.py (one-pass ContextCite: reader and full masking), fa2.py
                  (FlashAttention-2 varlen next to flex attention)
   train/         losses.py (L_tree, KL anchors), train.py
+  serving/       merge.py (LoRA merged into the weights), sglang_client.py (decisions and ContextCite
+                 over SGLang's /v1/score)
   evaluation/    evaluate.py (eval split metrics), benchmarks.py (external benchmarks)
   prompts/       decision.j2 (the decision prompt; package data)
-scripts/         train.sh, evaluate.sh (launchers, one GPU each)
+scripts/         train.sh, evaluate.sh, sglang_serve.sh (launchers, one GPU each)
 ```
 
