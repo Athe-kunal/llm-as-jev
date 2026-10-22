@@ -1,12 +1,10 @@
 """ContextCite for the decision interface: which context sentences an answer depends on.
 
-Cohen-Wang et al., "ContextCite: Attributing Model Generation to Context"
-(NeurIPS 2024), following github.com/MadryLab/context-cite (MIT). Sources
-are the sentences of the example's parts; ablated examples keep a random subset of
-them, the model's predicted answer is re-scored on each, and a sparse linear
-surrogate gives one weight per sentence. The target is the logit of the tree
-probability q(answer | x) (answers.score_batch), not raw token
-probabilities.
+Cohen-Wang et al., ContextCite (NeurIPS 2024), following
+github.com/MadryLab/context-cite (MIT). Sources are the sentences of the
+example's parts; ablations keep a random subset, the predicted answer is
+re-scored on each, and a sparse linear surrogate gives one weight per
+sentence. The target is logit q(answer) from answers.score_batch.
 """
 
 import dataclasses
@@ -34,15 +32,14 @@ def _punkt() -> None:
         nltk.download("punkt_tab", quiet=True)
 
 
-# A word for has_content: two or more letters (no digits or underscores).
 _WORD = re.compile(r"[^\W\d_]{2,}")
 
 
 def has_content(text: str, min_words: int = 2, min_alnum: float = 0.5) -> bool:
-    """Whether a sentence carries content: at least min_words words and at
-    least min_alnum of its characters letters or digits. Blank form fields
-    ("Agent:____"), checkbox lines and fragments of abbreviations split by
-    nltk ("(C.A.R.") do not."""
+    """Whether a sentence carries content (enough words, mostly letters or digits).
+
+    Blank form fields, checkbox lines and nltk abbreviation fragments do not.
+    """
     alnum = sum(ch.isalnum() for ch in text) / max(len(text), 1)
     return len(_WORD.findall(text)) >= min_words and alnum >= min_alnum
 
@@ -51,15 +48,10 @@ def split_sources(example: schema.Example, min_words: int = 2,
                   min_alnum: float = 0.5) -> list[dict[str, Any]]:
     """The example's sources: the sentences of every part, in order, each with content.
 
-    As the reference's split_text: each line of a part is split with
-    nltk.sent_tokenize and each sentence is located after the previous one.
-    Unlike the reference, a sentence without content (has_content) joins the
-    previous source of its part, or the next one at the start of a part (a
-    part with no content sentence is one source), so every source can carry
-    evidence and the text is unchanged. A source is {"part": part index,
-    "start", "end": its char range in that part's text (the example's spans use
-    the same offsets), "sep": the text between the previous source of the
-    part, or the part start, and it}.
+    Sentences without content join a neighbouring source, so the text is
+    unchanged. Each source is {"part", "start", "end" (char range in that
+    part's text, the same offsets as spans), "sep" (the text since the previous
+    source of its part)}.
     """
     _punkt()
     sources = []
@@ -74,11 +66,11 @@ def split_sources(example: schema.Example, min_words: int = 2,
                 cur = s["end"]
                 if not has_content(sentence, min_words, min_alnum):
                     if own:
-                        own[-1]["end"] = s["end"]          # joins the previous source
+                        own[-1]["end"] = s["end"]
                     elif lead:
                         lead["end"] = s["end"]
                     else:
-                        lead = s                           # waits for the next source
+                        lead = s
                     continue
                 if lead:
                     s = {**s, "start": lead["start"], "sep": lead["sep"]}
@@ -92,11 +84,8 @@ def ablate(example: schema.Example, sources: list[dict[str, Any]],
            keep: list[bool]) -> schema.Example:
     """The example with only the kept sources (the reference's get_context).
 
-    Each kept sentence is preceded by its own separator, except the first
-    kept one of its part. Unlike the reference, the text before a part's
-    first sentence and after its last (whitespace) is always kept, so keeping
-    every source rebuilds the example exactly. Spans are dropped: their offsets
-    no longer hold.
+    Text outside a part's sources is always kept, so keeping every source
+    rebuilds the example exactly. Spans are dropped.
     """
     kept: list[list[str]] = [[] for _ in example.parts]
     for s, k in zip(sources, keep):
@@ -115,9 +104,7 @@ def ablate(example: schema.Example, sources: list[dict[str, Any]],
 def ablation_masks(n: int, d: int, keep_prob: float = 0.5, seed: int = 0) -> np.ndarray:
     """[n, d] bool: n random ablations of d sources, True = kept.
 
-    The reference's _create_mask: mask i comes from its own
-    np.random.RandomState(seed + i), each source kept with keep_prob, so the
-    same seed gives the reference's masks.
+    Mask i uses RandomState(seed + i), as the reference's _create_mask does.
     """
     masks = np.zeros((n, d), dtype=bool)
     for i in range(n):
@@ -127,9 +114,10 @@ def ablation_masks(n: int, d: int, keep_prob: float = 0.5, seed: int = 0) -> np.
 
 
 def logit_q(s: torch.Tensor, answer: int) -> float:
-    """logit q(answer) = log q - log(1 - q) from the candidate scores s [K]:
-    s_answer - logsumexp(other s), exact even when q rounds to 1 (the
-    reference's correct-minus-logsumexp-of-the-rest, per token there)."""
+    """logit q(answer) = log q - log(1 - q) from the candidate scores s [K].
+
+    Computed as s_answer - logsumexp(other s), which stays exact when q rounds to 1.
+    """
     s = s.double()
     return (s[answer] - torch.cat([s[:answer], s[answer + 1:]]).logsumexp(0)).item()
 
@@ -140,11 +128,7 @@ def ablation_targets(model, tok, example: schema.Example, sources: list[dict[str
                      batch_tokens: int = 32768, batch_rows: int = 64) -> np.ndarray:
     """[n] float: logit q(answer | ablated prompt) for every mask.
 
-    The reference's get_masks_and_logit_probs + aggregate_logit_probs, with
-    the tree probability q of answers.score_batch in place of the response
-    tokens' probabilities. Options stay in release order (no shuffling), so
-    `answer` is the same option under every mask; prompts are scored in
-    length-sorted batches (answers.batches).
+    Options stay in release order, so `answer` is the same option under every mask.
     """
     prompts = []
     for keep in masks:
@@ -164,10 +148,8 @@ def fit_surrogate(masks: np.ndarray, y: np.ndarray, alpha: float = 0.01,
                   num_output_tokens: int = 1) -> tuple[np.ndarray, float]:
     """Sparse linear surrogate y ~ b + w . mask: one weight per source.
 
-    The reference's LassoRegression.fit: masks standardised (StandardScaler),
-    Lasso(alpha) with an intercept, then w and b mapped back to 0/1 masks.
-    The reference divides y by the response length before the fit and
-    multiplies w, b back; our y is one decision, so num_output_tokens = 1.
+    Lasso on standardized masks, with w and b mapped back to 0/1 masks. y is a
+    single decision rather than a response, so num_output_tokens is 1.
     """
     X = masks.astype(np.float32)
     scaler = StandardScaler()
@@ -180,8 +162,7 @@ def fit_surrogate(masks: np.ndarray, y: np.ndarray, alpha: float = 0.01,
 
 def predict(model, tok, example: schema.Example,
             device: str = "cuda") -> tuple[list[int], int, torch.Tensor]:
-    """The prompt (options in release order), the predicted option (argmax
-    of answers.score) and the candidate scores s [K]."""
+    """The prompt (options in release order), the predicted option, and the scores s [K]."""
     ex = answers.encode(example, tok, None)
     prompt = ex["input_ids"][: ex["path"][0][0] + 1]
     s, _, _ = answers.score(model, prompt, tok, ex["n_options"], device)
@@ -200,11 +181,10 @@ def attribute(model, tok, example: schema.Example, num_ablations: int = 64, keep
               alpha: float = 0.01, seed: int = 0, device: str = "cuda") -> dict[str, Any]:
     """ContextCite on one example (the reference's get_attributions).
 
-    The attributed answer is the model's prediction on the full example (argmax
-    of answers.score, options in release order). Returns {"answer": its
-    option index, "q": its tree probability, "sources": split_sources(example)
-    with each source's weight "w", "bias": the surrogate's intercept}. A
-    weight is how much keeping that sentence adds to logit q(answer).
+    The attributed answer is the model's prediction on the full example.
+    Returns {"answer", "q" (its tree probability), "sources" (split_sources
+    with each source's weight "w"), "bias"}. A weight is how much keeping that
+    sentence adds to logit q(answer).
     """
     _, answer, s = predict(model, tok, example, device)
     sources = split_sources(example)
@@ -224,9 +204,7 @@ def no_sources_result(s: torch.Tensor, answer: int) -> dict[str, Any]:
 
 def result(s: torch.Tensor, answer: int, sources: list[dict[str, Any]], masks: np.ndarray,
            y: np.ndarray, alpha: float = 0.01) -> dict[str, Any]:
-    """attribute's output from the full prompt's candidate scores s [K], the
-    attributed answer and the ablation targets y [n] of masks [n, S]: the
-    surrogate's weight per source and its intercept."""
+    """attribute's output from the full prompt's scores s [K] and the ablation targets y [n] for masks [n, S]."""
     w, b = fit_surrogate(masks, y, alpha)
     return {"answer": answer, "q": torch.softmax(s.float(), 0)[answer].item(),
             "sources": [{**src, "w": float(v)} for src, v in zip(sources, w)], "bias": b}
@@ -253,13 +231,11 @@ def gold_sentences(example: schema.Example, sources: list[dict[str, Any]]) -> se
 
 def span_metrics(example: schema.Example, result: dict[str, Any], k: int = 3,
                  beta: float = 1.0) -> dict[str, float] | None:
-    """Sentence-level scores of the attributions against the gold spans
-    (None for an example without gold spans).
+    """Sentence-level scores against the gold spans (None without gold spans).
 
-    precision, recall and f_beta = (1 + beta^2) P R / (beta^2 P + R) of the
-    top-k selection (beta < 1 favours precision; beta = 1 is F1); ap: average
-    precision of the full weight ranking (threshold-free; ties broken by
-    sentence order); top1: whether the highest-weighted sentence is gold.
+    precision, recall and f_beta of the top-k selection (beta < 1 favours
+    precision); ap: average precision of the full weight ranking; top1:
+    whether the highest-weighted sentence is gold.
     """
     gold = gold_sentences(example, result["sources"])
     if not gold:

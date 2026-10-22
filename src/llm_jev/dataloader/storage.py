@@ -1,13 +1,10 @@
 """Examples as a `datasets.Dataset`: the container the pipeline maps over.
 
-A Dataset has one row per example, in the schema of `FEATURES` (the dict form
-of `Example.to_row`). It is saved as Parquet, which is also what a Hugging
-Face Hub dataset holds, so a built dataset can be pushed as it is.
+Rows follow the schema of `FEATURES`. Datasets are saved as Parquet, the
+format a Hugging Face Hub dataset holds.
 
-`load_dataset(source, split)` reads, in this order:
-  - a .parquet file (the split is ignored);
-  - a directory holding <split>.parquet;
-  - otherwise a Hugging Face dataset id, via `datasets.load_dataset`.
+load_dataset reads a .parquet file, a folder holding <split>.parquet, or else
+a Hugging Face dataset id.
 """
 
 import pathlib
@@ -44,11 +41,7 @@ def to_dataset(
 
     Args:
       examples: The examples.
-      with_overlap_text: Whether to add the `overlap_text` working column
-        (a list of strings, empty for the default) after the schema columns.
-
-    Returns:
-      The Dataset, in the schema of `FEATURES` (plus the working column).
+      with_overlap_text: Whether to add the `overlap_text` working column.
     """
     features = FEATURES.copy()
     if with_overlap_text:
@@ -73,9 +66,6 @@ def load_dataset(
       source: A .parquet file, a folder holding <split>.parquet, or a
         Hugging Face dataset id.
       split: The split to read (ignored for a .parquet file).
-
-    Returns:
-      The Dataset, in the schema of `FEATURES`.
 
     Raises:
       FileNotFoundError: If `source` is a local folder without <split>.parquet.

@@ -5,11 +5,7 @@ from torch import nn
 
 
 def load_base(model_id: str):
-    """The base LLM (latest Hugging Face version) in bf16 on the CPU.
-
-    Qwen3.5 is loaded with its multimodal class, other models (e.g. Qwen3)
-    with AutoModelForCausalLM.
-    """
+    """The base LLM in bf16 on the CPU (Qwen3.5 uses its multimodal class)."""
     from transformers import AutoModelForCausalLM
     from transformers import Qwen3_5ForConditionalGeneration
 
@@ -20,8 +16,7 @@ def load_base(model_id: str):
 
 
 def add_lora(model, rank: int = 16):
-    """A fresh LoRA adapter (alpha 2 * rank, dropout 0) on the decoder's
-    linear layers (not the vision tower or the LM head)."""
+    """A fresh LoRA adapter on the decoder's linear layers (not the vision tower or LM head)."""
     from peft import LoraConfig
     from peft import get_peft_model
 
@@ -53,10 +48,8 @@ def load(model_id: str, adapter: str | None = None, merge: bool = True, device: 
 def batched_hidden(model, seqs: list[list[int]], device: str, pad: int):
     """Last-layer states and last-position logits for several sequences.
 
-    Left padding: the linear-attention layers zero padded inputs, the
-    full-attention layers get the padding mask, and position ids skip the
-    padding, so each row matches a batch-of-one forward up to bf16 rounding.
-    Returns per-row hidden states (padding removed) and logits.
+    Sequences are left-padded; each row matches a batch-of-one forward up to
+    bf16 rounding. Returns per-row hidden states (padding removed) and logits.
     """
     n = max(len(x) for x in seqs)
     ids = torch.full((len(seqs), n), pad, dtype=torch.long)
@@ -66,8 +59,7 @@ def batched_hidden(model, seqs: list[list[int]], device: str, pad: int):
         mask[i, n - len(x):] = 1
     ids, mask = ids.to(device), mask.to(device)
     pos = (mask.cumsum(-1) - 1).clamp(min=0)
-    # The language model alone gives only the last layer (all layers' states
-    # would be kept with output_hidden_states); LoRA stays active.
+    # Language model only, last layer only (no output_hidden_states); LoRA stays active.
     base = model.get_base_model() if hasattr(model, "get_base_model") else model
     out = base.model(input_ids=ids, attention_mask=mask, position_ids=pos,
                      use_cache=False)

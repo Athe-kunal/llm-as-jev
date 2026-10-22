@@ -16,7 +16,7 @@ dependencies = [
     "tensorboard",
     "flash-linear-attention==0.5.2",  # fast Gated DeltaNet for Qwen3.5
     # Fast short convolution in Qwen3.5's linear-attention layers. Built from
-    # source against the installed torch: CUDA_HOME=/usr/local/cuda-12.6.
+    # source against the installed torch: set CUDA_HOME to your CUDA toolkit.
     "causal-conv1d==1.5.3.post1",
     "loguru>=0.7.3",
     "tensordict>=0.14.3",
@@ -37,7 +37,7 @@ llm-jev-merge = "llm_jev.serving.merge:main"
 llm-jev-spans = "llm_jev.span_generation.best_of_n:main"
 llm-jev-sglang-cite = "llm_jev.serving.sglang_client:main"
 
-# CUDA 12.8 wheels: run on the 550 driver and on 580+.
+# CUDA 12.8 wheels.
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"

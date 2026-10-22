@@ -3,7 +3,6 @@
 Importing this package registers every source in `base.SOURCES`.
 """
 
-# The imports register the sources.
 from llm_jev.dataloader.sources import intent  # pylint: disable=unused-import
 from llm_jev.dataloader.sources import multiple_choice  # pylint: disable=unused-import
 from llm_jev.dataloader.sources import nimble  # pylint: disable=unused-import

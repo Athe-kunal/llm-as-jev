@@ -1,9 +1,8 @@
 """The uniform example every dataset is converted to.
 
-A dataset source reads its raw files and emits `Example`s; everything
-downstream (prompt building, training, evaluation, span generation) consumes
-only this class. `Example.to_row` / `Example.from_row` convert it to and from
-a row of a `datasets.Dataset` (see `storage.FEATURES`).
+Sources emit `Example`s; everything downstream consumes only this class.
+`Example.to_row` / `Example.from_row` convert it to and from a row of a
+`datasets.Dataset` (see `storage.FEATURES`).
 """
 
 import dataclasses
@@ -20,12 +19,7 @@ _REQUIRED_KEYS = frozenset(
 
 @dataclasses.dataclass(frozen=True)
 class Part:
-    """A named piece of the input text (a passage, a document, a goal).
-
-    Attributes:
-      name: Section name, e.g. "Passage".
-      text: The section text.
-    """
+    """A named piece of the input text (a passage, a document, a goal)."""
 
     name: str
     text: str
@@ -33,13 +27,7 @@ class Part:
 
 @dataclasses.dataclass(frozen=True)
 class Span:
-    """A character range of one part that supports the answer.
-
-    Attributes:
-      part: Index into `Example.parts`.
-      start: First character of the span in that part's text.
-      end: One past the last character of the span.
-    """
+    """A character range [start, end) of one part (an index into `Example.parts`) that supports the answer."""
 
     part: int
     start: int
@@ -51,23 +39,16 @@ class Example:
     """One decision: input parts, a question, ordered options and the gold.
 
     Attributes:
-      id: Unique within a dataset, e.g. "reclor:3f9a...".
-      source: Name of the dataset the example comes from.
-      parts: The input text, in prompt order. Empty when the question is
-        self-contained (e.g. MMLU).
-      question: The question or instruction.
-      options: The answer options in prompt order; option i is shown as
-        number i + 1. At least two.
+      id: Unique within a dataset.
+      parts: The input text, in prompt order; empty if the question is self-contained.
+      options: Option i is shown as number i + 1. At least two.
       gold: 0-based index of the correct option.
-      spans: Evidence in `parts` supporting the gold option; empty when the
-        dataset has none or the answer has no evidence.
-      group: Leakage unit (document, story, theory, ...). Examples of one
-        group must stay in one split.
-      subset: Key to stratify by (label name, hypothesis, question type).
-      meta: Extra provenance or annotation output, JSON-serializable.
-      overlap_text: Texts to check against evaluation benchmarks when they
-        should differ from parts + question + options. A working column of
-        the build (`to_row(with_overlap_text=True)`); not part of saved rows.
+      spans: Evidence in `parts` for the gold option; may be empty.
+      group: Leakage unit (document, story, ...); one group stays in one split.
+      subset: Key to stratify by.
+      meta: Extra JSON-serializable provenance.
+      overlap_text: Texts to check against benchmarks, when they differ from
+        parts + question + options. A build working column, not in saved rows.
     """
 
     id: str
@@ -85,12 +66,7 @@ class Example:
         default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        """Checks the invariants.
-
-        Raises:
-          ValueError: If there are fewer than two options, `gold` is out of
-            range, or a span does not fit inside its part.
-        """
+        """Checks the invariants; raises ValueError on a violation."""
         if len(self.options) < 2:
             raise ValueError(f"{self.id}: needs at least 2 options")
         if not 0 <= self.gold < len(self.options):
@@ -121,8 +97,7 @@ class Example:
         """The row of a `datasets.Dataset` (see `storage.FEATURES`).
 
         Args:
-          with_overlap_text: Whether to add the `overlap_text` working column
-            (empty when it is None), so a `map` over the rows sees it.
+          with_overlap_text: Also add the `overlap_text` working column.
         """
         row = {
             "id": self.id,
@@ -145,19 +120,12 @@ class Example:
 
     @classmethod
     def from_row(cls, data: Mapping[str, Any]) -> "Example":
-        """Builds an example from a dataset row.
-
-        Args:
-          data: A mapping with the keys `to_row` writes (`meta` is a JSON
-            string); `spans`, `group`, `subset` and `meta` may be absent.
-
-        Returns:
-          The validated example.
+        """Builds a validated example from a dataset row.
 
         Raises:
           ValueError: If a required key is missing, an unknown key is present
-            (for instance the retired `labels` / `label` format), or the
-            example breaks an invariant.
+            (e.g. the retired `labels` / `label` format), or the example
+            breaks an invariant.
         """
         keys = set(data)
         if missing := _REQUIRED_KEYS - keys:

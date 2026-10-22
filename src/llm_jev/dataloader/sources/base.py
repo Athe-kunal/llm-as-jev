@@ -1,8 +1,8 @@
 """The source registry and the helpers every source uses.
 
 A source reads one dataset's raw files and returns its official train and
-validation splits as `Example`s. Sources only parse: they do not
-deduplicate, filter or sample (that is `processing`).
+validation splits as `Example`s. Sources only parse; `processing` deduplicates,
+filters and samples.
 """
 
 import dataclasses
@@ -20,8 +20,7 @@ Split = dict[str, list[schema.Example]]
 
 DEFAULT_SPLITS = {"train": "train", "validation": "validation"}
 
-# How many training examples each stratum gets: a share per stratum (the
-# last one takes the remainder), or "equal" for equal shares.
+# Training examples per stratum: a share per stratum (the last takes the remainder), or "equal".
 Shares = Mapping[str, float] | Literal["equal"]
 
 
@@ -65,17 +64,9 @@ def register(
     splits: Mapping[str, str] | None = None,
     stratification: Stratification | None = None,
 ) -> Callable[[Callable[[], Split]], Callable[[], Split]]:
-    """Registers a loader function as the source `name`.
+    """Registers a loader function as the source `name` (splits default to train / validation).
 
-    Args:
-      name: The dataset name.
-      splits: Which official split each side is read from; defaults to
-        train / validation.
-      stratification: The source's own way of drawing training examples, if
-        it has one.
-
-    Returns:
-      A decorator that registers the function and returns it unchanged.
+    The decorator returns the function unchanged.
     """
 
     def decorator(load: Callable[[], Split]) -> Callable[[], Split]:
@@ -122,22 +113,12 @@ def make_example(
     """One example, with a stable id and group derived from the raw keys.
 
     Args:
-      source: Dataset name.
-      key: Identifies the row inside the dataset (with the question, it
-        makes the id).
-      subset: Stratification key, usually the gold label's name.
+      key: Identifies the row inside the dataset (with the question, it makes the id).
       group: Raw identifier of the leakage unit.
-      parts: (name, text) pairs in prompt order.
-      question: The question text.
-      options: The answer options in release order.
-      gold: 0-based index of the correct option.
       spans: (part name, start, end) triples; duplicates are collapsed and
         those that do not fit their part are dropped.
-      overlap_text: Source texts the benchmark-overlap filter checks, when
-        they differ from parts + question + options.
-
-    Returns:
-      The example.
+      overlap_text: Texts the benchmark-overlap filter checks, when they
+        differ from parts + question + options.
     """
     texts = dict(parts)
     names = [name for name, _ in parts]

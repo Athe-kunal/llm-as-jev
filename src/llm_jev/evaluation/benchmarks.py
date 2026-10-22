@@ -1,18 +1,15 @@
 """External evaluation: the paper's benchmarks, as decision rows.
 
 Usage (a trained run, or the base model without --adapter):
-  CUDA_VISIBLE_DEVICES=1 .venv/bin/python -m llm_jev.evaluation.benchmarks \
+  CUDA_VISIBLE_DEVICES=0 .venv/bin/python -m llm_jev.evaluation.benchmarks \
       --model Qwen/Qwen3.5-4B --adapter runs/qwen3.5_4b/adapter \
       --out runs/qwen3.5_4b --tag final
 
-Li & Wagle (arXiv 2610.02076v3, §4.1, App. B): External = fixed samples of
-BoolQ (500), MMLU (1,200), MMLU-Pro (800), ARC-Challenge (600), WinoGrande
-(500), SciQ (400) and the full Banking77 test set (3,080), all options kept;
-the External macro average is the mean accuracy on the first six. JevBench:
-the 231 public items. The paper's samples are not released: ours are seeded
-uniform draws (seed 20260922:<name>). Files are the pinned downloads of
-dataloader.sources.download (make download). Rendering choices the paper
-leaves open are in docs/architecture.md §7.
+Li & Wagle (arXiv 2610.02076v3, §4.1, App. B). The paper's samples are not
+released, so ours are seeded uniform draws (seed 20260922:<name>). The
+external_macro metric is the mean accuracy over the six External sets.
+Files are the pinned downloads of dataloader.sources.download. Rendering
+choices the paper leaves open are in docs/architecture.md §7.
 """
 
 import argparse
@@ -115,11 +112,11 @@ def banking77() -> list[schema.Example]:
 
 
 def jevbench() -> list[schema.Example]:
-    """The 231 public items, rendered as JevBench's own LLM adapters
-    (qwen_flash_linear, openai_compat) build them: options in the item's
-    labels order, each "<label>: <criterion>" (noul: no / yes described by
-    the false / true criteria; score: levels 0..k by their criteria); dict
-    states as compact JSON."""
+    """The 231 public items, rendered as JevBench's own adapters render them.
+
+    Options are "<label>: <criterion>" in the item's label order; dict states
+    are compact JSON.
+    """
     examples = []
     for tier in ("easy", "original", "hard"):
         with open(download.benchmark_path("jevbench", f"{tier}.jsonl")) as f:
@@ -190,7 +187,7 @@ def main() -> None:
                                           for n in args.benchmarks})
     gen_rows = evaluate.subset(rows, args.gen_per, SEED)
     tok = AutoTokenizer.from_pretrained(args.model)
-    # an adapter is merged into the weights: no per-layer adapter calls at inference
+    # The adapter is merged into the weights for inference.
     model = modeling.load(args.model, args.adapter)
     metrics, examples = evaluate.evaluate(model, tok, rows, gen_rows, "cuda",
                                          args.batch_tokens, args.batch_rows)

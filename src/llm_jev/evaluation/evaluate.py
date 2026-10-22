@@ -1,19 +1,13 @@
 """Evaluation of a decision model on the eval split.
 
 Usage (a trained run, or the base model without --adapter):
-  CUDA_VISIBLE_DEVICES=1 .venv/bin/python -m llm_jev.evaluation.evaluate \
+  CUDA_VISIBLE_DEVICES=0 .venv/bin/python -m llm_jev.evaluation.evaluate \
       --model Qwen/Qwen3-0.6B --adapter runs/qwen3_0.6b/adapter \
       --out runs/qwen3_0.6b --tag final
---data is a local folder / .parquet file of examples or a Hugging Face
-dataset id (storage.load_examples); external benchmarks are in benchmarks.py.
-
-Metrics per dataset (and their mean, "ALL"): accuracy of argmax s_k (Eq. 1),
-mean log P(gold), the root's legal mass, and text mode on a subset:
-unguided greedy generation after "Best answer: [", stopped at the first
-"]" and capped at the longest suffix's length (a decision model writes
-nothing after its answer): the share that is a valid "k]" and the share
-that is correct. Writes eval_<tag>.json and eval_<tag>_examples.jsonl (one
-record per text-mode row, for reading the outputs by hand).
+Metrics per dataset and their mean ("ALL"): accuracy of argmax s_k, mean
+log P(gold), the root's legal mass, and on a subset, the validity and accuracy
+of unguided greedy text. Writes eval_<tag>.json and eval_<tag>_examples.jsonl.
+External benchmarks are in benchmarks.py.
 """
 
 import argparse
@@ -55,9 +49,8 @@ def evaluate(model, tok, rows: list[schema.Example],
              batch_tokens: int = 32768, batch_rows: int = 64):
     """Per-dataset metrics, and one example record per text-mode row.
 
-    Rows are scored in batches of similar length (answers.score_batch) of at
-    most batch_tokens padded prompt tokens and batch_rows rows (also the cap
-    on trie nodes per forward); text mode runs one row at a time.
+    Rows are scored in length-sorted batches bounded by batch_tokens and
+    batch_rows; text mode runs one row at a time.
     """
     was_training = model.training
     model.eval()
@@ -91,8 +84,7 @@ def evaluate(model, tok, rows: list[schema.Example],
             st["root_legal_mass"] += mass
             if id(r) not in gen_ids:
                 continue
-            # unguided greedy text, stopped at "]": at most the longest
-            # suffix's length, never past the answer
+            # Unguided greedy text, stopped at "]" and capped at the longest suffix.
             longest = max(map(len, answers.candidates(tok, ex["n_options"])[0]))
             out = model.generate(
                 torch.tensor([prompt], device=device), max_new_tokens=longest,

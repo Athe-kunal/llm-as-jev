@@ -37,8 +37,8 @@ uv sync                                  # the package, editable, with torch (CU
 uv sync --extra dev                      # pytest
 ```
 
-`causal-conv1d` is built from source against the installed torch (it needs
-`CUDA_HOME`, see `pyproject.toml`). Hugging Face models are loaded by id
+`causal-conv1d` is built from source against the installed torch (`CUDA_HOME`
+is the CUDA toolkit it is built with; see `pyproject.toml`). Hugging Face models are loaded by id
 (latest version); the FlashAttention-2 kernel is fetched from the Hub on
 first use (`llm_jev.modeling.fa2`).
 

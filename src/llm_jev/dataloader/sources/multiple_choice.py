@@ -22,21 +22,11 @@ def mc_example(
     question: str, options: list[str], gold: int,
     fixed_question: bool = False
 ) -> schema.Example:
-    """A multiple-choice example; gold is the 0-based index of the answer.
+    """A multiple-choice example.
 
     Args:
-      source: Dataset name.
-      key: Identifies the row inside the dataset.
-      group: Raw identifier of the leakage unit.
-      parts: (name, text) pairs in prompt order.
-      question: The question text.
-      options: The answer options, in release order.
-      gold: 0-based index of the answer.
-      fixed_question: Whether the question is our wording (PIQA, alpha-NLI),
-        so the overlap filter skips it.
-
-    Returns:
-      The example.
+      fixed_question: The question is our own wording (PIQA, alpha-NLI), so
+        the overlap filter skips it.
     """
     return base.make_example(
         source, key, str(gold + 1), group, parts, question, options, gold,

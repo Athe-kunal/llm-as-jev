@@ -1,13 +1,9 @@
 """Bespoke Labs' Nimble (github.com/bespokelabsai/nimble, data/).
 
-Every task is a state (the document), one decision question and its options.
-The files come from data/train.jsonl and data/eval.jsonl of the pinned
-commit (download.TRAIN_SOURCES["nimble"]), downloaded on first use; if they
-cannot be fetched, loading raises FileNotFoundError.
-
-Options are positional like every other source, so Nimble answers go through
-the same "Best answer: [k]" trie. Upstream's "eval" file is the validation
-split. The evidence sentences of the task's `verified_pair` become its spans.
+Each task is a state (the document) and one decision question with its
+options. The files are downloaded on first use; if they cannot be fetched,
+loading raises FileNotFoundError. The evidence sentences of the task's
+`verified_pair` become its spans.
 """
 
 import json
@@ -56,17 +52,11 @@ def state_parts(state: Any) -> list[tuple[str, str]]:
 
 def options_and_gold(decision: dict[str, Any], target: Any) -> tuple[
         list[str], int]:
-    """The options and the gold index of a decision.
+    """The options (in release order) and the 0-based gold index of a decision.
 
-    Args:
-      decision: The task's `questions.decision` object.
-      target: The task's `reference.target`.
-
-    Returns:
-      (options in release order, 0-based gold index). Choice: the criteria
-      keys name the options. Noul: the criteria keys are true / false.
-      Score: the criteria list holds the levels 0.., and the target is the
-      level.
+    Choice: the criteria values are the options, matched by key. Noul: the
+    criteria keys are true / false. Score: the criteria are the levels 0..,
+    and the target is the level.
     """
     criteria = decision["criteria"]
     if decision["type"] == "score":
@@ -80,19 +70,7 @@ def options_and_gold(decision: dict[str, Any], target: Any) -> tuple[
 def evidence_spans(
     task: dict[str, Any], parts: list[tuple[str, str]]
 ) -> tuple[schema.Span, ...]:
-    """The task's own evidence sentences, as spans of its parts.
-
-    Nimble's `verified_pair` holds the two sentences the answer rests on: a
-    base task uses `left` and `right`, a counterfactual task (the same
-    story with one fact changed) `negative_left` and `negative_right`. Each
-    occurs verbatim, once, in one part of the state.
-
-    Args:
-      task: The raw task.
-      parts: Its (name, text) parts.
-
-    Returns:
-      The two spans in document order.
+    """The task's two evidence sentences as spans of its parts, in document order.
 
     Raises:
       ValueError: If a sentence is not in any part.

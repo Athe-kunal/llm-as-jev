@@ -25,7 +25,7 @@ def render(name: str, *, directory: pathlib.Path = _PROMPTS, **values: Any) -> s
 
     Args:
       name: Template name without the extension.
-      directory: The template folder (default: prompts/).
+      directory: Template folder (default: the package's prompts/).
       **values: Template variables; a missing one raises an error.
 
     Returns:

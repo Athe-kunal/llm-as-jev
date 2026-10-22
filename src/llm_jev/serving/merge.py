@@ -4,9 +4,7 @@ Usage (or: make sglang-merge):
   .venv/bin/python -m llm_jev.serving.merge --model Qwen/Qwen3-4B \
       --adapter runs/qwen3_4b/adapter --out runs/qwen3_4b/merged
 
-SGLang's score API cannot select a LoRA adapter, so the server runs the
-merged weights (modeling.load with merge=True) as a plain checkpoint, with
-the base model's tokenizer next to them.
+SGLang's score API cannot select a LoRA adapter, so it serves the merged weights.
 """
 
 import argparse

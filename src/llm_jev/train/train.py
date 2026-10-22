@@ -1,24 +1,13 @@
 """Fine-tuning a decision model: tree-factorized listwise loss + KL anchors.
 
 Usage (one GPU per run):
-  CUDA_VISIBLE_DEVICES=2 .venv/bin/python -m llm_jev.train.train \
+  CUDA_VISIBLE_DEVICES=0 .venv/bin/python -m llm_jev.train.train \
       --model Qwen/Qwen3-0.6B --out runs/qwen3_0.6b
 
-Recipe of Li & Wagle, arXiv 2610.02076v3 (§3.4, Table 2):
-loss = L_tree + lambda * (L_mass + L_out + L_pos) (losses.compute). Defaults
-are the paper's (Table 2): LoRA rank 16, alpha 32, dropout 0 on the decoder
-linear layers; torch AdamW (weight decay 0.01, gradient clipping 1.0); peak
-learning rate 1e-4, linear warmup over 100 steps then linear decay to 10%
-of the peak (torch LinearLR -> LinearLR in a SequentialLR);
-global batch 32, one epoch, seed 20260922; BF16 weights with FP32 LoRA
-parameters and optimizer states; gradient checkpointing. Every setting is a
-flag (scripts/train.sh). The reference model p0 is the same model with the
-adapter disabled (no cache).
-
-Evaluates (evaluate.py) before training, every --eval-every steps (also
-saving the adapter there) and at the end. --data is a local folder of
-Parquet splits (built by dataloader.build) or a Hugging Face dataset id with
-train and eval splits of `Example`s (storage.load_examples).
+Follows Li & Wagle, arXiv 2610.02076v3 (§3.4); defaults are the paper's Table 2
+(every setting is a flag, see scripts/train.sh). Evaluates before training, at
+the end and every --eval-every steps. --data is a local folder of Parquet
+splits or a Hugging Face dataset id.
 """
 
 import argparse

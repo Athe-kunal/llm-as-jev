@@ -1,40 +1,13 @@
 """The training mixture: Reason+Long-12k (Li & Wagle, arXiv 2610.02076v3) plus Nimble.
 
 Usage (or: make data):
-  # fetch the pinned sources into the Hugging Face cache (once)
-  .venv/bin/python -m llm_jev.dataloader.build --download
-  # build <out>/{train,eval}.parquet and manifest.json
-  .venv/bin/python -m llm_jev.dataloader.build
+  .venv/bin/python -m llm_jev.dataloader.build --download   # fetch the pinned sources (once)
+  .venv/bin/python -m llm_jev.dataloader.build              # writes <out>/{train,eval}.parquet
 
-Reason+Long-12k is twelve public human-annotated datasets, 1,000 training
-examples each (Table 3 of the paper): CLINC150, MASSIVE (en-US), Bitext
-customer support, ReClor, LogiQA 2.0, CosmosQA ("none of the above" gold
-upsampled to 16%), PIQA, alpha-NLI, ProofWriter, ContractNLI, MuSiQue
-(answerability over 20 paragraphs) and QuALITY. The labels are the datasets'
-own gold answers. Native evidence spans are kept where the release has them:
-ContractNLI (human spans), MuSiQue (supporting paragraphs of answerable
-questions) and ProofWriter (the facts and rules of the gold proof). Nimble
-(Bespoke Labs) is added as a thirteenth dataset of 1,000 examples, 13,000
-in all, with its own two evidence sentences as spans. MIXTURE gives every dataset's number of training examples. Every
-source is a registered `Example` source (`dataloader.sources`).
-
-Cleaning, applied to each training pool before sampling (paper section 3.5,
-Appendix D): examples sharing a 13-word n-gram, or an identical sentence of
-six or more words, with any evaluation benchmark are dropped
-(`contamination_stats` and the mask filter); examples whose input also
-appears in the dataset's official validation split are dropped; exact
-duplicate inputs within the pool are collapsed to one copy, or dropped
-together when they disagree on the answer's text (`processing.dedupe_indices`;
-the paper does not specify this step). Training examples come from each
-dataset's official train split, eval examples (up to --eval-rows per dataset,
-whole groups) from its official validation split; Bitext has no split, so a
-seeded group hold-out stands in for one. Examples whose prompt
-(`answers.build_prompt`, the paper's prompt, with the LENGTH_TOKENIZER
-tokenizer) exceeds --max-tokens are left out, never truncated.
-
-Processing is a `Dataset.map` (the per-example features, parallel over
---num-proc workers) followed by column selections (`processing`); the result
-is saved as Parquet, ready for training or `push_to_hub`.
+Reason+Long-12k is twelve public datasets (Table 3), plus Nimble. Each training
+pool is cleaned before sampling (paper section 3.5, Appendix D): benchmark and
+validation overlaps and over-long prompts are dropped, and duplicate inputs
+collapse to one copy. The paper does not specify the duplicate rule.
 """
 
 import argparse
@@ -59,11 +32,10 @@ from llm_jev.dataloader.sources import base
 from llm_jev.dataloader.sources import download
 
 EVAL_ROWS = 500  # default; change with --eval-rows
-MAX_TOKENS = 10240  # Table 2: 10,240 for Reason+Long-12k, never truncated
+MAX_TOKENS = 10240  # Table 2; longer prompts are dropped, never truncated
 OUT = "data/splits/reason_long_nimble"
 LENGTH_TOKENIZER = "Qwen/Qwen3.5-4B"  # the paper's model; lengths only
-# The training mixture: dataset -> training examples drawn (None: every clean
-# example). The first twelve are Reason+Long-12k; Nimble is one more dataset.
+# Dataset -> training examples drawn (None: every clean example).
 MIXTURE: dict[str, int | None] = {
     name: 1000 for name in (
         "clinc150", "massive", "bitext", "reclor", "logiqa2", "cosmosqa",
@@ -94,17 +66,6 @@ def build_dataset(
     """Cleans one dataset and draws its training and eval examples.
 
     `processing.set_context` must have been called.
-
-    Args:
-      source: The dataset.
-      index: The benchmarks' overlap index (for the manifest).
-      eval_rows: The most eval examples to take.
-      max_tokens: Examples with longer prompts are left out.
-      num_proc: Worker processes of the feature map.
-
-    Returns:
-      (training examples, eval examples, the dataset's manifest entry); the
-      Datasets are in the schema of `storage.FEATURES`.
     """
     rng = random.Random(f"{base.SEED}:{source.name}")
     data = source.load()
@@ -116,7 +77,6 @@ def build_dataset(
         "train_split_rows": len(train),
         "validation_split_rows": len(validation),
     }
-    # eval: deduplicated validation examples that fit, whole groups
     kept, _, _ = processing.dedupe_indices(
         validation["input_key"], validation["answer"])
     deduped = validation.select(kept)
@@ -124,7 +84,7 @@ def build_dataset(
     eval_set = fit.select(processing.take_eval_indices(
         fit["group"], fit["subset"], eval_rows, rng))
     stats["validation_too_long"] = len(deduped) - len(fit)
-    # train pool, cleaned in order; each example counted at its first drop
+    # Each example is counted at its first drop.
     kept, copies, conflict = processing.dedupe_indices(
         train["input_key"], train["answer"])
     pool = train.select(kept)
@@ -132,7 +92,7 @@ def build_dataset(
     stats["drop_conflicting_duplicates"] = conflict
     for column, key in (("input_key", "drop_input_in_validation"),
                         ("group", "drop_group_in_validation")):
-        before = len(pool)  # drop what the validation split has seen
+        before = len(pool)
         pool = pool.select(_where(~np.isin(
             pool[column], list(set(validation[column])))))
         stats[key] = before - len(pool)
@@ -181,18 +141,7 @@ def build(
     names: Iterable[str] | None = None,
     num_proc: int = 1,
 ) -> dict[str, Any]:
-    """Writes train.parquet, eval.parquet and manifest.json under out.
-
-    Args:
-      out: The output folder.
-      eval_rows: The most eval examples per dataset.
-      max_tokens: Examples with longer prompts are left out.
-      names: The datasets to build; defaults to all of MIXTURE.
-      num_proc: Worker processes of the feature map.
-
-    Returns:
-      The manifest.
-    """
+    """Writes train.parquet, eval.parquet and manifest.json under out; returns the manifest."""
     from transformers import AutoTokenizer  # pylint: disable=C0415
 
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")  # we fork

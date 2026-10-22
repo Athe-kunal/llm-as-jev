@@ -1,9 +1,8 @@
 """Dropping training examples that overlap the evaluation benchmarks.
 
-Paper section 3.5 and Appendix D: an example sharing a 13-word n-gram, or an
-identical sentence of six or more words, with any evaluation benchmark is
-dropped. The benchmarks are the pinned downloads of
-`sources.download.BENCH_SOURCES`.
+An example sharing a 13-word n-gram, or an identical sentence of six or more
+words, with any evaluation benchmark is dropped (paper section 3.5, Appendix D).
+Benchmarks are the pinned downloads of `sources.download.BENCH_SOURCES`.
 """
 
 import collections
@@ -45,13 +44,9 @@ def _strings(value: Any) -> Iterable[str]:
 
 
 def benchmark_items() -> dict[str, list[list[str]]]:
-    """The text fields of every evaluation item, per benchmark.
+    """The text fields of every item of each benchmark's evaluation splits.
 
-    Whole evaluation splits (the paper's fixed samples are not released, so
-    the check covers every item they could have been drawn from).
-
-    Returns:
-      Benchmark name -> one list of text fields per item.
+    Whole splits are used, since the paper's samples are not released.
     """
     out: dict[str, list[list[str]]] = {}
 
@@ -97,7 +92,7 @@ def benchmark_items() -> dict[str, list[list[str]]]:
                         for r in trivia), ("q", "a"))
     fields("lambada", _parquet(download.benchmark_path("lambada", "default/test/default.parquet")),
            ("text",))
-    # WikiText-2 test: one item per article (a line " = Title = " opens one)
+    # WikiText-2 test: one item per article (a " = Title = " line opens one)
     articles, current = [], []
     for r in _parquet(download.benchmark_path(
             "wikitext2", "wikitext-2-raw-v1/test-00000-of-00001.parquet")):
@@ -114,9 +109,7 @@ def benchmark_items() -> dict[str, list[list[str]]]:
            ("question", "hint", "A", "B", "C", "D"))
     fields("mmstar", _parquet(download.benchmark_path("mmstar", "mmstar.parquet")),
            ("question",))
-    # Behavior suite: the items are prompts (App. B: "Two Dolly prompts share
-    # a 13-word window"); reference responses are never model inputs or
-    # scoring targets there, so they are not checked.
+    # Behavior suite: items are prompts only; reference responses are not checked (App. B).
     fields("dolly", _jsonl(download.benchmark_path("dolly", "databricks-dolly-15k.jsonl")),
            ("instruction", "context"))
     fields("mt_bench", _jsonl(download.benchmark_path("mt_bench", "raw/question.jsonl")),
@@ -127,11 +120,7 @@ def benchmark_items() -> dict[str, list[list[str]]]:
 class OverlapIndex:
     """13-word n-grams and >= 6-word sentences of the evaluation benchmarks.
 
-    Each key maps to a bit mask over `names` (which benchmarks have it).
-
-    Attributes:
-      names: Sorted benchmark names; bit b of a mask is names[b].
-      sizes: Number of items per benchmark.
+    Each key maps to a bit mask over `names`: bit b is names[b].
     """
 
     def __init__(self, items: dict[str, list[list[str]]]):
@@ -165,8 +154,7 @@ class OverlapIndex:
         return hit
 
     def example_hits(self, example: schema.Example) -> tuple[int, int]:
-        """Masks for an example: its overlap text, or parts + question +
-        options."""
+        """Masks for an example's overlap text (or parts + question + options)."""
         texts = example.overlap_text or [
             *(p.text for p in example.parts), example.question,
             *example.options]
@@ -185,19 +173,12 @@ def contamination_stats(
     ids: Sequence[str], ngram_masks: Sequence[int],
     sentence_masks: Sequence[int], index: OverlapIndex,
 ) -> dict[str, Any]:
-    """Drop counts for examples sharing a 13-gram or a >= 6-word sentence
-    with a benchmark.
-
-    Args:
-      ids: The `id` column of the pool.
-      ngram_masks: Its `ngram_mask` column.
-      sentence_masks: Its `sentence_mask` column.
-      index: The benchmarks' overlap index.
+    """Drop counts for examples that overlap a benchmark.
 
     Returns:
-      The counts by kind (an example with both under "ngram") and by
-      benchmark (an example can count for several), with the first three
-      example ids per benchmark.
+      Counts by kind (an example with both counts as "ngram") and by benchmark
+      (an example can count for several), with the first three example ids per
+      benchmark.
     """
     by_bench: collections.Counter[str] = collections.Counter()
     by_kind: collections.Counter[str] = collections.Counter()

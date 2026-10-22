@@ -1,7 +1,6 @@
 """Intent classification: utterance -> one of the dataset's intent names.
 
-CLINC150, MASSIVE (en-US) and Bitext customer support. The options are the
-intent names verbatim; the subset is the gold intent.
+Covers CLINC150, MASSIVE (en-US) and Bitext customer support.
 """
 
 import csv
@@ -22,17 +21,7 @@ BITEXT_HELDOUT = 0.1  # share of distinct utterances held out (no split)
 def intent_examples(
     source: str, split: str, items: list[tuple[str, str]], names: list[str]
 ) -> list[schema.Example]:
-    """Utterance -> one of the dataset's intent names (verbatim).
-
-    Args:
-      source: Dataset name.
-      split: Split name, part of each example's key.
-      items: (utterance, intent name) pairs.
-      names: All intent names, in option order.
-
-    Returns:
-      One example per item.
-    """
+    """Utterance -> one of the dataset's intent names (verbatim), one example per item."""
     index = {name: i for i, name in enumerate(names)}
     return [
         base.make_example(
@@ -99,11 +88,7 @@ def massive() -> base.Split:
     "train": "all (90% of distinct utterances)",
     "validation": "all (seeded 10% of distinct utterances)"})
 def bitext() -> base.Split:
-    """Bitext customer support (27 intents); one file, so a seeded split.
-
-    BITEXT_HELDOUT of the distinct utterances (after normalization, so
-    copies stay together) form the "validation" side.
-    """
+    """Bitext customer support (27 intents), split by a seeded shuffle of distinct utterances."""
     path = download.local_path(
         "bitext", "Bitext_Sample_Customer_Support_Training_Dataset_27K_"
         "responses-v11.csv")

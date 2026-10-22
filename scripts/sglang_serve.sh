@@ -18,7 +18,8 @@ cd "$(dirname "$0")/.."
 MEM=${MEM:-0.85}                     # GPU memory share for weights + KV cache
 CONTEXT=${CONTEXT:-32768}            # longest prompt, tokens
 # triton: FlashInfer (the default) JIT-compiles its kernels with the system
-# nvcc, here CUDA 12.4, against the tool's CUDA 13 torch, and fails
+# nvcc, which can fail when that CUDA version differs from the one the tool's
+# torch was built for; hence the triton backend default.
 ATTENTION=${ATTENTION:-triton}
 SAMPLING=${SAMPLING:-pytorch}
 # tokens per prefill batch: a ContextCite row is 64+ prompts of up to ~6k

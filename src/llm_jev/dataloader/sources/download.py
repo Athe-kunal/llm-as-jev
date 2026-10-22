@@ -1,16 +1,9 @@
 """Where the raw dataset files live, and fetching the pinned ones.
 
-Each entry of TRAIN_SOURCES / BENCH_SOURCES gives how to fetch a dataset
-(kind "hf": a Hugging Face dataset repo, kind "url": a plain download, GitHub
-raw URLs pinned by commit) and its revision.
-
-Files live outside the workspace:
-  - kind "hf" datasets are in the Hugging Face cache (HF_HOME), fetched with
-    snapshot_download at the pinned revision; `root` returns the snapshot
-    folder.
-  - kind "url" datasets, and the ones added by hand (contractnli, ...), are in
-    <HF_HOME>/llm_jev/<name>/ (override with the LLM_JEV_DATA variable).
-The sha256 of every fetched file is written to <data home>/<name>/SOURCES.json.
+TRAIN_SOURCES and BENCH_SOURCES pin each dataset's revision. "hf" entries are
+Hugging Face dataset repos (in the HF cache); "url" entries are plain downloads
+kept under data_home() (override with LLM_JEV_DATA). Each fetched file's sha256
+is recorded in SOURCES.json.
 """
 
 import functools
@@ -47,7 +40,7 @@ TRAIN_SOURCES: dict[str, dict[str, Any]] = {
         "files": ["Bitext_Sample_Customer_Support_Training_Dataset_27K_"
                   "responses-v11.csv", "README.md"],
     },
-    "reclor": {  # the official zip is behind a form; a mirror of it
+    "reclor": {  # Mirror: the official zip is behind a form.
         "kind": "hf", "repo": "metaeval/reclor",
         "revision": "0414b39bfc39b2d555b48fa245fc198744c46215",
         "files": ["train.json", "val.json", "README.md"],
@@ -88,7 +81,7 @@ TRAIN_SOURCES: dict[str, dict[str, Any]] = {
                   "https://aristo-data-public.s3.amazonaws.com/proofwriter/"
                   "proofwriter-dataset-V2020.12.3.zip"},
     },
-    "musique": {  # the official zip is on Google Drive; a mirror of it
+    "musique": {  # Mirror: the official zip is on Google Drive.
         "kind": "hf", "repo": "bdsaglam/musique",
         "revision": "22873a405dd809893b22ada0b499299fb612d2df",
         "files": ["musique_full_v1.0_train.jsonl",
@@ -101,7 +94,7 @@ TRAIN_SOURCES: dict[str, dict[str, Any]] = {
                   "f84977c40dbfef70c9cab48037b7becfc8e45f73/data/v1.0.1/"
                   "QuALITY.v1.0.1.zip"},
     },
-    "nimble": {  # Bespoke Labs' Nimble: train.jsonl and eval.jsonl
+    "nimble": {
         "kind": "url", "revision": "bespokelabsai/nimble@4edb0703",
         "files": {
             f"{s}.jsonl": "https://raw.githubusercontent.com/bespokelabsai/"
@@ -184,8 +177,7 @@ BENCH_SOURCES: dict[str, dict[str, Any]] = {
                  "revision": "e3a795c5e9a82ee40611c416b8a7786c73198991",
                  "files": ["raw/question.jsonl"]},
 }
-# sha256 of every "url" file, checked when it is downloaded. Several of the
-# releases are unversioned, so this pins them to the content used so far.
+# sha256 of every "url" file, checked on download; pins the unversioned releases to the content used so far.
 CHECKSUMS: dict[str, dict[str, str]] = {
     "anli": {
         "alphanli-train-dev.zip":
@@ -260,8 +252,7 @@ SUITES = {
 
 
 def provenance(entry: dict[str, Any]) -> dict[str, Any]:
-    """The pinned revision and where a TRAIN_SOURCES / BENCH_SOURCES entry
-    comes from (its repo, else its file URLs), for the manifest."""
+    """The pinned revision and origin (repo or file URLs) of a source entry, for the manifest."""
     return {"revision": entry["revision"],
             "source": entry.get("repo") or list(entry["files"].values())}
 
@@ -288,12 +279,7 @@ def _source(name: str) -> dict[str, Any] | None:
 def root(name: str) -> pathlib.Path:
     """The folder holding a dataset's raw files, fetching it if needed.
 
-    Args:
-      name: A dataset name; benchmarks are "benchmarks/<name>".
-
-    Returns:
-      For a "hf" dataset the snapshot folder in the Hugging Face cache (its
-      files are fetched on first use), otherwise <data home>/<name>.
+    Benchmarks are named "benchmarks/<name>".
     """
     source = _source(name)
     if source is None or source["kind"] != "hf":
@@ -320,14 +306,6 @@ def _snapshot(name: str) -> pathlib.Path:
 def local_path(name: str, filename: str) -> pathlib.Path:
     """The local path of one raw file of a dataset, fetching it if missing.
 
-    Args:
-      name: A dataset name; benchmarks are "benchmarks/<name>".
-      filename: One of the dataset's files.
-
-    Returns:
-      The path in the Hugging Face cache (kind "hf") or in the data home
-      (kind "url").
-
     Raises:
       FileNotFoundError: If a "url" file is missing and cannot be downloaded.
     """
@@ -346,14 +324,8 @@ def sha256(path: pathlib.Path) -> str:
 def verify(name: str, filename: str, path: pathlib.Path) -> None:
     """Checks a "url" file against its pinned sha256.
 
-    Args:
-      name: The dataset name; benchmarks are "benchmarks/<name>".
-      filename: The file's name in the dataset.
-      path: The local file.
-
     Raises:
-      ValueError: If the file's sha256 differs from the pinned one (the
-        upstream file changed).
+      ValueError: If the sha256 differs from the pinned one (the upstream file changed).
     """
     expected = CHECKSUMS.get(name, {}).get(filename)
     if expected is None:
@@ -379,14 +351,6 @@ def fetch(
     name: str, filename: str, directory: pathlib.Path | None = None
 ) -> pathlib.Path:
     """The local path of one pinned "url" file, downloading it if missing.
-
-    Args:
-      name: A "url" dataset; benchmarks are "benchmarks/<name>".
-      filename: One of that source's files.
-      directory: The dataset folder; defaults to <data home>/<name>.
-
-    Returns:
-      The local path of the file.
 
     Raises:
       FileNotFoundError: If the file is missing and cannot be downloaded
@@ -430,11 +394,7 @@ def _record(
 
 
 def download(names: Iterable[str] | None = None) -> None:
-    """Fetches the pinned training and benchmark files (skips existing).
-
-    Args:
-      names: Datasets to fetch; defaults to all.
-    """
+    """Fetches the pinned training and benchmark files (skips existing ones)."""
     sources = {**TRAIN_SOURCES,
                **{f"benchmarks/{k}": v for k, v in BENCH_SOURCES.items()}}
     for name, source in sources.items():

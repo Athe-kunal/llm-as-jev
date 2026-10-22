@@ -1,9 +1,7 @@
 """The answer interface: prompt, candidate trie, encoding, scoring.
 
-Li & Wagle, "LLM-as-Jev" (arXiv 2610.02076v3, §3.2-3.3): the assistant turn
-is prefilled with "Best answer: [" and candidate k is the suffix "k]". The
-suffixes form a prefix-free trie; each node's legal tokens are the next
-tokens that stay inside it.
+Li & Wagle, arXiv 2610.02076v3 (§3.2-3.3): the assistant turn is prefilled
+with "Best answer: [" and candidate k is the suffix "k]".
 """
 
 import copy
@@ -18,33 +16,21 @@ from llm_jev.dataloader import prompts
 from llm_jev.dataloader import schema
 
 ANSWER_PREFIX = "Best answer: ["
-# The assistant turn up to the answer, as the chat template renders it with
-# add_generation_prompt=True, enable_thinking=False (Qwen3 and Qwen3.5).
+# The assistant turn up to the answer, as the Qwen3 / Qwen3.5 chat template renders it without thinking.
 _TAIL = "<|im_start|>assistant\n<think>\n\n</think>\n\n" + ANSWER_PREFIX
-# Trie nodes off the gold path anchored per training example (App. I).
+# Off-gold-path trie nodes sampled per training example (App. I).
 OFF_PATH = 3
 
 
 def user_message(
     example: schema.Example, order: Sequence[int]
 ) -> tuple[str, list[tuple[int, int]]]:
-    """The paper's user message (prompts/decision.j2) and each part's range in it.
+    """The paper's user message (prompts/decision.j2) and each part's (start, end) range in it.
 
-    The state is the example's part texts (no names), then the question
-    (like the paper's MMBench state: the hint, then the question). Options
-    are numbered from 1 in the given order.
-
-    Args:
-      example: The example.
-      order: The option indices in the order they are shown.
-
-    Returns:
-      (the message, the (start, end) character range of every part, indexed
-      like `Example.parts`).
+    Options are numbered from 1 in the given order.
     """
-    # The template inserts each part's text verbatim, so render with a marker
-    # in place of every text, locate the markers, then put the texts in.
-    # (Searching for the texts could match the template's own words.)
+    # Render with markers in place of the texts, then substitute the texts:
+    # searching for the texts could match the template's own words.
     marks = [f"\x00{i}\x00" for i in range(len(example.parts))]
     marked = prompts.render(
         "decision",
@@ -67,16 +53,7 @@ def user_message(
 def build_prompt(
     example: schema.Example, order: Sequence[int], tokenizer: Any
 ) -> tuple[str, list[tuple[int, int]]]:
-    """Prompt text up to "Best answer: [", and each part's range in it.
-
-    Args:
-      example: The example.
-      order: The option indices in the order they are shown.
-      tokenizer: The tokenizer whose chat template builds the prompt.
-
-    Returns:
-      (the prompt, the (start, end) character range of every part in it,
-      indexed like `Example.parts`).
+    """Prompt text up to "Best answer: [", and each part's (start, end) range in it.
 
     Raises:
       ValueError: If the chat template's assistant turn is not _TAIL.
@@ -142,13 +119,10 @@ def encode(
 ) -> dict[str, Any]:
     """Prompt + gold suffix token ids, the gold path, and the anchor sites.
 
-    The input is the prompt followed by the whole gold suffix (teacher
-    forcing). path[t] = (position, legal tokens, gold token): the logits at
-    that position predict suffix token t, among the legal tokens of the node
-    it leaves. reply: the position whose logits predict the reply's first
-    token ("Best"). With rng (training) the options are shuffled and
-    off_path holds OFF_PATH sampled trie nodes off the gold path, each as
-    (node tokens, legal tokens); without rng it is empty.
+    Teacher forcing: the input is the prompt followed by the gold suffix.
+    path[t] = (position, legal tokens, gold token). With rng (training) the
+    options are shuffled and off_path holds OFF_PATH sampled off-gold trie
+    nodes; without rng it is empty.
     """
     order = list(range(len(example.options)))
     if rng is not None:
@@ -191,13 +165,7 @@ def batches(lengths: list[int], budget: int, max_rows: int) -> list[list[int]]:
 
 
 def _select_cache(cache, rows: torch.Tensor):
-    """A new cache holding the given batch rows of cache (repeats allowed).
-
-    Each layer is shallow-copied with its own state dicts, then the
-    library's reorder_cache picks the rows (index_select along the batch);
-    that covers attention keys/values and Qwen3.5's linear-attention conv
-    and recurrent states, and leaves cache itself untouched.
-    """
+    """A new cache holding the given batch rows (repeats allowed); cache is left untouched."""
     new = copy.copy(cache)
     new.layers = []
     for layer in cache.layers:
@@ -215,11 +183,8 @@ def score_batch(model, prompts: list[list[int]], tokenizer: Any,
                 max_rows: int = 64) -> list[tuple]:
     """score() for several prompts: (s, root legal mass, decoded) per prompt.
 
-    One left-padded prefill of all prompts (positions skip the padding).
-    Then, per trie depth d, every node of that depth of every prompt runs
-    on top of a copy of its prompt's cache, as one batch of d-token inputs,
-    in chunks of at most budget // (longest prompt) and max_rows nodes (each
-    copy also holds Qwen3.5's fixed-size linear-attention states).
+    One left-padded prefill of all prompts, then the trie nodes run per depth
+    on copies of their prompts' caches, in bounded chunks.
     """
     n = max(map(len, prompts))
     ids = torch.full((len(prompts), n), tokenizer.pad_token_id, dtype=torch.long)
@@ -258,10 +223,11 @@ def score_batch(model, prompts: list[list[int]], tokenizer: Any,
 
 def read_trie(lp: dict[tuple[int, ...], torch.Tensor], suffixes: list[list[int]],
               nodes: dict[tuple[int, ...], list[int]]) -> tuple:
-    """(s, root legal mass, decoded) from each trie node's next-token
-    log-probabilities lp[node] [V]: s_k sums the log-probabilities along
-    suffix k (Eq. 1); decoded takes the most likely legal token at each node
-    from the root until the closing "]"."""
+    """(s, root legal mass, decoded) from each trie node's log-probabilities lp[node] [V].
+
+    s_k sums the log-probabilities along suffix k (Eq. 1); decoded is the
+    greedy path through the trie, ending at a complete "k]".
+    """
     s = torch.stack([sum(lp[tuple(x[:t])][x[t]] for t in range(len(x))) for x in suffixes])
     node: tuple = ()
     while node in nodes:  # greedy over the legal tokens, down to a leaf
@@ -270,13 +236,8 @@ def read_trie(lp: dict[tuple[int, ...], torch.Tensor], suffixes: list[list[int]]
 
 
 def score(model, prompt: list[int], tokenizer: Any, k: int, device: str):
-    """s_k (Eq. 1) for each candidate, the root's legal mass, and the answer
-    decoded inside the trie.
+    """s_k (Eq. 1) for each candidate, the root's legal mass, and the decoded answer.
 
-    One prefill of the prompt; its cache is then copied for each depth of
-    the trie, and all nodes of that depth run as one batch on top of it
-    (1-3 short steps, App. C). The decoded answer takes the most likely
-    legal token at each node from the root until the closing "]", so it is
-    always a valid "k]" (greedy within the trie; nothing after "]").
+    Single-prompt wrapper of score_batch; the decoded answer is always a valid "k]".
     """
     return score_batch(model, [prompt], tokenizer, [k], device)[0]

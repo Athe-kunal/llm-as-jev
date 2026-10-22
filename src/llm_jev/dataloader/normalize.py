@@ -1,9 +1,7 @@
 """Text normalization for duplicate and benchmark-overlap checks.
 
-Words: NFKC, case-folded, curly quotes made straight, then maximal runs of
-Unicode letters / digits / underscore (punctuation and whitespace are
-separators; "don't" -> "don", "t" on both sides alike). Sentences: the text
-split after . ! ? followed by whitespace, and at line breaks.
+Words are NFKC-normalized, case-folded and split on non-word characters.
+Sentences are split after . ! ? and at line breaks.
 """
 
 import hashlib
@@ -43,16 +41,9 @@ def ngrams(text: str) -> Iterable[str]:
 
 
 def input_key(example: schema.Example) -> str:
-    """The example's input (parts, question, options) for duplicate checks.
+    """Hashes an example's input (parts, question, options) for duplicate checks.
 
-    Normalized words, so copies that differ only in case, spacing or
-    punctuation count as the same input; options are order-free.
-
-    Args:
-      example: The example to key.
-
-    Returns:
-      A hex digest, equal for examples with the same input.
+    Copies that differ only in case, spacing, punctuation or option order get the same key.
     """
     texts = [part.text for part in example.parts] + [example.question]
     texts += sorted(" ".join(words(option)) for option in example.options)

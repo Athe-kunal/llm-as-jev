@@ -1,13 +1,10 @@
 """Pipeline steps over a `datasets.Dataset` of examples.
 
-The text-heavy work is one stateless, batched function, `compute_features`,
-meant for `Dataset.map(..., batched=True, num_proc=N)`: it adds the columns
-of FEATURE_COLUMNS to every example independently, so it runs in parallel and
-holds no dataset-specific code (sources only contribute a pure `stratum`
-function). Everything after it selects rows from those small columns:
-duplicates, the validation overlap, benchmark contamination and prompt
-length are `filter`/`select` on columns; `take_eval_indices` and
-`sample_indices` draw seeded subsets of them.
+`compute_features` is the one text-heavy step: a stateless batched function
+for `Dataset.map` that adds the FEATURE_COLUMNS to each example independently.
+Everything after it selects rows from those columns (duplicates, validation
+overlap, contamination, prompt length); take_eval_indices and sample_indices
+draw seeded subsets.
 """
 
 import dataclasses
@@ -32,19 +29,13 @@ FEATURE_COLUMNS = (
 
 @dataclasses.dataclass(frozen=True)
 class FeatureContext:
-    """The read-only objects `compute_features` needs.
-
-    Attributes:
-      tokenizer: Measures prompt lengths.
-      index: The benchmarks' overlap index.
-    """
+    """The read-only objects `compute_features` needs (tokenizer, overlap index)."""
 
     tokenizer: Any
     index: contamination.OverlapIndex
 
 
-# Set once in the parent before `Dataset.map`; worker processes are forked
-# and inherit it, so the (large) index is neither pickled nor rebuilt.
+# Set in the parent before `Dataset.map`; forked workers inherit it, so the index is not pickled.
 _CONTEXT: FeatureContext | None = None
 
 
@@ -55,15 +46,7 @@ def set_context(context: FeatureContext) -> None:
 
 
 def compute_features(batch: dict[str, list]) -> dict[str, list]:
-    """The feature columns of a batch of examples (for `Dataset.map`).
-
-    Args:
-      batch: A batch of dataset rows, as column lists.
-
-    Returns:
-      The columns of FEATURE_COLUMNS: the normalized input hash, the prompt's
-      token count, the n-gram and sentence overlap masks with the
-      benchmarks, the sampling stratum and the gold option's text.
+    """The FEATURE_COLUMNS of a batch of dataset rows (for `Dataset.map`).
 
     Raises:
       RuntimeError: If `set_context` was not called.
@@ -97,14 +80,9 @@ def dedupe_indices(
 ) -> tuple[list[int], int, int]:
     """Rows to keep when exact duplicate inputs are collapsed.
 
-    One copy is kept when the copies agree on the gold option's text, none
-    when they disagree. Copies that list the same options in a different
-    order agree (the position of the answer differs, its text does not);
-    only copies with different answers are dropped.
-
-    Args:
-      keys: The `input_key` column.
-      answers: The `answer` column.
+    Copies that agree on the gold option's text collapse to one, even if their
+    options are ordered differently. Inputs whose copies disagree on the answer
+    are dropped entirely.
 
     Returns:
       (indices to keep in order, number of dropped copies, number of rows
@@ -125,15 +103,6 @@ def take_eval_indices(
 
     Groups are taken per subset in a shuffled order; a group is only taken
     while it fits.
-
-    Args:
-      groups: The `group` column.
-      subsets: The `subset` column.
-      cap: The most rows to take.
-      rng: Shuffles the groups of each subset.
-
-    Returns:
-      The chosen row indices, group by group.
     """
     members: dict[str, list[int]] = {}
     for i, group in enumerate(groups):
@@ -163,18 +132,7 @@ def sample_indices(
     strata: Sequence[str], n: int | None, rng: random.Random,
     shares: base.Shares | None, name: str = "dataset"
 ) -> list[int]:
-    """n shuffled row indices: a uniform draw, or by stratum shares.
-
-    Args:
-      strata: The `stratum` column.
-      n: How many to draw; None takes every row.
-      rng: The seeded generator.
-      shares: None for a uniform draw; otherwise each stratum's share of n
-        (the last takes the remainder), or "equal" for equal shares.
-      name: The dataset, for error messages.
-
-    Returns:
-      n row indices.
+    """n shuffled row indices: a uniform draw, or by stratum shares (see base.Shares).
 
     Raises:
       ValueError: If the pool has fewer than n rows.

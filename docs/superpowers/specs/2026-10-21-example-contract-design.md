@@ -210,13 +210,11 @@ nondeterminism is larger than any difference), and end to end (train, evaluate, 
 
 Step 3 (done) replaced `build_data.py` (deleted) with `build.py` and the `map`-based `processing.py`,
 and `make data` now builds into `data/splits/reason_long_nimble` (the old-format
-`data/splits/reason_long_12k` stays untouched for the running job).
+`data/splits/reason_long_12k` is left untouched so that jobs still reading it keep working).
 
-A span-generation job (`llm_jev.span_generation.best_of_n`, pid 2595774/2618098) is running now and
-reads `data/splits/reason_long_12k`. Therefore: steps 1-3 are additive and safe; **step 4 edits
-`best_of_n.py` and `context_cite.py` and does not start until that job finishes**; step 5 writes to a
-new directory (not over `data/splits/reason_long_12k`) and no template (`prompts/*.j2`,
-`span_generation/cite.j2`) is moved. The old files stop loading after step 4, by design.
+Steps 1-3 are additive. Step 4 edits the consumers (`best_of_n.py`, `context_cite.py`, ...) and must
+not run while any job still reads the old data format. Step 5 writes to a new directory (not over
+`data/splits/reason_long_12k`) and no template (`prompts/*.j2`, `span_generation/cite.j2`) is moved. The old files stop loading after step 4, by design.
 
 Acceptance: the migrated pipeline reproduces the existing prompt text, and the LLM-as-Jev
 reproduction numbers do not change.

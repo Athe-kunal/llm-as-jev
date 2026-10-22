@@ -1,16 +1,12 @@
 """ContextCite targets from one pass: the document once, one reader branch per ablation.
 
 context_cite.ablation_targets deletes sentences and re-scores every ablated
-prompt in full. Here the prompt is split into the document (the row's parts)
-and the reader (question, options, "Best answer: [" and the trie suffixes).
-The document is run once with causal attention; each ablation is a copy of the
-reader that attends only to the kept sentences, all copies packed into one
-sequence under a FlexAttention block mask. Branch 0 keeps every sentence: it
-is the decision itself.
+prompt. Here the document runs once, and each ablation is a copy of the reader
+that attends only to its kept sentences; all copies are packed into one
+FlexAttention sequence. Branch 0 keeps every sentence: it is the decision.
 
-This is reader-side masking, not deletion: document tokens still read the
-"removed" sentences in every layer, so their information can leak into the
-kept ones. Positions stay fixed, unlike deletion.
+This masks the reader only, not the document, so document tokens still see the
+removed sentences and their information can leak. Positions stay fixed.
 """
 
 import math
@@ -26,15 +22,12 @@ from llm_jev.modeling import context_cite
 
 def token_owners(tok, example: schema.Example,
                  sources: list[dict[str, Any]]) -> tuple[list[int], np.ndarray, int]:
-    """The prompt's token ids, each token's source and where the reader starts.
+    """The prompt's token ids, each token's source (-1 if none), and where the reader starts.
 
-    The prompt is answers.build_prompt with options in release order (as
-    answers.encode without shuffling). owner[t] is the first source that
-    token t's characters reach, its separator included (ablate drops a
-    source with its separator), so " CAL" before "CALIFORNIA" and ".\n" after
-    a sentence go to that sentence; -1 outside every source (chat template,
-    "State:", the text around a part's sentences, the reader). The reader is
-    every token from the first one starting after the last part.
+    owner[t] is the first source whose characters reach token t, separator
+    included. Tokens outside every source (chat template, text around
+    sentences, the reader) get -1. The reader is every token from the first
+    one starting after the last part.
     """
     text, where = answers.build_prompt(example, range(len(example.options)), tok)
     enc = tok(text, add_special_tokens=False, return_offsets_mapping=True)
@@ -53,16 +46,12 @@ def pack(ids: list[int], reader: int, n: int,
          nodes: list[tuple[int, ...]]) -> dict[str, torch.Tensor | list]:
     """One sequence: the document (tokens before `reader`) once, then n copies of reader + trie.
 
-    A copy is the reader followed by one token per inner trie node (every
-    node of answers.trie but the root, by depth): the node's last token, at
-    the position it has after the prompt (P - 1 + depth). Every copy gets
-    the full prompt's positions, as if it alone followed the document
-    (tree-attention decoding). branch is -1 on the document and i on copy i;
-    node is j on the token of trie node nodes[j] and -1 elsewhere. at[i, j]
-    is the token of copy i whose logits are node nodes[j]'s next-token
-    distribution: the reader's last token for the root, the node's own token
-    otherwise. With P prompt tokens, R = P - reader and T inner nodes:
-    D + n*(R+T) tokens instead of n*P (plus the trie steps).
+    Each copy is the reader followed by one token per inner trie node; all
+    copies take the full prompt's positions (tree-attention decoding). branch
+    is -1 on the document and i on copy i; node is j on trie node nodes[j]'s
+    token, -1 elsewhere. at[i, j] is the copy-i token whose logits give node
+    nodes[j]'s next-token distribution. Costs D + n*(R+T) tokens instead of
+    n*P, with R = P - reader and T inner trie nodes.
     """
     nodes = [()] + sorted((x for x in nodes if x), key=len)             # root first, by depth
     P = len(ids)
@@ -84,16 +73,11 @@ def pack(ids: list[int], reader: int, n: int,
 
 
 def block_mask(packed: dict[str, torch.Tensor], owner: np.ndarray, keep: np.ndarray, device: str = "cuda"):
-    """The FlexAttention mask of a packed sequence: copy i reads only what mask i keeps.
+    """The FlexAttention mask of a packed sequence: copy i reads only what keep[i] keeps.
 
-    Query q may attend to key k iff k <= q and either both are in the same
-    branch (the document causally, or copy i within itself), or q is in a
-    copy i and k is a document token outside every source or in a source
-    kept by keep[i]. A copy never sees another copy. Within a copy a trie
-    token is seen only by itself and its descendants (tree attention), so
-    each node reads the prompt and its own prefix, not its siblings. keep
-    [n, S] bool, one row per copy (row 0 all True gives the full prompt,
-    i.e. the decision).
+    A copy never sees another copy. Within a copy, a trie token is seen only
+    by its own node's descendants (tree attention). keep [n, S] bool, one row
+    per copy; row 0 all True gives the full prompt, i.e. the decision.
     """
     from torch.nn.attention.flex_attention import create_block_mask
 
@@ -117,7 +101,7 @@ def block_mask(packed: dict[str, torch.Tensor], owner: np.ndarray, keep: np.ndar
         return (k <= q) & (same | reads)
 
     n = len(branch)
-    # compiled, the mask is evaluated block by block instead of as one dense [N, N] grid
+    # Compiled: evaluated block by block, not as a dense [N, N] grid.
     return create_block_mask(mask_mod, B=None, H=None, Q_LEN=n, KV_LEN=n, device=device, _compile=True)
 
 
@@ -125,14 +109,8 @@ def score_copies(model, packed: dict[str, torch.Tensor | list], mask, tok, k: in
                  device: str = "cuda", return_output: bool = False, **forward):
     """answers.score_batch's (s, root legal mass, decoded) for every copy, from one forward.
 
-    The packed sequence runs once under the block mask (the model must use
-    flex attention); the LM head runs only at the `at` positions, each
-    copy's trie nodes. Copy i's results are those of the full prompt with
-    the sources dropped by mask i hidden from its reader (block_mask).
-    Differentiable (callers that do not train wrap it in torch.no_grad);
-    extra keyword arguments go to the model: inputs_embeds in place of the
-    packed ids, or any other input the model's forward takes. With return_output, also the
-    model's output (e.g. its hidden states with output_hidden_states=True).
+    The model must use flex attention. Differentiable; extra keyword arguments
+    go to the model (e.g. inputs_embeds). With return_output, also the model's output.
     """
     at = packed["at"]                                                   # [n, 1+T]
     if "inputs_embeds" not in forward:
@@ -153,27 +131,17 @@ def full_batch(ids: list[int], owner: np.ndarray, keep: np.ndarray, nodes: list[
                device: str = "cuda") -> dict[str, Any]:
     """Full masking as FA2 varlen inputs (modeling.fa2), shared prefixes computed once.
 
-    A source dropped by keep[i] is hidden from every later token, so nothing
-    reads its tokens and they need not be computed: copy i is the prompt's
-    kept tokens (owner -1 or a kept source) at their original positions.
-    Copies that agree on their first sources share those tokens' states
-    exactly, so the copies form a prefix tree (AReaL-DTA's rollout tree): in
-    lexicographic order of their keep rows, each copy shares its longest
-    common prefix with the previous one, and only its tokens after that
-    prefix enter the packed sequence. In one forward pass every token's keys
-    and values at a layer depend only on its own earlier-layer state, so a
-    copy's new tokens attend to keys gathered from its whole path (the shared
-    prefix, computed for earlier copies, then its own tokens), causal and
-    aligned to the end. The trie's inner node tokens follow, per copy, each
-    attending to its copy's path and its trie ancestors. at [n, 1+T] as in
-    pack, in the order of keep: the copy's last token for the root, the
-    node's token otherwise.
+    A dropped source is hidden from every later token, so copy i is just the
+    prompt's kept tokens at their original positions. Copies are ordered by
+    their keep rows, so each shares its longest common prefix with the previous
+    one and only the new tokens are computed (a prefix tree). Each trie node
+    token attends to its copy's path and its trie ancestors. at [n, 1+T] as in pack.
     """
     nodes = [()] + sorted((x for x in nodes if x), key=len)
     inner, P = nodes[1:], len(ids)
     anc = [[a for a, y in enumerate(inner) if x[: len(y)] == y] for x in inner]   # ancestors, by depth
     kept = [np.where((owner < 0) | keep[i][np.maximum(owner, 0)])[0] for i in range(len(keep))]
-    order = sorted(range(len(keep)), key=lambda i: tuple(keep[i]), reverse=True)  # DFS order: keep before drop
+    order = sorted(range(len(keep)), key=lambda i: tuple(keep[i]), reverse=True)  # keep before drop
     path = [None] * len(keep)              # packed index of every kept token of each copy
     tok_pos, segs, prev, n_new = [], [], None, 0
     for i in order:
@@ -190,7 +158,7 @@ def full_batch(ids: list[int], owner: np.ndarray, keep: np.ndarray, nodes: list[
         n_new += len(new)
         prev = i
     main, T = n_new, len(inner)
-    node_base = {i: main + r * T for r, i in enumerate(order)}        # node tokens per copy, DFS order
+    node_base = {i: main + r * T for r, i in enumerate(order)}        # node tokens per copy, in order
     for i in order:
         for j in range(T):
             keys = np.concatenate([path[i], node_base[i] + np.array(anc[j])])
@@ -218,8 +186,10 @@ def full_batch(ids: list[int], owner: np.ndarray, keep: np.ndarray, nodes: list[
 
 
 def score_full(model, batch: dict[str, Any], tok, k: int, device: str = "cuda") -> list[tuple]:
-    """answers.score_batch's (s, root legal mass, decoded) per sequence of a
-    full_batch, from one forward (the model must use modeling.fa2)."""
+    """answers.score_batch's (s, root legal mass, decoded) per sequence of a full_batch.
+
+    The model must use modeling.fa2.
+    """
     at = batch["at"]
     with torch.no_grad():
         logits = model(input_ids=batch["input_ids"][None].to(device),
@@ -233,9 +203,10 @@ def score_full(model, batch: dict[str, Any], tok, k: int, device: str = "cuda") 
 
 def predict(model, tok, example: schema.Example,
             device: str = "cuda") -> tuple[int, torch.Tensor]:
-    """The decision on the full prompt through the packed scorer (one copy
-    that keeps every source): the predicted option and the scores s [K]; the
-    same as copy 0 of attribute. The model must use flex_attention."""
+    """The decision on the full prompt through the packed scorer: the predicted option and s [K].
+
+    Equal to copy 0 of attribute. The model must use flex attention.
+    """
     sources = context_cite.split_sources(example)
     if not sources:  # nothing to mask: the plain decision
         _, answer, s = context_cite.predict(model, tok, example, device)
@@ -250,10 +221,10 @@ def predict(model, tok, example: schema.Example,
 
 
 def ablation_count(num_sources: int, low: int = 32, high: int = 256) -> int:
-    """The ablation count for a row with num_sources sources: about two per
-    source, rounded up to a power of two and clipped to [low, high]. The
-    Lasso needs more ablations as sources grow; powers of two keep the packed
-    sequence to a few shapes, so a compiled model sees no new ones."""
+    """The ablation count for a row: about two per source, rounded up to a power of two, clipped to [low, high].
+
+    Powers of two keep the packed sequences to a few shapes for a compiled model.
+    """
     return min(high, max(low, 1 << math.ceil(math.log2(2 * num_sources))))
 
 
@@ -262,16 +233,11 @@ def attribute(model, tok, example: schema.Example, num_ablations: int | None = N
               device: str = "cuda") -> dict[str, Any]:
     """context_cite.attribute with the decision and every ablation from packed forwards.
 
-    Copy 0 keeps every source: its argmax is the attributed answer (the
-    model's prediction). Copies 1..n use context_cite.ablation_masks, so the
-    masks are the same as context_cite.attribute's for the same seed; each
-    target is logit q(answer) with the dropped sources hidden instead of
-    deleted. removal "reader": hidden from the reader only, the document
-    shared by all copies (pack, block_mask: one flex pass); "full": hidden
-    from every later token, each copy being the kept tokens at their
-    original positions (full_batch: FA2), in passes of at most `budget`
-    tokens. The model must use modeling.fa2. num_ablations None: chosen
-    from the row's source count (ablation_count).
+    Copy 0 keeps every source and gives the attributed answer. Copies 1..n use
+    the same masks as context_cite.attribute. removal "reader" hides dropped
+    sources from the reader only (one flex pass); "full" hides them from every
+    later token (FA2, in passes of at most `budget` tokens). The model must use
+    modeling.fa2. num_ablations None uses ablation_count.
     """
     if removal not in ("reader", "full"):
         raise ValueError(f"removal must be 'reader' or 'full', not {removal!r}")

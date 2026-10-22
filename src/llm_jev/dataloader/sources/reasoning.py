@@ -1,7 +1,6 @@
 """Reasoning over long inputs: ProofWriter, ContractNLI and MuSiQue.
 
-These carry the datasets' own evidence spans. The subset is the gold label's
-name.
+These carry the datasets' own evidence spans.
 """
 
 import json
@@ -57,9 +56,7 @@ def sentence_offsets(theory: str, texts: list[tuple[str, str]]) -> dict:
 def proofwriter() -> base.Split:
     """ProofWriter (OWA, depth <= 5): theory + statement -> T / F / Unknown.
 
-    Spans: the facts and rules used by the first proof listed for the
-    question (the proof of the statement, or of its negation for False).
-    Unknown has no proof, so no spans.
+    Spans: the facts and rules of the first proof (none for Unknown).
     """
     path = download.local_path(
         "proofwriter", "proofwriter-dataset-V2020.12.3.zip")
@@ -135,12 +132,10 @@ def contractnli() -> base.Split:
 @base.register("musique", splits={
     "train": "full_v1.0 train", "validation": "full_v1.0 dev"})
 def musique() -> base.Split:
-    """MuSiQue-Full: question + its paragraphs -> answerable yes / no.
+    """MuSiQue-Full: question + paragraphs -> answerable yes / no.
 
-    MuSiQue-Full pairs each answerable question with an unanswerable
-    contrast copy (same id, a supporting paragraph removed); both copies
-    share the id, which is the group. Spans (answerable rows only): each
-    supporting paragraph (title line and text).
+    Each answerable question has an unanswerable contrast copy with the same
+    id (the group). Spans (answerable rows only): the supporting paragraphs.
     """
     names = list(MUSIQUE_LABELS)
     out = {}

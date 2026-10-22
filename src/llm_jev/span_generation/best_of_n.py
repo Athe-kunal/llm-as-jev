@@ -1,24 +1,10 @@
 """Best-of-N evidence labels: the LLM proposes citation sets and scores them (SelfCite).
 
-Usage (servers from serve.sh; no local GPU needed):
-  .venv/bin/python -m llm_jev.span_generation.best_of_n \
-      --model Qwen/Qwen3.6-27B --base-url http://127.0.0.1:8011/v1 \
-      --limit 20 --out runs/span_generation/labels.jsonl
-
-Chuang et al., "SelfCite" (arXiv 2502.09604): the same model proposes and
-scores. Per example, the context's sentences (context_cite.split_sources) are
-tagged <c1>, <c2>, ... in cite.j2 with the question and the gold answer; the
-model thinks, then cites <citations><c2><c7></citations>; N citation
-sets are sampled (the paper: N = 10, temperature 1.2, top-p 0.9; duplicates
-removed; sets citing more than 384 tokens dropped unless a single sentence).
-Each set S is scored on the decision prompt (answers.build_prompt) by the
-tree probability q of the gold answer, from the server's echoed prompt
-log-probabilities:
-  reward(S) = log q(gold | S only) - log q(gold | x without S)
-            = sufficiency + necessity,
-and the highest-reward set becomes the example's spans. Unlike the paper, which
-scores the model's own response, we score the gold answer, so each example also
-records q(gold | x) and the model's own answer: the reward is uninformative
+Chuang et al., SelfCite (arXiv 2502.09604). The model proposes N citation sets
+per example (the paper: N = 10, temperature 1.2, top-p 0.9) and each set S is
+scored by reward(S) = log q(gold | S only) - log q(gold | x without S); the
+highest-reward set becomes the spans. Unlike the paper, which scores the
+model's own response, we score the gold answer, so the reward is uninformative
 where the model does not believe the gold answer (cut-off to be chosen).
 """
 
@@ -51,11 +37,11 @@ _TAG = re.compile(r"<c(\d+)>")
 
 
 def parse_citations(reply: str, d: int, thinking: bool = True) -> tuple[int, ...] | None:
-    """0-based sentence indices from a reply "<think>…</think> <citations><c2><c7></citations>":
-    the last citations block after the thinking; None if there is none, it is
-    empty, or a tag is out of range. With thinking, a reply without "</think>"
-    was cut off mid-reasoning and is rejected: a citations block inside the
-    reasoning is a draft, not the answer."""
+    """0-based sentence indices from the last <citations> block after the thinking.
+
+    None if there is no valid block. With thinking, a reply without "</think>"
+    was cut off and is rejected.
+    """
     if thinking and "</think>" not in reply:
         return None
     answer = reply.rsplit("</think>", 1)[-1]
@@ -68,9 +54,9 @@ def parse_citations(reply: str, d: int, thinking: bool = True) -> tuple[int, ...
 
 async def propose(client, model: str, example: schema.Example, sources: list[dict[str, Any]], n: int,
                   temperature: float, top_p: float, max_tokens: int) -> tuple[list[tuple[int, ...]], dict]:
-    """n sampled citation sets (0-based sentence indices) and reply stats;
-    replies without a valid citations block (e.g. cut off while thinking) are
-    dropped. The model thinks first (Qwen's <think> block), then cites.
+    """n sampled citation sets (0-based sentence indices) and reply stats.
+
+    Replies without a valid citations block are dropped.
     TODO: sampling settings for thinking mode (Qwen suggests T 0.6, top-p 0.95;
     the paper uses 1.2 / 0.9 for diversity); retry when few parse."""
     text = prompts.render("cite", directory=_HERE, sentences=sentences(example, sources),
@@ -78,7 +64,7 @@ async def propose(client, model: str, example: schema.Example, sources: list[dic
     reply = await client.chat.completions.create(
         model=model, messages=[{"role": "user", "content": text}], n=n, temperature=temperature,
         top_p=top_p, max_tokens=max_tokens, extra_body={"chat_template_kwargs": {"enable_thinking": True}})
-    # max_tokens is the caller's budget, already capped to fit the context (label)
+    # max_tokens: the caller's budget, already capped to fit the context.
     out = [s for c in reply.choices if (s := parse_citations(c.message.content or "", len(sources)))]
     stats = {"cut_off": sum(c.finish_reason == "length" for c in reply.choices),
              "completion_tokens": reply.usage.completion_tokens / n}
@@ -86,23 +72,25 @@ async def propose(client, model: str, example: schema.Example, sources: list[dic
 
 
 async def option_scores(client, model: str, prompt: list[int], suffixes: list[list[int]]) -> torch.Tensor:
-    """s_k = log p(suffix k | prompt) for every option (Eq. 1), from the
-    server's echoed prompt log-probabilities of prompt + suffix k. Token ids
-    are sent, so the server does not re-tokenise; the K requests share the
-    prompt prefix (prefix caching)."""
+    """s_k = log p(suffix k | prompt) for every option (Eq. 1).
+
+    Uses the server's echoed prompt log-probabilities. Token ids are sent, so
+    the server does not re-tokenise.
+    """
     async def one(suffix):
         r = await client.completions.create(model=model, prompt=prompt + suffix, max_tokens=1,
                                             echo=True, logprobs=0, temperature=0)
-        lp = r.choices[0].logprobs.token_logprobs[: len(prompt) + len(suffix)]  # drop the generated token
+        lp = r.choices[0].logprobs.token_logprobs[: len(prompt) + len(suffix)]  # drops the generated token
         return sum(lp[len(prompt):])
     return torch.tensor(await asyncio.gather(*(one(s) for s in suffixes)), dtype=torch.float64)
 
 
 async def rewards(client, model: str, tok, example: schema.Example, sources: list[dict[str, Any]],
                   sets: list[tuple[int, ...]]) -> tuple[dict[str, Any], list[dict[str, float]]]:
-    """Scores the full context, each set removed and each set alone on the
-    decision prompt; returns the full-context record (q of gold, the model's
-    own answer) and each set's necessity, sufficiency and reward."""
+    """Scores the full context, each set removed and each set alone.
+
+    Returns the full-context record and each set's necessity, sufficiency and reward.
+    """
     d = len(sources)
     masks = [np.ones(d, bool)]
     for S in sets:
@@ -123,8 +111,10 @@ async def rewards(client, model: str, tok, example: schema.Example, sources: lis
 
 
 async def label(client, model: str, tok, example: schema.Example, args) -> dict[str, Any] | None:
-    """One row's record: the distinct proposed sets with their rewards and the
-    best one as spans (None if no reply parsed or no set survives the cap)."""
+    """One row's record: the proposed sets with their rewards, and the best as spans.
+
+    None if no set survives parsing and the token cap.
+    """
     sources = context_cite.split_sources(example)
     prompt_len = len(tok(prompts.render("cite", directory=_HERE, sentences=sentences(example, sources),
                                         question=example.question, answer=example.answer))["input_ids"])
@@ -147,8 +137,8 @@ async def label(client, model: str, tok, example: schema.Example, args) -> dict[
 def labelled_ids(out: pathlib.Path) -> set[str]:
     """The ids already written to out, for resuming.
 
-    A run killed mid-write leaves a partial last line: it is cut from the
-    file (its row is labelled again). A bad line anywhere else is an error.
+    A partial last line (from a killed run) is cut from the file, so its row is
+    labelled again. A bad line anywhere else is an error.
     """
     if not out.exists():
         return set()
@@ -169,7 +159,7 @@ async def run(args) -> None:
     from openai import AsyncOpenAI
     from transformers import AutoTokenizer
 
-    # 8 long thinking replies in one request can take well over the client's default 600 s
+    # Long thinking replies can exceed the client's default 600 s timeout.
     clients = [AsyncOpenAI(base_url=u, api_key="local", timeout=args.timeout, max_retries=2)
                for u in args.base_url]
     tok = AutoTokenizer.from_pretrained(args.model)
@@ -192,7 +182,7 @@ async def run(args) -> None:
                 logger.warning("{}: skipped ({}: {})", r.id, type(e).__name__, str(e)[:200])
                 return None
 
-    # resume: rows already labelled in --out are skipped; new records are appended
+    # Resume: skip rows already in --out.
     done = labelled_ids(out)
     rows = [r for r in rows if r.id not in done]
     logger.info("{} rows to label ({} already in {})", len(rows), len(done), out)
@@ -212,9 +202,8 @@ async def run(args) -> None:
 
 
 def main() -> None:
-    """Labels --limit rows per dataset with at least two sentences, one JSON line each.
+    """Labels --limit rows per dataset, one JSON line each; re-running with the same --out resumes.
 
-    Re-running with the same --out resumes: rows already in it are skipped.
     TODO: the q(gold) cut-off and the picker (reward, vote) are chosen after
     the run from the stored candidates.
     """

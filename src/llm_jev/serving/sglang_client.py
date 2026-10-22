@@ -4,23 +4,9 @@ Usage (a server from scripts/sglang_serve.sh, or: make sglang-serve):
   .venv/bin/python -m llm_jev.serving.sglang_client --url http://127.0.0.1:30000 \
       --tokenizer runs/qwen3_4b/merged --source contractnli musique --per 5
 
-The prompt is ours (answers.encode: decision.j2, then "Best answer: ["),
-tokenised here and sent as token ids, so the server needs no chat template
-and the merged model (llm_jev.serving.merge) scores exactly what it was
-trained on. SGLang's /v1/decisions endpoint is not used: it renders its own
-prompt with single-token A-Z labels and cannot select a LoRA adapter.
-
-Scoring: every trie node of a prompt is one item, prompt + node tokens,
-with query []; the server returns the next-token log-probabilities of the
-label tokens (every legal token of the trie; return_token_logprobs: the
-full vocabulary's log-softmax), and answers.read_trie sums them along each
-suffix into s_k (Eq. 1). An option count of 9 or less has a one-level trie, one
-item per prompt.
-
-ContextCite: the ablations delete the dropped sentences
-(context_cite.ablate), as the reference does; RadixAttention reuses each
-ablated prompt's prefix up to its first dropped sentence, and the trie
-items reuse their whole prompt. The surrogate is context_cite's.
+Prompts are tokenised here and sent as token ids, so the server scores the
+merged model (llm_jev.serving.merge) exactly as trained. SGLang's /v1/decisions
+endpoint is not used: it cannot select a LoRA adapter.
 """
 
 import argparse
@@ -49,14 +35,10 @@ def post(url: str, payload: dict[str, Any], timeout: float = 600) -> dict[str, A
 
 def score_prompts(url: str, tok, prompts: list[list[int]], ks: list[int], chunk: int = 32,
                   workers: int = 8) -> list[tuple]:
-    """answers.score_batch through the server: (s, root legal mass, decoded)
-    per prompt, prompts[i] ending at "Best answer: [" with ks[i] options.
+    """answers.score_batch through the server: (s, root legal mass, decoded) per prompt.
 
-    The items (every prompt's trie nodes) go out one trie depth at a time,
-    the prompts first: a deeper node then finds its prompt in the radix
-    cache and prefills only its own tokens (sent together, every node of a
-    prompt would prefill the whole prompt again). Within a depth, requests
-    of `chunk` items, `workers` at a time; the server batches them.
+    prompts[i] ends at "Best answer: [" and has ks[i] options. Items are sent
+    one trie depth at a time so the server's prefix cache can reuse prompts.
     """
     depths: dict[int, list] = {}
     for i, (p, k) in enumerate(zip(prompts, ks)):
@@ -102,9 +84,7 @@ def predict(url: str, tok, example: schema.Example) -> tuple[int, torch.Tensor]:
 
 def attribute(url: str, tok, example: schema.Example, num_ablations: int | None = None,
               keep_prob: float = 0.5, alpha: float = 0.01, seed: int = 0, **request) -> dict[str, Any]:
-    """context_cite.attribute through the server: the predicted answer, then
-    one ablated prompt per mask (sentences deleted), all scored in one
-    score_prompts call. num_ablations None: masked_cite.ablation_count."""
+    """context_cite.attribute through the server; num_ablations None uses masked_cite.ablation_count."""
     answer, s = predict(url, tok, example)
     sources = context_cite.split_sources(example)
     if not sources:  # nothing to cite: the decision alone
@@ -118,8 +98,7 @@ def attribute(url: str, tok, example: schema.Example, num_ablations: int | None 
 
 
 def main() -> None:
-    """Attributes --per seeded eval rows per dataset; logs the time, the top
-    sentences and (rows with gold spans) context_cite.span_metrics."""
+    """Attributes --per seeded eval rows per dataset and logs the results."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", default="http://127.0.0.1:30000")
     parser.add_argument("--tokenizer", required=True, help="the served model's folder or HF id")

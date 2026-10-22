@@ -1,18 +1,9 @@
 """FlashAttention-2 (variable-length) for packed ablations, next to flex attention.
 
-flash-attn has no wheel for torch 2.9; the kernel is the Hugging Face Hub
-build kernels-community/flash-attn (main, build/torch29-cxx11-cu128-...),
-imported straight from the snapshot. use() registers one attention
-implementation, ATTENTION, that dispatches on its inputs:
-
-- a FlexAttention BlockMask as attention_mask: flex attention
-  (masked_cite's reader-only packing);
-- fa2_* keyword arguments (masked_cite.full_batch): one FA2 varlen call.
-  The packed tokens are split into query segments (fa2_cu_q); segment i
-  attends, causally and aligned to its end, to keys gathered by index
-  (fa2_gather, fa2_cu_k): a prefix-tree node sees its whole root-to-node
-  path, a trie node its copy's path and its trie ancestors. Exact: no
-  attention mask is needed anywhere.
+flash-attn has no wheel for torch 2.9, so the kernel is the Hugging Face Hub build
+kernels-community/flash-attn. use() registers one attention implementation that
+dispatches on a FlexAttention BlockMask (masked_cite's reader-only packing) or on
+fa2_* keyword arguments (masked_cite.full_batch: one varlen call, exact, no mask).
 """
 
 import functools
