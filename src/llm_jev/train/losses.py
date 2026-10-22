@@ -148,6 +148,36 @@ def _logits(model, ex: dict, seqs: list[list[int]], device: str,
                       batch_size=[])
 
 
+def _loss_terms(
+    cur_path: torch.Tensor, cur_last: torch.Tensor, cur_reply: torch.Tensor,
+    ref_path: torch.Tensor, ref_last: torch.Tensor, ref_reply: torch.Tensor,
+    legal: torch.Tensor, gold: torch.Tensor, weight: torch.Tensor,
+) -> torch.Tensor:
+    """The four losses from the current and reference logits (all tensors).
+
+    cur_* are p_theta's logits and ref_* p0's, as `_logits` returns them:
+    path [T, V], reply [V], last [S, V]. legal [N, V] bool, gold [T], weight
+    [N] with N = T + O. Returns [4]: tree, mass, out, pos.
+    """
+    T = cur_path.shape[0]
+    nodes = torch.cat([cur_path, cur_last[1:]])                         # [N, V]
+    ref_nodes = torch.cat([ref_path, ref_last[1:]])                     # [N, V]
+    anchor = node_anchor(nodes, legal, node_stats(ref_nodes, legal))    # TensorDict [N]
+    sites = torch.stack([cur_reply, cur_last[0]])                       # [2, V]
+    ref_sites = torch.stack([ref_reply, ref_last[0]])                   # [2, V]
+    return torch.stack([
+        tree_loss(cur_path, legal[:T], gold),                           # []
+        (weight * anchor["mass"]).sum(),                                # []
+        (weight * anchor["out"]).sum(),                                 # []
+        0.5 * pos_anchor(sites, pos_stats(ref_sites)).sum(),            # []
+    ])
+
+
+# The node counts vary per example (T gold-path and O off-path nodes), so the
+# shapes are compiled as dynamic.
+loss_terms = torch.compile(_loss_terms, dynamic=True)
+
+
 def compute(model, ex: dict, device: str, pad: int) -> TensorDict:
     """L_tree and the anchors L_mass, L_out, L_pos (Eqs. 2-3) for one example.
 
@@ -170,15 +200,7 @@ def compute(model, ex: dict, device: str, pad: int) -> TensorDict:
     gold = torch.tensor([g for _, _, g in ex["path"]], device=device)   # [T]
     weight = torch.tensor([0.5 / T] * T + [0.5 / max(O, 1)] * O,
                           device=device)                                # [N]
-    nodes = torch.cat([cur["path"], cur["last"][1:]])                   # [N, V]
-    ref_nodes = torch.cat([ref["path"], ref["last"][1:]])               # [N, V]
-    anchor = node_anchor(nodes, legal, node_stats(ref_nodes, legal))    # TensorDict [N]
-    sites = torch.stack([cur["reply"], cur["last"][0]])                 # [2, V]
-    ref_sites = torch.stack([ref["reply"], ref["last"][0]])             # [2, V]
-    return TensorDict(
-        tree=tree_loss(cur["path"], legal[:T], gold),                   # []
-        mass=(weight * anchor["mass"]).sum(),                           # []
-        out=(weight * anchor["out"]).sum(),                             # []
-        pos=0.5 * pos_anchor(sites, pos_stats(ref_sites)).sum(),        # []
-        batch_size=[],
-    )
+    tree, mass, out, pos = loss_terms(
+        cur["path"], cur["last"], cur["reply"],
+        ref["path"], ref["last"], ref["reply"], legal, gold, weight)
+    return TensorDict(tree=tree, mass=mass, out=out, pos=pos, batch_size=[])
