@@ -25,24 +25,20 @@ import pandas as pd
 from loguru import logger
 
 from llm_jev.dataloader import schema
+from llm_jev.dataloader.sources import base
 from llm_jev.dataloader.sources import download
+from llm_jev.dataloader.sources import intent
 from llm_jev.evaluation import evaluate
 from llm_jev.modeling import modeling
 
-SEED = 20260922
+SEED = base.SEED
 EXTERNAL = ("boolq", "mmlu", "mmlu_pro", "arc_challenge", "winogrande", "sciq")
 SIZES = {"boolq": 500, "mmlu": 1200, "mmlu_pro": 800, "arc_challenge": 600,
          "winogrande": 500, "sciq": 400, "banking77": None, "jevbench": None}
-INTENT_QUESTION = "Which intent does the user's message express?"
-
-
-def _file(name: str, filename: str) -> pathlib.Path:
-    """The local path of one file of a benchmark (fetched if missing)."""
-    return download.local_path(f"benchmarks/{name}", filename)
 
 
 def _parquet(name: str, filename: str) -> list[dict]:
-    return pd.read_parquet(_file(name, filename)).to_dict("records")
+    return pd.read_parquet(download.benchmark_path(name, filename)).to_dict("records")
 
 
 def _example(
@@ -57,10 +53,6 @@ def _example(
         meta=meta or {})
 
 
-def _numbered(options) -> list[str]:
-    return [str(o) for o in options]
-
-
 def boolq() -> list[schema.Example]:
     return [_example("boolq", i, [("Passage", r["passage"])],
                      r["question"][:1].upper() + r["question"][1:] + "?",
@@ -70,7 +62,7 @@ def boolq() -> list[schema.Example]:
 
 
 def mmlu() -> list[schema.Example]:
-    return [_example("mmlu", i, [], r["question"], _numbered(r["choices"]),
+    return [_example("mmlu", i, [], r["question"], [str(o) for o in r["choices"]],
                      int(r["answer"]))
             for i, r in enumerate(_parquet(
                 "mmlu", "all/test-00000-of-00001.parquet"))]
@@ -78,7 +70,7 @@ def mmlu() -> list[schema.Example]:
 
 def mmlu_pro() -> list[schema.Example]:
     return [_example("mmlu_pro", i, [], r["question"],
-                     _numbered(r["options"]), int(r["answer_index"]))
+                     [str(o) for o in r["options"]], int(r["answer_index"]))
             for i, r in enumerate(_parquet(
                 "mmlu_pro", "data/test-00000-of-00001.parquet"))]
 
@@ -110,14 +102,14 @@ def sciq() -> list[schema.Example]:
         random.Random(f"{SEED}:sciq:{i}").shuffle(opts)
         examples.append(_example(
             "sciq", i, [("Support", r["support"])], r["question"],
-            _numbered(opts), opts.index(r["correct_answer"])))
+            [str(o) for o in opts], opts.index(r["correct_answer"])))
     return examples
 
 
 def banking77() -> list[schema.Example]:
-    frame = pd.read_csv(_file("banking77", "test.csv"))
+    frame = pd.read_csv(download.benchmark_path("banking77", "test.csv"))
     intents = sorted(frame["category"].unique())
-    return [_example("banking77", i, [("Message", r.text)], INTENT_QUESTION,
+    return [_example("banking77", i, [("Message", r.text)], intent.INTENT_QUESTION,
                      intents, intents.index(r.category))
             for i, r in enumerate(frame.itertuples())]
 
@@ -130,7 +122,7 @@ def jevbench() -> list[schema.Example]:
     states as compact JSON."""
     examples = []
     for tier in ("easy", "original", "hard"):
-        with open(_file("jevbench", f"{tier}.jsonl")) as f:
+        with open(download.benchmark_path("jevbench", f"{tier}.jsonl")) as f:
             for line in f:
                 t = json.loads(line)
                 q, crit = t["question"], t["question"].get("criteria")

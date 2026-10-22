@@ -13,10 +13,12 @@ Files live outside the workspace:
 The sha256 of every fetched file is written to <data home>/<name>/SOURCES.json.
 """
 
+import functools
 import hashlib
 import json
 import os
 import pathlib
+import shutil
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
@@ -257,6 +259,18 @@ SUITES = {
 }
 
 
+def provenance(entry: dict[str, Any]) -> dict[str, Any]:
+    """The pinned revision and where a TRAIN_SOURCES / BENCH_SOURCES entry
+    comes from (its repo, else its file URLs), for the manifest."""
+    return {"revision": entry["revision"],
+            "source": entry.get("repo") or list(entry["files"].values())}
+
+
+def benchmark_path(name: str, filename: str) -> pathlib.Path:
+    """The local path of one file of a benchmark (fetched if missing)."""
+    return local_path(f"benchmarks/{name}", filename)
+
+
 def data_home() -> pathlib.Path:
     """The folder of the datasets that are not in the Hugging Face cache."""
     if override := os.environ.get("LLM_JEV_DATA"):
@@ -284,8 +298,15 @@ def root(name: str) -> pathlib.Path:
     source = _source(name)
     if source is None or source["kind"] != "hf":
         return data_home() / name
+    return _snapshot(name)
+
+
+@functools.cache
+def _snapshot(name: str) -> pathlib.Path:
+    """The snapshot folder of a "hf" dataset, resolved once per process."""
     from huggingface_hub import snapshot_download  # pylint: disable=C0415
 
+    source = _source(name)
     kwargs = dict(repo_id=source["repo"], repo_type="dataset",
                   revision=source["revision"],
                   allow_patterns=source["files"])
@@ -318,11 +339,8 @@ def local_path(name: str, filename: str) -> pathlib.Path:
 
 def sha256(path: pathlib.Path) -> str:
     """The sha256 hex digest of a file."""
-    digest = hashlib.sha256()
     with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def verify(name: str, filename: str, path: pathlib.Path) -> None:
@@ -353,8 +371,7 @@ def _download_url(url: str, path: pathlib.Path) -> None:
     tmp = path.with_suffix(path.suffix + ".part")
     with urllib.request.urlopen(url, timeout=600) as response, \
             open(tmp, "wb") as out:
-        while block := response.read(1 << 20):
-            out.write(block)
+        shutil.copyfileobj(response, out, 1 << 20)
     tmp.rename(path)
 
 

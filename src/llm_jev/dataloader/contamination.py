@@ -19,11 +19,6 @@ from llm_jev.dataloader import schema
 from llm_jev.dataloader.sources import download
 
 
-def _bench(name: str, filename: str) -> pathlib.Path:
-    """The local path of one benchmark file."""
-    return download.local_path(f"benchmarks/{name}", filename)
-
-
 def _parquet(path: pathlib.Path) -> list[dict[str, Any]]:
     import pandas as pd  # pylint: disable=import-outside-toplevel
 
@@ -65,46 +60,46 @@ def benchmark_items() -> dict[str, list[list[str]]]:
             [s for k in keys if k in r for s in _strings(r[k])]
             for r in records)
 
-    fields("boolq", _parquet(_bench(
+    fields("boolq", _parquet(download.benchmark_path(
         "boolq", "data/validation-00000-of-00001.parquet")),
            ("question", "passage"))
     for split in ("test", "validation", "dev"):
-        fields("mmlu", _parquet(_bench(
+        fields("mmlu", _parquet(download.benchmark_path(
             "mmlu", f"all/{split}-00000-of-00001.parquet")),
                ("question", "choices"))
     for split in ("test", "validation"):
-        fields("mmlu_pro", _parquet(_bench(
+        fields("mmlu_pro", _parquet(download.benchmark_path(
             "mmlu_pro", f"data/{split}-00000-of-00001.parquet")),
                ("question", "options", "cot_content"))
-    fields("arc_challenge", _parquet(_bench(
+    fields("arc_challenge", _parquet(download.benchmark_path(
         "arc_challenge", "ARC-Challenge/test-00000-of-00001.parquet")),
            ("question", "choices"))
-    fields("winogrande", _parquet(_bench(
+    fields("winogrande", _parquet(download.benchmark_path(
         "winogrande", "winogrande_xl/validation-00000-of-00001.parquet")),
            ("sentence", "option1", "option2"))
-    fields("sciq", _parquet(_bench(
+    fields("sciq", _parquet(download.benchmark_path(
         "sciq", "data/test-00000-of-00001.parquet")),
            ("question", "support", "correct_answer", "distractor1",
             "distractor2", "distractor3"))
-    with open(_bench("banking77", "test.csv"), newline="") as f:
+    with open(download.benchmark_path("banking77", "test.csv"), newline="") as f:
         fields("banking77", csv.DictReader(f), ("text",))
     for split in ("easy", "original", "hard"):
-        fields("jevbench", _jsonl(_bench("jevbench", f"{split}.jsonl")),
+        fields("jevbench", _jsonl(download.benchmark_path("jevbench", f"{split}.jsonl")),
                ("state", "question", "labels"))
-    fields("gsm8k", _parquet(_bench(
+    fields("gsm8k", _parquet(download.benchmark_path(
         "gsm8k", "main/test-00000-of-00001.parquet")),
            ("question", "answer"))
-    fields("ifeval", _jsonl(_bench("ifeval", "ifeval_input_data.jsonl")),
+    fields("ifeval", _jsonl(download.benchmark_path("ifeval", "ifeval_input_data.jsonl")),
            ("prompt",))
-    trivia = _parquet(_bench(
+    trivia = _parquet(download.benchmark_path(
         "triviaqa", "rc.nocontext/validation-00000-of-00001.parquet"))
     fields("triviaqa", ({"q": r["question"], "a": r["answer"]["value"]}
                         for r in trivia), ("q", "a"))
-    fields("lambada", _parquet(_bench("lambada", "default/test/default.parquet")),
+    fields("lambada", _parquet(download.benchmark_path("lambada", "default/test/default.parquet")),
            ("text",))
     # WikiText-2 test: one item per article (a line " = Title = " opens one)
     articles, current = [], []
-    for r in _parquet(_bench(
+    for r in _parquet(download.benchmark_path(
             "wikitext2", "wikitext-2-raw-v1/test-00000-of-00001.parquet")):
         text = r["text"]
         if re.fullmatch(r" = [^=].* = \n", text) and current:
@@ -114,17 +109,17 @@ def benchmark_items() -> dict[str, list[list[str]]]:
             current.append(text)
     articles.append({"text": current})
     fields("wikitext2", articles, ("text",))
-    fields("mmbench", _parquet(_bench(
+    fields("mmbench", _parquet(download.benchmark_path(
         "mmbench", "en/dev-00000-of-00001.parquet")),
            ("question", "hint", "A", "B", "C", "D"))
-    fields("mmstar", _parquet(_bench("mmstar", "mmstar.parquet")),
+    fields("mmstar", _parquet(download.benchmark_path("mmstar", "mmstar.parquet")),
            ("question",))
     # Behavior suite: the items are prompts (App. B: "Two Dolly prompts share
     # a 13-word window"); reference responses are never model inputs or
     # scoring targets there, so they are not checked.
-    fields("dolly", _jsonl(_bench("dolly", "databricks-dolly-15k.jsonl")),
+    fields("dolly", _jsonl(download.benchmark_path("dolly", "databricks-dolly-15k.jsonl")),
            ("instruction", "context"))
-    fields("mt_bench", _jsonl(_bench("mt_bench", "raw/question.jsonl")),
+    fields("mt_bench", _jsonl(download.benchmark_path("mt_bench", "raw/question.jsonl")),
            ("prompt",))
     return out
 

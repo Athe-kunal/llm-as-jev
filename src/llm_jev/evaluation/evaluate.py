@@ -30,9 +30,10 @@ import torch
 from llm_jev.dataloader import answers
 from llm_jev.dataloader import schema
 from llm_jev.dataloader import storage
+from llm_jev.dataloader.sources import base
 from llm_jev.modeling import modeling
 
-SEED = 20260922
+SEED = base.SEED
 
 
 def subset(

@@ -20,11 +20,22 @@ Split = dict[str, list[schema.Example]]
 
 DEFAULT_SPLITS = {"train": "train", "validation": "validation"}
 
-# A pure per-example function: the stratum the example is sampled from.
-Stratum = Callable[[schema.Example], str]
 # How many training examples each stratum gets: a share per stratum (the
 # last one takes the remainder), or "equal" for equal shares.
 Shares = Mapping[str, float] | Literal["equal"]
+
+
+@dataclasses.dataclass(frozen=True)
+class Stratification:
+    """How a source's training examples are drawn: by stratum, not uniformly.
+
+    Attributes:
+      stratum: A pure function giving an example's stratum.
+      shares: How many training examples each stratum gets.
+    """
+
+    stratum: Callable[[schema.Example], str]
+    shares: Shares
 
 
 @dataclasses.dataclass(frozen=True)
@@ -36,17 +47,14 @@ class Source:
       load: Reads the raw files and returns the splits.
       splits: Which official split of the release each side is read from,
         for the manifest.
-      stratum: A pure function giving an example's sampling stratum, or None
-        when the source is sampled uniformly.
-      shares: How many training examples each stratum gets (see `Shares`);
-        required with `stratum`.
+      stratification: How training examples are drawn, or None for a uniform
+        draw.
     """
 
     name: str
     load: Callable[[], Split]
     splits: Mapping[str, str]
-    stratum: Stratum | None = None
-    shares: Shares | None = None
+    stratification: Stratification | None = None
 
 
 SOURCES: dict[str, Source] = {}
@@ -55,8 +63,7 @@ SOURCES: dict[str, Source] = {}
 def register(
     name: str,
     splits: Mapping[str, str] | None = None,
-    stratum: Stratum | None = None,
-    shares: Shares | None = None,
+    stratification: Stratification | None = None,
 ) -> Callable[[Callable[[], Split]], Callable[[], Split]]:
     """Registers a loader function as the source `name`.
 
@@ -64,8 +71,8 @@ def register(
       name: The dataset name.
       splits: Which official split each side is read from; defaults to
         train / validation.
-      stratum: The source's sampling stratum function, if it has one.
-      shares: The training share of each stratum (needed with `stratum`).
+      stratification: The source's own way of drawing training examples, if
+        it has one.
 
     Returns:
       A decorator that registers the function and returns it unchanged.
@@ -74,10 +81,8 @@ def register(
     def decorator(load: Callable[[], Split]) -> Callable[[], Split]:
         if name in SOURCES:
             raise ValueError(f"source {name!r} is already registered")
-        if (stratum is None) != (shares is None):
-            raise ValueError(f"{name}: stratum and shares go together")
         SOURCES[name] = Source(
-            name, load, splits or DEFAULT_SPLITS, stratum, shares)
+            name, load, splits or DEFAULT_SPLITS, stratification)
         return load
 
     return decorator

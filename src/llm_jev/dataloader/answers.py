@@ -52,13 +52,13 @@ def user_message(
         question=example.question,
         options=[example.options[i] for i in order],
     )
-    pieces, where, cursor = [], [], 0
+    pieces, where, cursor, length = [], [], 0, 0
     for part, mark in zip(example.parts, marks):
         found = marked.index(mark, cursor)
-        pieces.append(marked[cursor:found])
-        start = sum(map(len, pieces))
-        pieces.append(part.text)
-        where.append((start, start + len(part.text)))
+        pieces += [marked[cursor:found], part.text]
+        length += (found - cursor)
+        where.append((length, length + len(part.text)))
+        length += len(part.text)
         cursor = found + len(mark)
     pieces.append(marked[cursor:])
     return "".join(pieces), where

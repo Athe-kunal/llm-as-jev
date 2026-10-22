@@ -113,11 +113,11 @@ def bitext() -> base.Split:
     examples = intent_examples(
         "bitext", "all", [(x["instruction"], x["intent"]) for x in data],
         names)
-    keys = sorted({normalize.input_key(e) for e in examples})
-    random.Random(f"{base.SEED}:bitext-split").shuffle(keys)
-    held = set(keys[: int(BITEXT_HELDOUT * len(keys))])
+    keys = [normalize.input_key(e) for e in examples]
+    distinct = sorted(set(keys))
+    random.Random(f"{base.SEED}:bitext-split").shuffle(distinct)
+    held = set(distinct[: int(BITEXT_HELDOUT * len(distinct))])
     return {
-        "train": [e for e in examples if normalize.input_key(e) not in held],
-        "validation": [e for e in examples
-                       if normalize.input_key(e) in held],
+        "train": [e for e, k in zip(examples, keys) if k not in held],
+        "validation": [e for e, k in zip(examples, keys) if k in held],
     }

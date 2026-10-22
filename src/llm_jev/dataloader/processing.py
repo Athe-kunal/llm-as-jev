@@ -72,7 +72,7 @@ def compute_features(batch: dict[str, list]) -> dict[str, list]:
         raise RuntimeError("call processing.set_context before mapping")
     size = len(batch["id"])
     examples = [
-        schema.Example.from_dict({k: v[i] for k, v in batch.items()})
+        schema.Example.from_row({k: v[i] for k, v in batch.items()})
         for i in range(size)]
     texts = [answers.build_prompt(e, range(len(e.options)),
                                   _CONTEXT.tokenizer)[0] for e in examples]
@@ -80,8 +80,8 @@ def compute_features(batch: dict[str, list]) -> dict[str, list]:
     hits = [_CONTEXT.index.example_hits(e) for e in examples]
     strata = []
     for e in examples:
-        stratum = sources.get_source(e.source).stratum
-        strata.append(stratum(e) if stratum else "")
+        stratification = sources.get_source(e.source).stratification
+        strata.append(stratification.stratum(e) if stratification else "")
     return {
         "input_key": [normalize.input_key(e) for e in examples],
         "n_tokens": [len(ids) for ids in encoded["input_ids"]],

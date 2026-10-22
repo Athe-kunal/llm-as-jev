@@ -110,11 +110,9 @@ def build_dataset(
     data = source.load()
     train = _featurize(data["train"], num_proc)
     validation = _featurize(data["validation"], num_proc)
-    pinned = download.TRAIN_SOURCES.get(source.name, {})
     stats: dict[str, Any] = {
         "source_split": dict(source.splits),
-        "revision": pinned.get("revision"),
-        "source": pinned.get("repo") or list(pinned.get("files", {}).values()),
+        **download.provenance(download.TRAIN_SOURCES[source.name]),
         "train_split_rows": len(train),
         "validation_split_rows": len(validation),
     }
@@ -132,14 +130,12 @@ def build_dataset(
     pool = train.select(kept)
     stats["drop_duplicate_copies"] = copies
     stats["drop_conflicting_duplicates"] = conflict
-    before = len(pool)
-    pool = pool.select(_where(~np.isin(
-        pool["input_key"], list(set(validation["input_key"])))))
-    stats["drop_input_in_validation"] = before - len(pool)
-    before = len(pool)
-    pool = pool.select(_where(~np.isin(
-        pool["group"], list(set(validation["group"])))))
-    stats["drop_group_in_validation"] = before - len(pool)
+    for column, key in (("input_key", "drop_input_in_validation"),
+                        ("group", "drop_group_in_validation")):
+        before = len(pool)  # drop what the validation split has seen
+        pool = pool.select(_where(~np.isin(
+            pool[column], list(set(validation[column])))))
+        stats[key] = before - len(pool)
     stats.update(contamination.contamination_stats(
         pool["id"], pool["ngram_mask"], pool["sentence_mask"], index))
     pool = pool.select(_where(
@@ -152,8 +148,8 @@ def build_dataset(
     stats["clean_pool_labels"] = dict(
         sorted(collections.Counter(clean["subset"]).items()))
     train_set = clean.select(processing.sample_indices(
-        clean["stratum"], MIXTURE[source.name], rng, source.shares,
-        source.name))
+        clean["stratum"], MIXTURE[source.name], rng,
+        source.stratification and source.stratification.shares, source.name))
     stats.update({
         "train": len(train_set),
         "eval": len(eval_set),
@@ -168,7 +164,7 @@ def build_dataset(
         "eval_tokens": processing.length_stats(eval_set["n_tokens"]),
         "clean_pool_tokens": processing.length_stats(clean["n_tokens"]),
     })
-    if source.stratum:
+    if source.stratification:
         stats["train_strata"] = dict(
             sorted(collections.Counter(train_set["stratum"]).items()))
         stats["clean_pool_strata"] = dict(
@@ -213,12 +209,8 @@ def build(
         "normalization": {"ngram": normalize.NGRAM,
                           "min_sentence_words": normalize.MIN_SENTENCE_WORDS},
         "benchmarks": {
-            name: {
-                "items": index.sizes[name],
-                "revision": download.BENCH_SOURCES[name]["revision"],
-                "source": download.BENCH_SOURCES[name].get("repo")
-                or list(download.BENCH_SOURCES[name]["files"].values()),
-            }
+            name: {"items": index.sizes[name],
+                   **download.provenance(download.BENCH_SOURCES[name])}
             for name in index.names},
         "benchmark_suites": {k: list(v) for k, v in download.SUITES.items()},
         "datasets": {},

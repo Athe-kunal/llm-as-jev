@@ -87,9 +87,9 @@ def cosmosqa_stratum(example: schema.Example) -> str:
 
 
 @base.register("cosmosqa", splits={"train": "train", "validation": "valid"},
-               stratum=cosmosqa_stratum,
-               shares={"none": COSMOS_NONE_SHARE,
-                       "other": 1 - COSMOS_NONE_SHARE})
+               stratification=base.Stratification(
+                   cosmosqa_stratum,
+                   {"none": COSMOS_NONE_SHARE, "other": 1 - COSMOS_NONE_SHARE}))
 def cosmosqa() -> base.Split:
     """CosmosQA: context + question -> 4 options (train / valid)."""
     out = {}

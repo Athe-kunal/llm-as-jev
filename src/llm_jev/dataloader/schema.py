@@ -2,9 +2,8 @@
 
 A dataset source reads its raw files and emits `Example`s; everything
 downstream (prompt building, training, evaluation, span generation) consumes
-only this class. `Example.to_dict` / `Example.from_dict` are the dict
-form of one example; `to_row` is the same with `meta` as a JSON string, the
-row of a `datasets.Dataset` (see `storage.FEATURES`).
+only this class. `Example.to_row` / `Example.from_row` convert it to and from
+a row of a `datasets.Dataset` (see `storage.FEATURES`).
 """
 
 import dataclasses
@@ -118,13 +117,14 @@ class Example:
         """Whether the example carries evidence spans."""
         return bool(self.spans)
 
-    def span_text(self, span: Span) -> str:
-        """The text a span covers."""
-        return self.parts[span.part].text[span.start:span.end]
+    def to_row(self, with_overlap_text: bool = False) -> dict[str, Any]:
+        """The row of a `datasets.Dataset` (see `storage.FEATURES`).
 
-    def to_dict(self) -> dict[str, Any]:
-        """The JSON-serializable form (`overlap_text` is left out)."""
-        return {
+        Args:
+          with_overlap_text: Whether to add the `overlap_text` working column
+            (empty when it is None), so a `map` over the rows sees it.
+        """
+        row = {
             "id": self.id,
             "source": self.source,
             "parts": [{"name": p.name, "text": p.text} for p in self.parts],
@@ -137,30 +137,19 @@ class Example:
             ],
             "group": self.group,
             "subset": self.subset,
-            "meta": dict(self.meta),
+            "meta": json.dumps(dict(self.meta), ensure_ascii=False),
         }
-
-    def to_row(self, with_overlap_text: bool = False) -> dict[str, Any]:
-        """The row of a `datasets.Dataset`: `to_dict` with `meta` as JSON.
-
-        Args:
-          with_overlap_text: Whether to add the `overlap_text` working column
-            (empty when it is None), so a `map` over the rows sees it.
-        """
-        row = self.to_dict()
-        row["meta"] = json.dumps(row["meta"], ensure_ascii=False)
         if with_overlap_text:
             row["overlap_text"] = list(self.overlap_text or ())
         return row
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "Example":
-        """Builds an example from `to_dict` output.
+    def from_row(cls, data: Mapping[str, Any]) -> "Example":
+        """Builds an example from a dataset row.
 
         Args:
-          data: A mapping with the keys `to_dict` or `to_row` writes (`meta`
-            is a dict or a JSON string); `spans`, `group`, `subset` and
-            `meta` may be absent.
+          data: A mapping with the keys `to_row` writes (`meta` is a JSON
+            string); `spans`, `group`, `subset` and `meta` may be absent.
 
         Returns:
           The validated example.
@@ -190,14 +179,8 @@ class Example:
                 for s in data.get("spans", ())),
             group=data.get("group", ""),
             subset=data.get("subset", ""),
-            meta=_meta(data.get("meta")),
+            meta=json.loads(data.get("meta") or "{}"),
             overlap_text=tuple(data["overlap_text"])
             if data.get("overlap_text") else None,
         )
 
-
-def _meta(value: Any) -> dict[str, Any]:
-    """`meta` from its dict or JSON-string form."""
-    if isinstance(value, str):
-        value = json.loads(value) if value else {}
-    return dict(value or {})

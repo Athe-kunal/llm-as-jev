@@ -57,11 +57,6 @@ def to_dataset(
         [e.to_row(with_overlap_text) for e in examples], features=features)
 
 
-def to_examples(dataset: datasets.Dataset) -> list[schema.Example]:
-    """The examples of a Dataset (validated)."""
-    return [schema.Example.from_dict(row) for row in dataset]
-
-
 def save(dataset: datasets.Dataset, path: str | pathlib.Path) -> None:
     """Writes a Dataset as one Parquet file, creating the parent folder."""
     path = pathlib.Path(path)
@@ -103,4 +98,4 @@ def load_examples(
     source: str = DEFAULT_SOURCE, split: str = "train"
 ) -> list[schema.Example]:
     """`load_dataset` as validated `Example`s."""
-    return to_examples(load_dataset(source, split))
+    return [schema.Example.from_row(row) for row in load_dataset(source, split)]

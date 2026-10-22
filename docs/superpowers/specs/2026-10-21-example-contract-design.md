@@ -46,10 +46,10 @@ class Example:
 
 - `__post_init__` validates and raises `ValueError` naming the example id: at least two options,
   `0 <= gold < len(options)`, every span has `0 <= start < end <= len(parts[span.part].text)`.
-- Properties: `has_spans`, `answer` (`options[gold]`), `span_text(span)`.
-- `to_dict()` / `from_dict()` are the single serialization (nested plain JSON; no `labels` mapping,
-  so no Hub repair step). `overlap_text` is not serialized; it replaces the private `_units` key
-  and the `_clean` helper. Default decontamination text is parts + question + options.
+- Properties: `has_spans`, `answer` (`options[gold]`).
+- `to_row()` / `from_row()` are the single serialization, a row of a `datasets.Dataset` (`meta` as a
+  JSON string; no `labels` mapping, so no Hub repair step). `overlap_text` is not part of saved rows;
+  it replaces the private `_units` key and the `_clean` helper. Default decontamination text is parts + question + options.
 - Dropped from the old row: `labels`/`label` (now `options`/`gold`), `needs_spans` (now
   `has_spans`), `Span.text` (derived).
 - Soft span targets (vote fractions) stay in `meta` until training needs a typed field.
@@ -181,7 +181,7 @@ downloaded raises (see above).
 
 ## Testing
 
-- Schema: round trip (`from_dict(to_dict(x)) == x`) and each validation error.
+- Schema: round trip (`from_row(to_row(x)) == x`) and each validation error.
 - One tiny checked-in raw fixture per source, asserting the produced `Example`s.
 - Nimble: fixtures for each state shape (str, list of turns, list of str, dict) and each question
   type (choice, noul, score); download-failure raises; **golden test** that the new loader's parts,

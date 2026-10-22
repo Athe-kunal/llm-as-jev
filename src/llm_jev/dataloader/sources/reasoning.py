@@ -52,7 +52,8 @@ def sentence_offsets(theory: str, texts: list[tuple[str, str]]) -> dict:
 @base.register("proofwriter", splits={
     "train": f"{PROOFWRITER_CONFIG} train",
     "validation": f"{PROOFWRITER_CONFIG} dev"},
-    stratum=lambda e: e.subset, shares="equal")  # label-balanced
+    stratification=base.Stratification(  # label-balanced
+        lambda e: e.subset, "equal"))
 def proofwriter() -> base.Split:
     """ProofWriter (OWA, depth <= 5): theory + statement -> T / F / Unknown.
 
