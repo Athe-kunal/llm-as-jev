@@ -117,7 +117,7 @@ and the same rules as `benchmarks.jevbench`):
 | `family` | `group`; the base and counterfactual variants share it so a pair never straddles train and eval |
 | `decision.type` | `subset` |
 | `domain`, `variant`, `source_family`, `method` | `meta` |
-| `evidence_certificate` | not carried (large; not needed to train); spans come from annotation |
+| `evidence_certificate.verified_pair` | `spans`: the two evidence sentences, located verbatim in the state (base variant: `left`, `right`; counterfactual: `negative_left`, `negative_right`; all 3,000 tasks, each sentence once). The rest of the certificate is not carried. Nimble rows are therefore not span-labelled by `best_of_n` |
 
 Because options are positional, Nimble's `true`/`false`/`0..5`/choice keys all render as
 `Best answer: [1] .. [k]` through the existing `answers.candidates(tokenizer, k)`. No trie change.

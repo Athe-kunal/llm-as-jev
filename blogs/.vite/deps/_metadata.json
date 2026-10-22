@@ -1,8 +1,40 @@
 {
-  "hash": "7591e942",
+  "hash": "1f24b6ca",
   "configHash": "e2f9c84c",
-  "lockfileHash": "e3b0c442",
-  "browserHash": "c819b551",
-  "optimized": {},
-  "chunks": {}
+  "lockfileHash": "907fa29b",
+  "browserHash": "e198cf5b",
+  "optimized": {
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "afafbbe2",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "cf8fa1eb",
+      "needsInterop": true
+    },
+    "framer-motion": {
+      "src": "../../node_modules/framer-motion/dist/es/index.mjs",
+      "file": "framer-motion.js",
+      "fileHash": "b192bc5b",
+      "needsInterop": false
+    },
+    "katex": {
+      "src": "../../node_modules/katex/dist/katex.mjs",
+      "file": "katex.js",
+      "fileHash": "a0f67d6d",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-32E4H3EV": {
+      "file": "chunk-32E4H3EV.js"
+    },
+    "chunk-G3PMV62Z": {
+      "file": "chunk-G3PMV62Z.js"
+    }
+  }
 }

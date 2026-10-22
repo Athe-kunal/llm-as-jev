@@ -15,7 +15,7 @@ own gold answers. Native evidence spans are kept where the release has them:
 ContractNLI (human spans), MuSiQue (supporting paragraphs of answerable
 questions) and ProofWriter (the facts and rules of the gold proof). Nimble
 (Bespoke Labs) is added as a thirteenth dataset of 1,000 examples, 13,000
-in all. MIXTURE gives every dataset's number of training examples. Every
+in all, with its own two evidence sentences as spans. MIXTURE gives every dataset's number of training examples. Every
 source is a registered `Example` source (`dataloader.sources`).
 
 Cleaning, applied to each training pool before sampling (paper section 3.5,

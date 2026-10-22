@@ -222,8 +222,7 @@ __marimo__/
 # Claude Code login for astarag2843@gmail.com (local credentials only)
 astarag2843@gmail.com/
 
-# pipeline outputs
-data/
+# pipeline outputs live in data/ and are ignored by data/.gitignore
 archive
 
 

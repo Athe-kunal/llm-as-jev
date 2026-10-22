@@ -7,7 +7,7 @@ cannot be fetched, loading raises FileNotFoundError.
 
 Options are positional like every other source, so Nimble answers go through
 the same "Best answer: [k]" trie. Upstream's "eval" file is the validation
-split.
+split. The evidence sentences of the task's `verified_pair` become its spans.
 """
 
 import json
@@ -16,6 +16,12 @@ from typing import Any
 from llm_jev.dataloader import schema
 from llm_jev.dataloader.sources import base
 from llm_jev.dataloader.sources import download
+
+# The verified_pair keys of the evidence sentences, by task variant.
+EVIDENCE_KEYS = {
+    "base": ("left", "right"),
+    "counterfactual": ("negative_left", "negative_right"),
+}
 
 
 def render_text(value: Any) -> str:
@@ -71,18 +77,53 @@ def options_and_gold(decision: dict[str, Any], target: Any) -> tuple[
     return list(criteria.values()), keys.index(wanted)
 
 
+def evidence_spans(
+    task: dict[str, Any], parts: list[tuple[str, str]]
+) -> tuple[schema.Span, ...]:
+    """The task's own evidence sentences, as spans of its parts.
+
+    Nimble's `verified_pair` holds the two sentences the answer rests on: a
+    base task uses `left` and `right`, a counterfactual task (the same
+    story with one fact changed) `negative_left` and `negative_right`. Each
+    occurs verbatim, once, in one part of the state.
+
+    Args:
+      task: The raw task.
+      parts: Its (name, text) parts.
+
+    Returns:
+      The two spans in document order.
+
+    Raises:
+      ValueError: If a sentence is not in any part.
+    """
+    pair = task["evidence_certificate"]["verified_pair"]
+    spans = []
+    for key in EVIDENCE_KEYS[task["variant"]]:
+        for i, (_, text) in enumerate(parts):
+            start = text.find(pair[key])
+            if start >= 0:
+                spans.append(schema.Span(i, start, start + len(pair[key])))
+                break
+        else:
+            raise ValueError(f"nimble:{task['id']}: evidence {key!r} is not "
+                             "in the state")
+    return tuple(sorted(spans, key=lambda s: (s.part, s.start)))
+
+
 def nimble_example(task: dict[str, Any]) -> schema.Example:
     """One raw Nimble task as an `Example`."""
     decision = task["input"]["questions"]["decision"]
     options, gold = options_and_gold(decision, task["reference"]["target"])
+    parts = state_parts(task["input"]["state"])
     return schema.Example(
         id=f"nimble:{task['id']}",
         source="nimble",
-        parts=tuple(schema.Part(n, t)
-                    for n, t in state_parts(task["input"]["state"])),
+        parts=tuple(schema.Part(n, t) for n, t in parts),
         question=decision["instructions"],
         options=tuple(options),
         gold=gold,
+        spans=evidence_spans(task, parts),
         group=f"nimble:{task['family']}",
         subset=decision["type"],
         meta={k: task[k] for k in ("domain", "variant", "source_family",

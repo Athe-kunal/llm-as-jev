@@ -1,0 +1,3 @@
+# Pipeline outputs. This file applies only inside data/, so blogs/data stays trackable.
+*
+!.gitignore
