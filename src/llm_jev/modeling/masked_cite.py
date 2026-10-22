@@ -237,6 +237,9 @@ def predict(model, tok, example: schema.Example,
     that keeps every source): the predicted option and the scores s [K]; the
     same as copy 0 of attribute. The model must use flex_attention."""
     sources = context_cite.split_sources(example)
+    if not sources:  # nothing to mask: the plain decision
+        _, answer, s = context_cite.predict(model, tok, example, device)
+        return answer, s
     ids, owner, reader = token_owners(tok, example, sources)
     k = len(example.options)
     packed = pack(ids, reader, 1, list(answers.candidates(tok, k)[1]))
@@ -270,7 +273,12 @@ def attribute(model, tok, example: schema.Example, num_ablations: int | None = N
     tokens. The model must use modeling.fa2. num_ablations None: chosen
     from the row's source count (ablation_count).
     """
+    if removal not in ("reader", "full"):
+        raise ValueError(f"removal must be 'reader' or 'full', not {removal!r}")
     sources = context_cite.split_sources(example)
+    if not sources:  # nothing to cite: the decision alone
+        _, answer, s = context_cite.predict(model, tok, example, device)
+        return context_cite.no_sources_result(s, answer)
     n = num_ablations or ablation_count(len(sources))
     masks = context_cite.ablation_masks(n, len(sources), keep_prob, seed)
     ids, owner, reader = token_owners(tok, example, sources)

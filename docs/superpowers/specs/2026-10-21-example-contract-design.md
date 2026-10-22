@@ -4,7 +4,7 @@ Date: 2026-10-21. Status: design approved in conversation; written spec awaiting
 
 ## Goal
 
-Every dataset (the 12 Reason+Long-12k sources, the external eval benchmarks, and Nimble) is read by a
+Every dataset (the 12 Reason+Long-12k sources, Nimble, and the external eval benchmarks) is read by a
 *source* and converted to one typed dataclass, `Example`. Everything downstream (prompt building,
 training, evaluation, span generation, context-cite) consumes only `Example`. Adding a dataset
 becomes one small registered source. The code base is meant to be usable by other people, so the
@@ -145,16 +145,24 @@ Everything maps onto `datasets.Dataset` operations, with no dataset-specific cod
 Feature columns are computed before the filters (so a few more rows are tokenized than before); the
 selected rows and the manifest statistics are unchanged.
 
-**Duplicate rule (`--dedupe-conflict`, recorded in the manifest).** The paper only requires the
+**Duplicate rule (decided 2026-10-21: the answer's text).** The paper only requires the
 benchmark-overlap filter and purging inputs that appear in the validation split; collapsing
-duplicates inside the training pool is our choice. `gold` (default) is the original builder's rule:
-copies must agree on the answer's position, so copies listing the same options in another order
-count as conflicting and the whole question is dropped. Audit of the 12 sources: 1,430 distinct
-questions erased, 1,421 of them agreeing on the answer text. `answer` compares the answer text and
-erases only the 13 true conflicts. Switching changes 3,702 of the 12,000 training rows (the pools of
-ReClor, LogiQA, CosmosQA, PIQA and alpha-NLI shift, so their seeded 1,000-row draws change) but only
-18 recovered questions land in the new sample; the eval split changes by 3 CosmosQA rows. The
-datasets with human spans (ContractNLI, MuSiQue, ProofWriter) are identical under both rules.
+duplicates inside the training pool is our choice. Exact duplicate inputs (same documents, question
+and options, compared ignoring case, spacing and punctuation) are collapsed to one copy when they
+agree on the answer's text, and dropped together when they do not. The original builder compared the
+answer's position instead, so copies listing the same options in another order counted as
+conflicting and the whole question was erased: 1,430 distinct questions across the 12 sources, 1,421
+of them agreeing on the answer text; the text rule erases the 13 true conflicts. There is no option
+for the old rule. Versus the old build this changes 3,702 of the 12,000 Reason+Long-12k training
+rows (the pools of ReClor, LogiQA, CosmosQA, PIQA and alpha-NLI shift, so their seeded 1,000-row
+draws change; 18 recovered questions are in the sample) and 3 eval rows. A question with the same
+text but different documents is never a duplicate.
+
+**Training mixture (decided 2026-10-21).** `build.MIXTURE` maps dataset to training examples:
+Reason+Long-12k's twelve datasets at 1,000 each, plus Nimble at 1,000: 13,000 training examples.
+Nimble's upstream `eval` file is its validation split; its families (base and counterfactual pairs)
+never straddle train and eval. The output is `data/splits/reason_long_nimble` (the name no longer
+says 12k).
 
 ## Consumers
 
@@ -201,7 +209,7 @@ weights), on `best_of_n` against a live vLLM server (same prompts and answers; t
 nondeterminism is larger than any difference), and end to end (train, evaluate, SGLang serving).
 
 Step 3 (done) replaced `build_data.py` (deleted) with `build.py` and the `map`-based `processing.py`,
-and `make data` now builds into `data/splits/reason_long_12k_v2` (the old-format
+and `make data` now builds into `data/splits/reason_long_nimble` (the old-format
 `data/splits/reason_long_12k` stays untouched for the running job).
 
 A span-generation job (`llm_jev.span_generation.best_of_n`, pid 2595774/2618098) is running now and

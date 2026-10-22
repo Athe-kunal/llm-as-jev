@@ -18,7 +18,7 @@ from loguru import logger
 
 from llm_jev.dataloader import schema
 
-DEFAULT_SOURCE = "data/splits/reason_long_12k_v2"  # local copy or a Hub id
+DEFAULT_SOURCE = "data/splits/reason_long_nimble"  # local copy or a Hub id
 
 FEATURES = datasets.Features({
     "id": datasets.Value("string"),

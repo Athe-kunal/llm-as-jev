@@ -86,6 +86,9 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(args.model)
     pad = tok.pad_token_id
     train = storage.load_examples(args.data, args.train_split)
+    if len(train) < args.batch_size:
+        raise ValueError(f"{len(train)} training examples are fewer than one "
+                         f"batch of {args.batch_size}")
     evals = evaluate.subset(storage.load_examples(args.data, args.eval_split),
                             args.eval_per, args.seed)
     gen_rows = evaluate.subset(evals, args.gen_per, args.seed)

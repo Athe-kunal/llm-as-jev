@@ -45,7 +45,7 @@ first use (`llm_jev.modeling.fa2`).
 ## Quickstart
 
 ```bash
-make data                                   # download the pinned sources, build Reason+Long-12k -> data/splits/reason_long_12k_v2/{train,eval}.parquet (CPU, ~6 min)
+make data                                   # download the pinned sources, build the training mix (Reason+Long-12k + Nimble) -> data/splits/reason_long_nimble/{train,eval}.parquet (CPU, ~6 min)
 scripts/train.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2       # one GPU; logs to runs/qwen3_0.6b.log
 scripts/evaluate.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2    # eval split + external benchmarks
 ```
@@ -60,7 +60,7 @@ The console scripts run the same modules as `python -m llm_jev.<module>`:
 | `llm-jev-merge` | `llm_jev.serving.merge` | merges a LoRA adapter into its base model for SGLang |
 | `llm-jev-sglang-cite` | `llm_jev.serving.sglang_client` | decisions and ContextCite through an SGLang server |
 | `llm-jev-spans` | `llm_jev.span_generation.best_of_n` | best-of-N evidence labels from a vLLM server (`span_generation/serve.sh`; `uv sync --extra spans`) |
-| `llm-jev-build-data` | `llm_jev.dataloader.build` | builds Reason+Long-12k (`--download` fetches the pinned sources into the Hugging Face cache) |
+| `llm-jev-build-data` | `llm_jev.dataloader.build` | builds the training mix, Reason+Long-12k + Nimble (`--download` fetches the pinned sources into the Hugging Face cache) |
 
 Attribution with the packed paths, from Python:
 

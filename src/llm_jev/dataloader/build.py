@@ -1,29 +1,33 @@
-"""Reason+Long-12k: the training mixture of Li & Wagle (arXiv 2610.02076v3).
+"""The training mixture: Reason+Long-12k (Li & Wagle, arXiv 2610.02076v3) plus Nimble.
 
 Usage (or: make data):
   # fetch the pinned sources into the Hugging Face cache (once)
   .venv/bin/python -m llm_jev.dataloader.build --download
-  # build <out>/{train,eval}.jsonl and manifest.json
+  # build <out>/{train,eval}.parquet and manifest.json
   .venv/bin/python -m llm_jev.dataloader.build
 
-Twelve public human-annotated datasets, 1,000 training examples each (Table
-3 of the paper): CLINC150, MASSIVE (en-US), Bitext customer support,
-ReClor, LogiQA 2.0, CosmosQA ("none of the above" gold upsampled to 16%),
-PIQA, alpha-NLI, ProofWriter, ContractNLI, MuSiQue (answerability over 20
-paragraphs) and QuALITY. The labels are the datasets' own gold answers.
-Native evidence spans are kept where the release has them: ContractNLI
-(human spans), MuSiQue (supporting paragraphs of answerable questions) and
-ProofWriter (the facts and rules of the gold proof). Every source is a
-registered `Example` source (`dataloader.sources`).
+Reason+Long-12k is twelve public human-annotated datasets, 1,000 training
+examples each (Table 3 of the paper): CLINC150, MASSIVE (en-US), Bitext
+customer support, ReClor, LogiQA 2.0, CosmosQA ("none of the above" gold
+upsampled to 16%), PIQA, alpha-NLI, ProofWriter, ContractNLI, MuSiQue
+(answerability over 20 paragraphs) and QuALITY. The labels are the datasets'
+own gold answers. Native evidence spans are kept where the release has them:
+ContractNLI (human spans), MuSiQue (supporting paragraphs of answerable
+questions) and ProofWriter (the facts and rules of the gold proof). Nimble
+(Bespoke Labs) is added as a thirteenth dataset of 1,000 examples, 13,000
+in all. MIXTURE gives every dataset's number of training examples. Every
+source is a registered `Example` source (`dataloader.sources`).
 
 Cleaning, applied to each training pool before sampling (paper section 3.5,
 Appendix D): examples sharing a 13-word n-gram, or an identical sentence of
 six or more words, with any evaluation benchmark are dropped
-(`contamination.decontaminate`); examples whose input also appears in the
-dataset's official validation split are dropped; exact duplicate inputs
-within the pool are collapsed. Training examples come from each dataset's
-official train split, eval examples (up to --eval-rows per dataset, whole
-groups) from its official validation split; Bitext has no split, so a
+(`contamination_stats` and the mask filter); examples whose input also
+appears in the dataset's official validation split are dropped; exact
+duplicate inputs within the pool are collapsed to one copy, or dropped
+together when they disagree on the answer's text (`processing.dedupe_indices`;
+the paper does not specify this step). Training examples come from each
+dataset's official train split, eval examples (up to --eval-rows per dataset,
+whole groups) from its official validation split; Bitext has no split, so a
 seeded group hold-out stands in for one. Examples whose prompt
 (`answers.build_prompt`, the paper's prompt, with the LENGTH_TOKENIZER
 tokenizer) exceeds --max-tokens are left out, never truncated.
@@ -54,16 +58,18 @@ from llm_jev.dataloader import storage
 from llm_jev.dataloader.sources import base
 from llm_jev.dataloader.sources import download
 
-PER_DATASET = 1000
 EVAL_ROWS = 500  # default; change with --eval-rows
 MAX_TOKENS = 10240  # Table 2: 10,240 for Reason+Long-12k, never truncated
-OUT = "data/splits/reason_long_12k_v2"
+OUT = "data/splits/reason_long_nimble"
 LENGTH_TOKENIZER = "Qwen/Qwen3.5-4B"  # the paper's model; lengths only
-# What exact-duplicate inputs must agree on to keep one copy (column name).
-DEDUPE_CONFLICT = ("gold", "answer")
-REASON_LONG_12K = (
-    "clinc150", "massive", "bitext", "reclor", "logiqa2", "cosmosqa", "piqa",
-    "anli", "proofwriter", "contractnli", "musique", "quality")
+# The training mixture: dataset -> training examples drawn (None: every clean
+# example). The first twelve are Reason+Long-12k; Nimble is one more dataset.
+MIXTURE: dict[str, int | None] = {
+    name: 1000 for name in (
+        "clinc150", "massive", "bitext", "reclor", "logiqa2", "cosmosqa",
+        "piqa", "anli", "proofwriter", "contractnli", "musique", "quality",
+        "nimble")
+}
 
 
 def _featurize(examples: list, num_proc: int) -> datasets.Dataset:
@@ -84,7 +90,6 @@ def build_dataset(
     eval_rows: int,
     max_tokens: int,
     num_proc: int,
-    dedupe_conflict: str = "gold",
 ) -> tuple[datasets.Dataset, datasets.Dataset, dict[str, Any]]:
     """Cleans one dataset and draws its training and eval examples.
 
@@ -96,9 +101,6 @@ def build_dataset(
       eval_rows: The most eval examples to take.
       max_tokens: Examples with longer prompts are left out.
       num_proc: Worker processes of the feature map.
-      dedupe_conflict: The column duplicate inputs must agree on ("gold":
-        the answer's position, as in the original build; "answer": its
-        text).
 
     Returns:
       (training examples, eval examples, the dataset's manifest entry); the
@@ -118,7 +120,7 @@ def build_dataset(
     }
     # eval: deduplicated validation examples that fit, whole groups
     kept, _, _ = processing.dedupe_indices(
-        validation["input_key"], validation[dedupe_conflict])
+        validation["input_key"], validation["answer"])
     deduped = validation.select(kept)
     fit = deduped.select(_where(np.asarray(deduped["n_tokens"]) <= max_tokens))
     eval_set = fit.select(processing.take_eval_indices(
@@ -126,7 +128,7 @@ def build_dataset(
     stats["validation_too_long"] = len(deduped) - len(fit)
     # train pool, cleaned in order; each example counted at its first drop
     kept, copies, conflict = processing.dedupe_indices(
-        train["input_key"], train[dedupe_conflict])
+        train["input_key"], train["answer"])
     pool = train.select(kept)
     stats["drop_duplicate_copies"] = copies
     stats["drop_conflicting_duplicates"] = conflict
@@ -150,7 +152,8 @@ def build_dataset(
     stats["clean_pool_labels"] = dict(
         sorted(collections.Counter(clean["subset"]).items()))
     train_set = clean.select(processing.sample_indices(
-        clean["stratum"], PER_DATASET, rng, source.shares, source.name))
+        clean["stratum"], MIXTURE[source.name], rng, source.shares,
+        source.name))
     stats.update({
         "train": len(train_set),
         "eval": len(eval_set),
@@ -181,7 +184,6 @@ def build(
     max_tokens: int = MAX_TOKENS,
     names: Iterable[str] | None = None,
     num_proc: int = 1,
-    dedupe_conflict: str = "gold",
 ) -> dict[str, Any]:
     """Writes train.parquet, eval.parquet and manifest.json under out.
 
@@ -189,9 +191,8 @@ def build(
       out: The output folder.
       eval_rows: The most eval examples per dataset.
       max_tokens: Examples with longer prompts are left out.
-      names: The datasets to build; defaults to the twelve of Reason+Long.
+      names: The datasets to build; defaults to all of MIXTURE.
       num_proc: Worker processes of the feature map.
-      dedupe_conflict: See `build_dataset`.
 
     Returns:
       The manifest.
@@ -205,9 +206,9 @@ def build(
     processing.set_context(processing.FeatureContext(tokenizer, index))
     manifest: dict[str, Any] = {
         "paper": "Li & Wagle, LLM-as-Jev, arXiv 2610.02076v3, Reason+Long-12k",
-        "seed": base.SEED, "per_dataset": PER_DATASET,
+        "seed": base.SEED, "mixture": dict(MIXTURE),
         "eval_rows": eval_rows, "max_tokens": max_tokens,
-        "dedupe_conflict": dedupe_conflict,
+        "duplicates_agree_on": "answer text",
         "prompt": "answers.build_prompt", "tokenizer": LENGTH_TOKENIZER,
         "normalization": {"ngram": normalize.NGRAM,
                           "min_sentence_words": normalize.MIN_SENTENCE_WORDS},
@@ -223,11 +224,10 @@ def build(
         "datasets": {},
     }
     train_parts, eval_parts = [], []
-    for name in names or REASON_LONG_12K:
+    for name in names or MIXTURE:
         logger.info("{} ...", name)
         train_set, eval_set, stats = build_dataset(
-            sources.get_source(name), index, eval_rows, max_tokens, num_proc,
-            dedupe_conflict)
+            sources.get_source(name), index, eval_rows, max_tokens, num_proc)
         manifest["datasets"][name] = stats
         train_parts.append(train_set)
         eval_parts.append(eval_set)
@@ -260,24 +260,18 @@ def main() -> None:
     parser.add_argument("--out", default=OUT)
     parser.add_argument("--eval-rows", type=int, default=EVAL_ROWS)
     parser.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
-    parser.add_argument("--dedupe-conflict", choices=DEDUPE_CONFLICT,
-                        default="gold",
-                        help="what exact-duplicate inputs must agree on to "
-                        "keep one copy: the answer's position (gold, the "
-                        "original build) or its text (answer)")
     parser.add_argument("--num-proc", type=int,
                         default=min(8, os.cpu_count() or 1),
                         help="worker processes of the feature map")
     parser.add_argument("--datasets", nargs="*", default=None,
-                        choices=sorted(sources.SOURCES),
-                        help="subset of datasets (default: the twelve of "
-                        "Reason+Long-12k)")
+                        choices=sorted(MIXTURE),
+                        help="subset of the mixture (default: all of it)")
     args = parser.parse_args()
     if args.download:
         download.download()
         return
     build(pathlib.Path(args.out), args.eval_rows, args.max_tokens,
-          args.datasets, args.num_proc, args.dedupe_conflict)
+          args.datasets, args.num_proc)
 
 
 if __name__ == "__main__":

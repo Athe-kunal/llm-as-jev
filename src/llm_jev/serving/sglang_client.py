@@ -107,6 +107,8 @@ def attribute(url: str, tok, example: schema.Example, num_ablations: int | None 
     score_prompts call. num_ablations None: masked_cite.ablation_count."""
     answer, s = predict(url, tok, example)
     sources = context_cite.split_sources(example)
+    if not sources:  # nothing to cite: the decision alone
+        return context_cite.no_sources_result(s, answer)
     n = num_ablations or masked_cite.ablation_count(len(sources))
     masks = context_cite.ablation_masks(n, len(sources), keep_prob, seed)
     prompts = [prompt_ids(tok, context_cite.ablate(example, sources, keep)) for keep in masks]

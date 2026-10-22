@@ -93,27 +93,26 @@ def compute_features(batch: dict[str, list]) -> dict[str, list]:
 
 
 def dedupe_indices(
-    keys: Sequence[str], values: Sequence[Any]
+    keys: Sequence[str], answers: Sequence[str]
 ) -> tuple[list[int], int, int]:
     """Rows to keep when exact duplicate inputs are collapsed.
 
-    One copy is kept when the copies agree on `values`, none when they
-    disagree. With the gold option's position as the value, copies that list
-    the same options in a different order count as disagreeing (the original
-    builder's rule); with the gold option's text they agree, and only
-    copies with different answers are dropped.
+    One copy is kept when the copies agree on the gold option's text, none
+    when they disagree. Copies that list the same options in a different
+    order agree (the position of the answer differs, its text does not);
+    only copies with different answers are dropped.
 
     Args:
       keys: The `input_key` column.
-      values: What the copies must agree on: the `gold` or `answer` column.
+      answers: The `answer` column.
 
     Returns:
       (indices to keep in order, number of dropped copies, number of rows
       dropped for conflicting answers).
     """
-    frame = pd.DataFrame({"key": list(keys), "value": list(values)})
+    frame = pd.DataFrame({"key": list(keys), "answer": list(answers)})
     first = ~frame["key"].duplicated()
-    conflict = frame.groupby("key")["value"].transform("nunique") > 1
+    conflict = frame.groupby("key")["answer"].transform("nunique") > 1
     kept = frame.index[first & ~conflict].tolist()
     return kept, int((~first & ~conflict).sum()), int(conflict.sum())
 
@@ -161,14 +160,14 @@ def take_eval_indices(
 
 
 def sample_indices(
-    strata: Sequence[str], n: int, rng: random.Random,
+    strata: Sequence[str], n: int | None, rng: random.Random,
     shares: base.Shares | None, name: str = "dataset"
 ) -> list[int]:
     """n shuffled row indices: a uniform draw, or by stratum shares.
 
     Args:
       strata: The `stratum` column.
-      n: How many to draw.
+      n: How many to draw; None takes every row.
       rng: The seeded generator.
       shares: None for a uniform draw; otherwise each stratum's share of n
         (the last takes the remainder), or "equal" for equal shares.
@@ -180,6 +179,8 @@ def sample_indices(
     Raises:
       ValueError: If the pool has fewer than n rows.
     """
+    if n is None:
+        n = len(strata)
     if len(strata) < n:
         raise ValueError(f"{name}: only {len(strata)} clean examples for {n}")
     if shares is None:

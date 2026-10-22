@@ -206,11 +206,21 @@ def attribute(model, tok, example: schema.Example, num_ablations: int = 64, keep
     with each source's weight "w", "bias": the surrogate's intercept}. A
     weight is how much keeping that sentence adds to logit q(answer).
     """
-    _, answer, s = predict(model, tok, example, device)
     sources = split_sources(example)
+    if not sources:  # nothing to cite: the decision alone
+        _, answer, s = predict(model, tok, example, device)
+        return no_sources_result(s, answer)
+    _, answer, s = predict(model, tok, example, device)
     masks = ablation_masks(num_ablations, len(sources), keep_prob, seed)
     y = ablation_targets(model, tok, example, sources, masks, answer, device)
     return result(s, answer, sources, masks, y, alpha)
+
+
+def no_sources_result(s: torch.Tensor, answer: int) -> dict[str, Any]:
+    """attribute's output for an example with no sentences: the decision
+    (from the candidate scores s [K]) and no sources."""
+    return {"answer": answer, "q": torch.softmax(s.float(), 0)[answer].item(),
+            "sources": [], "bias": 0.0}
 
 
 def result(s: torch.Tensor, answer: int, sources: list[dict[str, Any]], masks: np.ndarray,

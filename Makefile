@@ -1,5 +1,5 @@
 PY := .venv/bin/python
-DATA := data/splits/reason_long_12k_v2
+DATA := data/splits/reason_long_nimble
 # make sglang-merge / sglang-serve: the trained adapter, its base model, the merged checkpoint
 BASE ?= Qwen/Qwen3-4B
 ADAPTER ?= runs/qwen3_4b/adapter
@@ -10,8 +10,8 @@ PORT ?= 30000
 .PHONY: help download data sglang-install sglang-merge sglang-serve sglang-stop
 
 help:
-	@echo "make download        fetch the pinned Reason+Long-12k sources (and the benchmarks used to decontaminate them) from the internet into the Hugging Face cache"
-	@echo "make data            build $(DATA)/{train,eval}.jsonl and manifest.json (CPU, ~10 min)"
+	@echo "make download        fetch the pinned training sources (Reason+Long-12k + Nimble) (and the benchmarks used to decontaminate them) from the internet into the Hugging Face cache"
+	@echo "make data            build $(DATA)/{train,eval}.parquet and manifest.json (CPU, ~6 min with 8 workers)"
 	@echo "make sglang-install  SGLang as a uv tool (its own environment)"
 	@echo "make sglang-merge    merge ADAPTER into BASE -> MERGED (CPU)"
 	@echo "make sglang-serve    serve MERGED with SGLang on GPU (http://127.0.0.1:PORT), merging first if needed"

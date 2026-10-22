@@ -42,18 +42,26 @@ def user_message(
       (the message, the (start, end) character range of every part, indexed
       like `Example.parts`).
     """
-    text = prompts.render(
+    # The template inserts each part's text verbatim, so render with a marker
+    # in place of every text, locate the markers, then put the texts in.
+    # (Searching for the texts could match the template's own words.)
+    marks = [f"\x00{i}\x00" for i in range(len(example.parts))]
+    marked = prompts.render(
         "decision",
-        parts=example.parts,
+        parts=[schema.Part(p.name, m) for p, m in zip(example.parts, marks)],
         question=example.question,
         options=[example.options[i] for i in order],
     )
-    where, cursor = [], 0
-    for part in example.parts:  # rendered in order, so search after the last one
-        start = text.index(part.text, cursor)
+    pieces, where, cursor = [], [], 0
+    for part, mark in zip(example.parts, marks):
+        found = marked.index(mark, cursor)
+        pieces.append(marked[cursor:found])
+        start = sum(map(len, pieces))
+        pieces.append(part.text)
         where.append((start, start + len(part.text)))
-        cursor = start + len(part.text)
-    return text, where
+        cursor = found + len(mark)
+    pieces.append(marked[cursor:])
+    return "".join(pieces), where
 
 
 def build_prompt(

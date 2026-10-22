@@ -144,6 +144,27 @@ async def label(client, model: str, tok, example: schema.Example, args) -> dict[
                       for s in context_cite.to_spans([sources[i] for i in sets[best]])]}
 
 
+def labelled_ids(out: pathlib.Path) -> set[str]:
+    """The ids already written to out, for resuming.
+
+    A run killed mid-write leaves a partial last line: it is cut from the
+    file (its row is labelled again). A bad line anywhere else is an error.
+    """
+    if not out.exists():
+        return set()
+    lines = out.read_text().splitlines(keepends=True)
+    done = set()
+    for number, line in enumerate(lines):
+        try:
+            done.add(json.loads(line)["id"])
+        except (json.JSONDecodeError, KeyError):
+            if number != len(lines) - 1:
+                raise ValueError(f"{out}:{number + 1}: not a record")
+            logger.warning("{}: dropping the partial last line", out)
+            out.write_text("".join(lines[:-1]))
+    return done
+
+
 async def run(args) -> None:
     from openai import AsyncOpenAI
     from transformers import AutoTokenizer
@@ -172,7 +193,7 @@ async def run(args) -> None:
                 return None
 
     # resume: rows already labelled in --out are skipped; new records are appended
-    done = {json.loads(line)["id"] for line in open(out)} if out.exists() else set()
+    done = labelled_ids(out)
     rows = [r for r in rows if r.id not in done]
     logger.info("{} rows to label ({} already in {})", len(rows), len(done), out)
     start, finished = time.time(), 0
