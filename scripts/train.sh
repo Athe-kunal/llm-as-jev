@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Launches one training run in the background: Accelerate + FSDP2 over the
-# given GPUs (configs/accelerate_fsdp2.yaml).
+# given GPUs (configs/accelerate_fsdp2.yaml), or DDP with
+# ACCELERATE_CONFIG=configs/accelerate_ddp.yaml (each GPU holds the whole model).
 #
 #   scripts/train.sh <model> <run dir> [gpus] [extra train.py args ...]
 #   scripts/train.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2
 #   scripts/train.sh Qwen/Qwen3-4B runs/qwen3_4b 0,1,2,3
 #   LR=5e-5 EVAL_EVERY=75 scripts/train.sh Qwen/Qwen3.5-4B runs/qwen3.5_4b 4,5,6,7
+#   ACCELERATE_CONFIG=configs/accelerate_ddp.yaml scripts/train.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 0,1
 #
 # Every setting below can be overridden from the environment; the defaults
 # are the paper's (Li & Wagle, arXiv 2610.02076v3, Table 2). BATCH_SIZE is the
@@ -24,7 +26,7 @@ WEIGHT_DECAY=${WEIGHT_DECAY:-0.01}         # AdamW
 MAX_GRAD_NORM=${MAX_GRAD_NORM:-1.0}        # gradient clipping
 LAM=${LAM:-1.0}                            # KL anchor weight (lambda)
 LORA_RANK=${LORA_RANK:-16}                 # alpha = 2 x rank
-MAX_TOKENS=${MAX_TOKENS:-10240}            # longer rows are dropped
+MAX_TOKENS=${MAX_TOKENS:-16384}            # longer rows are dropped (paper: 10240)
 EVAL_EVERY=${EVAL_EVERY:-0}                # 0: evaluate before and after only
 EVAL_PER=${EVAL_PER:-100}                  # eval rows per dataset
 SEED=${SEED:-20260922}

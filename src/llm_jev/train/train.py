@@ -1,6 +1,6 @@
 """Fine-tuning a decision model: tree-factorized listwise loss + KL anchors.
 
-Usage (Accelerate with FSDP2 over the visible GPUs; see scripts/train.sh):
+Usage (Accelerate, FSDP2 or DDP over the visible GPUs; see scripts/train.sh):
   CUDA_VISIBLE_DEVICES=0,1,2,3 .venv/bin/accelerate launch \
       --config_file configs/accelerate_fsdp2.yaml --num_processes 4 \
       -m llm_jev.train.train --model Qwen/Qwen3-0.6B --out runs/qwen3_0.6b
@@ -12,7 +12,7 @@ splits or a Hugging Face dataset id.
 
 --batch-size is the global batch: each process takes batch_size /
 num_processes rows per step. Rows longer than --max-tokens are dropped before
-training, since under FSDP every process must run the same number of forward
+training, since every process must run the same number of forward and backward
 passes. Evaluation runs the same rows on every process; the main process
 writes the results.
 """
@@ -62,9 +62,10 @@ def save_adapter(acc, model, path: pathlib.Path) -> None:
     """
     from torch.distributed.tensor import DTensor
 
+    peft = acc.unwrap_model(model)  # DDP's state_dict keys carry "module."
     state = {k: (v.full_tensor() if isinstance(v, DTensor) else v).cpu()
-             for k, v in model.state_dict().items() if "lora_" in k}
-    acc.unwrap_model(model).save_pretrained(
+             for k, v in peft.state_dict().items() if "lora_" in k}
+    peft.save_pretrained(
         path, state_dict=state, is_main_process=acc.is_main_process)
 
 
@@ -87,7 +88,7 @@ def main() -> None:
                         help="final learning rate / peak (linear decay)")
     parser.add_argument("--lam", type=float, default=1.0, help="anchor weight")
     parser.add_argument("--lora-rank", type=int, default=16)
-    parser.add_argument("--max-tokens", type=int, default=10240)
+    parser.add_argument("--max-tokens", type=int, default=16384)
     parser.add_argument("--eval-per", type=int, default=100,
                         help="eval rows per dataset")
     parser.add_argument("--gen-per", type=int, default=20,
@@ -159,8 +160,9 @@ def main() -> None:
 
     def run_eval(step: int, tag: str) -> None:
         t0 = time.time()
-        metrics, examples = evaluate.evaluate(model, tok, evals, gen_rows,
-                                              device)
+        # The PEFT model itself: DDP's wrapper has no generate().
+        metrics, examples = evaluate.evaluate(acc.unwrap_model(model), tok,
+                                              evals, gen_rows, device)
         if acc.is_main_process:
             evaluate.save(out, tag, metrics, examples)
         acc.log({f"eval/{name}/{k}": x for name, v in metrics.items()

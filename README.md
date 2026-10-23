@@ -81,9 +81,12 @@ top = sorted(res["sources"], key=lambda s: -s["w"])[:3]         # per-sentence w
 Training runs under [Accelerate](https://huggingface.co/docs/accelerate) with
 FSDP2 (`configs/accelerate_fsdp2.yaml`: one shard unit per decoder layer, bf16
 compute, fp32 LoRA weights); `scripts/train.sh` starts one process per GPU in
-its list. `BATCH_SIZE` is the global batch and is split across the GPUs, so a
+its list. For a model that fits on one GPU, DDP can be faster:
+`ACCELERATE_CONFIG=configs/accelerate_ddp.yaml scripts/train.sh ...`.
+`BATCH_SIZE` is the global batch and is split across the GPUs, so a
 run's optimization does not depend on the GPU count. Evaluation during
-training runs the same rows on every GPU.
+training runs the same rows on every GPU. Rows over `MAX_TOKENS` (16384; the
+paper uses 10240) are dropped before training.
 
 The launchers in `scripts/` take the GPU index (for training, a comma-separated
 list) as an argument and set `CUDA_VISIBLE_DEVICES` from it; the Python entry points use
@@ -138,7 +141,7 @@ src/llm_jev/
                  (vLLM labelling server)
   evaluation/    evaluate.py (eval split metrics), benchmarks.py (external benchmarks)
   prompts/       decision.j2 (the decision prompt; package data)
-scripts/         train.sh (Accelerate + FSDP2, one or more GPUs), evaluate.sh, sglang_serve.sh (one GPU)
-configs/         accelerate_fsdp2.yaml (the Accelerate launch config for training)
+scripts/         train.sh (Accelerate + FSDP2 or DDP, one or more GPUs), evaluate.sh, sglang_serve.sh (one GPU)
+configs/         accelerate_fsdp2.yaml, accelerate_ddp.yaml (Accelerate launch configs for training)
 ```
 
