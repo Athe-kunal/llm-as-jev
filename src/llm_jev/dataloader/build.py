@@ -1,14 +1,4 @@
-"""The training mixture: Reason+Long-12k (Li & Wagle, arXiv 2610.02076v3) plus Nimble.
-
-Usage (or: make data):
-  .venv/bin/python -m llm_jev.dataloader.build --download   # fetch the pinned sources (once)
-  .venv/bin/python -m llm_jev.dataloader.build              # writes <out>/{train,eval}.parquet
-
-Reason+Long-12k is twelve public datasets (Table 3), plus Nimble. Each training
-pool is cleaned before sampling (paper section 3.5, Appendix D): benchmark and
-validation overlaps and over-long prompts are dropped, and duplicate inputs
-collapse to one copy. The paper does not specify the duplicate rule.
-"""
+"""The training mixture: Reason+Long-12k (Li & Wagle, arXiv 2610.02076v3) plus Nimble."""
 
 import argparse
 import collections

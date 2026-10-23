@@ -75,7 +75,7 @@ export default function TryIt() {
 
   return (
     <section className="trie-section" id="try">
-      <p className="eyebrow">7 · Try it</p>
+      <p className="eyebrow">8 · Try it</p>
       <h2>Random eval rows, live</h2>
       <p className="lede small">
         {row ? row.model : "The trained decision model"}, running on this machine. Each row is answered with the guided decoder, then explained by ContextCite in its

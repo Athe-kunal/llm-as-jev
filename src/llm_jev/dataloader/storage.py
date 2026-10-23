@@ -1,11 +1,4 @@
-"""Examples as a `datasets.Dataset`: the container the pipeline maps over.
-
-Rows follow the schema of `FEATURES`. Datasets are saved as Parquet, the
-format a Hugging Face Hub dataset holds.
-
-load_dataset reads a .parquet file, a folder holding <split>.parquet, or else
-a Hugging Face dataset id.
-"""
+"""Examples as a `datasets.Dataset`: the container the pipeline maps over."""
 
 import pathlib
 from collections.abc import Iterable

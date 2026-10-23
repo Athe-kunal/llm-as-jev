@@ -37,7 +37,7 @@ export default function AT2() {
   if (!CONSISTENT)
     return (
       <section className="trie-section" id="at2">
-        <p className="eyebrow">6 · AT2</p>
+        <p className="eyebrow">7 · AT2</p>
         <h2>Learning to attribute from the model's own attention</h2>
         <div className="pending">
           The AT2 data is being regenerated: it describes {t.phi.length} sentences, the ContextCite data {d}. Re-run{" "}
@@ -47,7 +47,7 @@ export default function AT2() {
     );
   return (
     <section className="trie-section" id="at2">
-      <p className="eyebrow">6 · AT2</p>
+      <p className="eyebrow">7 · AT2</p>
       <h2>Learning to attribute from the model's own attention</h2>
       <p className="lede small">
         Cohen-Wang et al., “Learning to Attribute with Attention” (2025), as implemented in <code>src/modeling/at2.py</code>.

@@ -11,6 +11,7 @@
     "data:trie": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_trie.py",
     "data:anchors": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_anchors.py",
     "data:contextcite": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_contextcite.py",
+    "data:losscode": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_loss_code.py",
     "data:at2": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_at2.py",
     "api": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/server.py --port 8767"
   },
