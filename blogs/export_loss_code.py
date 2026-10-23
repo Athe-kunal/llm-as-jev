@@ -406,25 +406,19 @@ class Tracer:
 
 
 def source(fn) -> dict:
-    """The function's lines with the docstring collapsed, plus statement extents."""
+    """The function's lines, its docstring span, and the extent of each statement."""
     lines, start = inspect.getsourcelines(fn)
     fdef = ast.parse("".join(lines)).body[0]
     doc = fdef.body[0] if ast.get_docstring(fdef, clean=False) is not None else None
-    shown, index = [], {}
-    for i, text in enumerate(lines, 1):
-        if doc is not None and doc.lineno <= i <= doc.end_lineno:
-            if i == doc.lineno:
-                index[i] = len(shown)
-                shown.append(text[: len(text) - len(text.lstrip())] + '"""…"""')
-            continue
-        index[i] = len(shown)
-        shown.append(text.rstrip("\n"))
+    shown = [text.rstrip("\n") for text in lines]
+    index = {i: i - 1 for i in range(1, len(lines) + 1)}
+    docs = [doc.lineno - 1, doc.end_lineno - 1] if doc is not None else None
     ends = {}
     for node in ast.walk(fdef):
         if isinstance(node, ast.stmt) and node is not fdef:
             header = isinstance(node, (ast.For, ast.While, ast.If, ast.With))
             ends.setdefault(node.lineno, node.body[0].lineno - 1 if header else node.end_lineno)
-    return {"start": start, "lines": lines, "shown": shown, "index": index, "ends": ends}
+    return {"start": start, "lines": lines, "shown": shown, "index": index, "ends": ends, "doc": docs}
 
 
 def build_steps(tracer: Tracer, funcs: dict) -> list[dict]:
@@ -471,13 +465,55 @@ def build_steps(tracer: Tracer, funcs: dict) -> list[dict]:
         if returned is not None:
             variables.append({"name": "return", "shape": returned[0], "text": returned[1], "changed": True})
         steps.append({"fn": fn, "line": src["index"][line], "line_end": src["index"][last_line],
-                      "node": node_of(fn, anchor),
+                      "node": node_of(fn, anchor), "frame": (fn, opts.get("call", 0)),
                       "title": title, "body": body,
                       "stack": stack, "vars": variables, "t": when})
+    steps += call_steps(tracer, funcs, steps)
     steps.sort(key=lambda s: s["t"])
-    for s in steps:
-        del s["t"]
+    for i, s in enumerate(steps):
+        if s.get("call"):  # the diagram node of the work the call starts
+            s["node"] = next(x["node"] for x in steps[i + 1:] if not x.get("call"))
+        del s["t"], s["frame"]
     return steps
+
+
+def call_steps(tracer: Tracer, funcs: dict, steps: list[dict]) -> list[dict]:
+    """One step per call on the way down, showing the calling line and the arguments."""
+
+    def frame_at(name: str, when: int):
+        return next(key for key, evs in tracer.events.items()
+                    if key[0] == name and evs[0]["t"] <= when <= evs[-1]["t"])
+
+    def parent(frame):
+        first = tracer.events[frame][0]
+        return frame_at(first["stack"][-2], first["t"]) if len(first["stack"]) > 1 else None
+
+    needed = set()
+    for step in steps:
+        frame = step["frame"]
+        while frame is not None and frame not in needed:
+            needed.add(frame)
+            frame = parent(frame)
+    out = []
+    for frame in needed:
+        caller = parent(frame)
+        if caller is None:
+            continue
+        first = tracer.events[frame][0]
+        events = tracer.events[caller]
+        k = max(j for j, e in enumerate(events) if e["line"] is not None and e["t"] < first["t"])
+        src = funcs[caller[0]]
+        line = events[k]["line"] - src["start"] + 1
+        args = [{"name": n, "shape": sh, "text": t, "changed": True, "tag": "argument"}
+                for n, (sh, t) in first["vars"].items()]
+        out.append({
+            "fn": caller[0], "line": src["index"][line],
+            "line_end": src["index"][src["ends"].get(line, line)],
+            "title": f"Call {frame[0]}", "call": frame[0],
+            "body": f"`{caller[0]}` calls `{frame[0]}`. Its arguments are on the right; the steps that follow run inside it, and this line is highlighted again when the call returns.",
+            "stack": events[k]["stack"], "vars": args, "t": first["t"] - 0.5, "frame": frame,
+        })
+    return out
 
 
 def main() -> None:
@@ -515,7 +551,7 @@ def main() -> None:
             "tokens": len(ex["input_ids"]),
         },
         "flow": FLOW,
-        "funcs": {name: {"lines": f["shown"]} for name, f in funcs.items()},
+        "funcs": {name: {"lines": f["shown"], "doc": f["doc"]} for name, f in funcs.items()},
         "steps": build_steps(tracer, funcs),
     }
     out = pathlib.Path(args.out)

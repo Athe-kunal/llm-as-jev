@@ -769,3 +769,16 @@ a.sec { text-decoration: none; }
 @media (max-width: 900px) {
   .rs-cards, .rs-dbs, .rs-grid-charts, .rs-grid-charts.two { grid-template-columns: minmax(0, 1fr); }
 }
+.lc-line.call .lc-ln::before { content: "▶"; color: var(--accent); margin-right: 4px; }
+.lc-line.call { background: color-mix(in srgb, var(--c2) 14%, transparent); border-left-color: var(--c2); }
+.lc-top .stepper { flex-wrap: nowrap; gap: 10px; }
+.lc-top .dots { flex: 1 1 0; min-width: 0; gap: 3px; }
+.lc-top .sdot { flex: 1 1 0; min-width: 3px; max-width: 10px; height: 8px; width: auto; }
+.lc-top .sdot.on { flex: 0 0 22px; max-width: none; }
+.lc-top .lc-toggle { flex: none; }
+.lc-top .step-count { flex: none; }
+@media (max-width: 800px) {
+  .lc-top .stepper { flex-wrap: wrap; }
+  .lc-top .dots { order: 5; flex-basis: 100%; }
+}
+.lc-line.lc-doc .lc-src { color: var(--muted); font-style: italic; white-space: pre-wrap; }

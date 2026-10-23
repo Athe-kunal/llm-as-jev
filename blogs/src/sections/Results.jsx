@@ -256,7 +256,7 @@ export default function Results() {
       <h3 className="sub-h">What it did to the external benchmarks</h3>
       <Table rows={[...BENCH, ["external_macro", "External macro"]]} groupLabel="Accuracy, %" digits={1}
         get={(m, k) => (m.bench_base ? [m.bench_base[k].accuracy, m.bench_final[k].accuracy] : null)} />
-      <p className="rs-note">The benchmarks were not run for Qwen3-4B.</p>
+      <p className="rs-note">Each benchmark is a seeded sample of the pinned download (BoolQ 500, MMLU 1,200, MMLU-Pro 800, ARC-Challenge 600, Winogrande 500, SciQ 400, Banking77 3,080, JevBench 231), so a one-point difference on a single benchmark is noise. External macro is the mean over the six external sets.</p>
 
       <h3 className="sub-h">Training curves from TensorBoard</h3>
       <div className="rs-ctl">

@@ -60,7 +60,7 @@ function Flow({ node, seen }) {
 
 /** The function being executed, with the line that just ran highlighted. */
 function CodeCard({ step }) {
-  const lines = d.funcs[step.fn].lines;
+  const { lines, doc } = d.funcs[step.fn];
   const box = useRef(null);
   useEffect(() => {
     // keep the active line in view inside the card, not the page
@@ -81,9 +81,13 @@ function CodeCard({ step }) {
       </div>
       <div className="lc-code" ref={box}>
         {lines.map((text, i) => (
-          <div key={`${step.fn}-${i}`} className={i >= step.line && i <= step.line_end ? "lc-line on" : "lc-line"}>
+          <div key={`${step.fn}-${i}`} className={[
+            "lc-line",
+            i >= step.line && i <= step.line_end ? (step.call ? "on call" : "on") : "",
+            doc && i >= doc[0] && i <= doc[1] ? "lc-doc" : "",
+          ].join(" ")}>
             <span className="lc-ln">{i + 1}</span>
-            <span className="lc-src"><Source text={text} /></span>
+            <span className="lc-src">{doc && i >= doc[0] && i <= doc[1] ? text : <Source text={text} />}</span>
           </div>
         ))}
       </div>
@@ -102,7 +106,7 @@ function Variables({ vars }) {
           <summary>
             <b>{v.name}</b>
             <span className="lc-shape">{v.shape}</span>
-            {v.changed && <em>{v.name === "return" ? "returned" : "new"}</em>}
+            {v.changed && <em>{v.tag || (v.name === "return" ? "returned" : "new")}</em>}
           </summary>
           {v.text && <pre>{v.text}</pre>}
         </details>
