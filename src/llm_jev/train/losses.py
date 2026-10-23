@@ -119,7 +119,7 @@ def pos_anchor(logits: torch.Tensor, ref: TensorDict) -> torch.Tensor:
     return _kl_top(ref["lp"], lp)                                       # [P]
 
 
-def _logits(model, ex: dict, seqs: list[list[int]], device: str,
+def _logits(model, ex: dict, seqs: list[list[int]], device,
             pad: int) -> TensorDict:
     """Gold-path logits, reply-start logits, and each sequence's last logits.
 
@@ -127,10 +127,8 @@ def _logits(model, ex: dict, seqs: list[list[int]], device: str,
     rows are the off-path sequences. The TensorDict has no batch dimension,
     since its fields have different leading sizes.
     """
-    hs, last = modeling.batched_hidden(model, seqs, device, pad)        # S x [L_i, H], [S, V]
-    head = model.get_base_model().lm_head
     pos = [p for p, _, _ in ex["path"]] + [ex["reply"]]                 # T + 1 positions
-    at = head(hs[0][pos].to(head.weight.dtype)).float()                 # [T+1, V]
+    at, last = modeling.batched_logits(model, seqs, pos, device, pad)   # [T+1, V], [S, V]
     return TensorDict(path=at[:-1], reply=at[-1], last=last,            # [T, V], [V], [S, V]
                       batch_size=[])
 
@@ -163,7 +161,7 @@ def _loss_terms(
 loss_terms = torch.compile(_loss_terms, dynamic=True)
 
 
-def compute(model, ex: dict, device: str, pad: int) -> TensorDict:
+def compute(model, ex: dict, device, pad: int) -> TensorDict:
     """L_tree and the anchors L_mass, L_out, L_pos (Eqs. 2-3) for one example.
 
     p0 is the same model with the adapter disabled, run without gradients.
@@ -173,8 +171,9 @@ def compute(model, ex: dict, device: str, pad: int) -> TensorDict:
     """
     prompt = ex["input_ids"][: ex["path"][0][0] + 1]
     seqs = [ex["input_ids"]] + [prompt + n for n, _ in ex["off_path"]]  # S sequences
-    with torch.no_grad(), model.disable_adapter():
-        ref = _logits(model, ex, seqs, device, pad)                     # p0
+    peft = getattr(model, "module", model)                              # unwrap DDP
+    with torch.no_grad(), peft.disable_adapter():
+        ref = _logits(peft, ex, seqs, device, pad)                      # p0
     cur = _logits(model, ex, seqs, device, pad)                         # p_theta
     T, O = len(ex["path"]), len(ex["off_path"])
     legal = legal_mask([l for _, l, _ in ex["path"]] + [l for _, l in ex["off_path"]],

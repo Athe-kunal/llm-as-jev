@@ -47,6 +47,7 @@ first use (`llm_jev.modeling.fa2`).
 ```bash
 make data                                   # download the pinned sources, build the training mix (Reason+Long-12k + Nimble) -> data/splits/reason_long_nimble/{train,eval}.parquet (CPU, ~6 min)
 scripts/train.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2       # one GPU; logs to runs/qwen3_0.6b.log
+scripts/train.sh Qwen/Qwen3-4B runs/qwen3_4b 0,1,2,3     # FSDP2 over four GPUs
 scripts/evaluate.sh Qwen/Qwen3-0.6B runs/qwen3_0.6b 2    # eval split + external benchmarks
 ```
 
@@ -77,8 +78,12 @@ res = masked_cite.attribute(model, tok, example, removal="full")   # or removal=
 top = sorted(res["sources"], key=lambda s: -s["w"])[:3]         # per-sentence weights w
 ```
 
-The launchers in `scripts/` take the GPU index as an argument and set
-`CUDA_VISIBLE_DEVICES` from it; the Python entry points use
+Training uses Accelerate with FSDP2 (`configs/accelerate_fsdp2.yaml`); set
+`ACCELERATE_CONFIG=configs/accelerate_ddp.yaml` for DDP. `BATCH_SIZE` is the
+global batch.
+
+The launchers in `scripts/` take the GPU index (for training, a comma-separated
+list) as an argument and set `CUDA_VISIBLE_DEVICES` from it; the Python entry points use
 `CUDA_VISIBLE_DEVICES` directly. Runs and data live in `runs/` and `data/`,
 which are git-ignored.
 
@@ -130,6 +135,7 @@ src/llm_jev/
                  (vLLM labelling server)
   evaluation/    evaluate.py (eval split metrics), benchmarks.py (external benchmarks)
   prompts/       decision.j2 (the decision prompt; package data)
-scripts/         train.sh, evaluate.sh, sglang_serve.sh (launchers, one GPU each)
+scripts/         train.sh, evaluate.sh, sglang_serve.sh (launchers)
+configs/         Accelerate configs for training (FSDP2, DDP)
 ```
 
