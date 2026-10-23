@@ -633,9 +633,6 @@ a.sec { text-decoration: none; }
 .pipe-fig svg { width: 100%; min-width: 760px; height: auto; display: block; color: var(--fg); }
 .pipe-fig figcaption { font-size: 13px; color: var(--muted); padding: 8px 4px 2px; max-width: 80ch; }
 .pipe-edge { fill: none; stroke: var(--muted); stroke-width: 1.6; }
-.pipe-edge.hot { stroke: var(--accent); stroke-width: 2; }
-.pipe-flow { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-dasharray: 3 14; stroke-linecap: round; animation: pipe-flow 1.2s linear infinite; opacity: 0.9; }
-@keyframes pipe-flow { to { stroke-dashoffset: -34; } }
 .pipe-head { fill: var(--muted); }
 .pipe-label { font: 11.5px var(--mono); fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; }
 .lane { font: 600 11px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; fill: var(--accent); }
@@ -645,9 +642,6 @@ a.sec { text-decoration: none; }
 .pipe-node.on > rect:first-of-type { stroke: var(--accent); stroke-width: 2.4; }
 .pipe-node .t1 { font: 600 13px var(--body); fill: var(--fg); }
 .pipe-node .t2 { font: 11px var(--mono); fill: var(--muted); }
-.pipe-node .t3 { font: 600 12px var(--body); fill: var(--accent); }
-.pipe-node.server > rect:first-of-type { fill: color-mix(in srgb, var(--accent) 9%, var(--surface)); stroke: var(--accent); }
-.pipe-node .port { fill: var(--surface); stroke: color-mix(in srgb, var(--accent) 50%, var(--line)); }
 .pipe-node.reward > rect { fill: color-mix(in srgb, var(--c2) 12%, var(--surface)); stroke: color-mix(in srgb, var(--c2) 55%, var(--line)); }
 .pipe-node.data > rect { fill: var(--gold-bg); stroke: color-mix(in srgb, var(--c6) 45%, var(--line)); }
 .pipe-node.gate > rect { fill: var(--surface); stroke: var(--c5); stroke-dasharray: 5 4; }

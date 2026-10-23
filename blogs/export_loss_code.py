@@ -34,12 +34,12 @@ MODEL = "Qwen/Qwen3-0.6B"
 ADAPTER = "runs/qwen3_0.6b/adapter"
 EXAMPLE = 4161  # a short four-option ReClor row in the training split
 SEED = f"42:{EXAMPLE}"
-SKIP = {"model", "device", "base", "head", "pad", "top", "self"}
+SKIP = {"model", "device", "pad", "top", "self"}
 
 FUNCTIONS = {
     "compute": losses.compute,
     "_logits": losses._logits,
-    "batched_hidden": modeling.batched_hidden,
+    "batched_logits": modeling.batched_logits,
     "legal_mask": losses.legal_mask,
     "_loss_terms": losses._loss_terms,
     "node_stats": losses.node_stats,
@@ -65,38 +65,28 @@ STEPS = [
     ("compute", 'seqs = [ex["input_ids"]]', {}, "One sequence per branch",
      "Row 0 is the teacher-forced gold sequence. Each other row is the prompt plus one off-path prefix, so the logits at its last position are the model's distribution at that trie node. S = 1 + the number of off-path nodes."),
 
-    ("batched_hidden", "n = max(", {}, "Pad length",
+    ("batched_logits", "n = max(", {}, "Pad length",
      "The S sequences are padded to the length of the longest."),
-    ("batched_hidden", "ids = torch.full(", {}, "A pad-filled token matrix",
+    ("batched_logits", "ids = torch.full(", {}, "A pad-filled token matrix",
      "`ids` is an `[S, n]` matrix of the pad token. The real tokens are written over it next."),
-    ("batched_hidden", "mask = torch.zeros(", {}, "An empty attention mask",
+    ("batched_logits", "mask = torch.zeros(", {}, "An empty attention mask",
      "`mask` is 1 where a real token will sit and 0 on padding."),
-    ("batched_hidden", "for i, x in enumerate(seqs):", {"to": "mask[i, n - len(x):] = 1"}, "Left-pad each row",
-     "The loop writes each sequence into the right end of its row of `ids` and sets `mask` to 1 over the real tokens. The padding sits on the left, so every row's last real token is in column `n - 1`; that alignment lets `last[:, -1]` read the final position of every row. The panel shows the state after the loop."),
-    ("batched_hidden", "ids, mask = ids.to(device)", {}, "Move to the GPU", "Both matrices go to the device."),
-    ("batched_hidden", "pos = (mask.cumsum", {}, "Position ids that skip padding",
+    ("batched_logits", "for i, x in enumerate(seqs):", {"to": "mask[i, n - len(x):] = 1"}, "Left-pad each row",
+     "The loop writes each sequence into the right end of its row of `ids` and sets `mask` to 1 over the real tokens. The padding sits on the left, so every row's last real token is in column `n - 1`; that alignment makes the final column the last real token of every row. The panel shows the state after the loop."),
+    ("batched_logits", "ids, mask = ids.to(device)", {}, "Move to the GPU", "Both matrices go to the device."),
+    ("batched_logits", "pos = (mask.cumsum", {}, "Position ids that skip padding",
      "`cumsum - 1` numbers the real tokens 0, 1, 2, … from the first real token, and `clamp(min=0)` puts padded slots at 0. Without it, a left-padded row would get shifted rotary positions and different logits than the same sequence run alone."),
-    ("batched_hidden", "base = model.get_base_model()", {}, "Skip the wrappers",
-     "`get_base_model()` unwraps the PEFT wrapper. The LoRA layers inside stay active, or are switched off by `disable_adapter()` in the reference pass."),
-    ("batched_hidden", "out = base.model(", {}, "The transformer forward",
-     "One pass over all S rows through the transformer stack only (`base.model`, not the LM head), so the vocabulary-sized projection is not applied at every position. This is where nearly all the time goes."),
-    ("batched_hidden", "last = out.last_hidden_state", {}, "Last layer's states",
-     "`[S, n, H]`: one hidden vector per token."),
-    ("batched_hidden", "logits = base.lm_head(last[:, -1])", {}, "LM head on the last column only",
-     "Column `n - 1` is the position after each row's final real token. For an off-path row that is the trie node we want; for the gold row it is the position after the closing `]`. Only these S vectors go through the vocabulary-wide head."),
-    ("batched_hidden", "last = last.float()", {}, "States to fp32",
-     "The states are cast so the gold-path head projection below is computed in fp32."),
-    ("batched_hidden", "return [last[i", {"ret": True}, "Remove the padding again",
-     "Returns each row's hidden states without its left padding (`[L_i, H]`) and the `[S, V]` last-position logits."),
+    ("batched_logits", "at = torch.tensor(", {}, "Which columns to keep",
+     "`keep` holds the T + 1 gold-path positions in the unpadded gold sequence. Row 0 was left-padded by `n - len(seqs[0])`, so each position is shifted by that amount to find its column; the last entry, `n - 1`, is the final column, which is the last real token of every row."),
+    ("batched_logits", "logits = model(", {}, "The forward, with logits only where needed",
+     "One pass over all S rows. `logits_to_keep=at` makes the model apply the vocabulary-wide LM head only at those columns instead of at every position, so the result is `[S, T + 2, V]`. This forward is where nearly all the time goes."),
+    ("batched_logits", "return logits[0, :-1]", {"ret": True}, "Split the two views",
+     "`logits[0, :-1]` is the gold row at the T + 1 kept positions (`[T + 1, V]`). `logits[:, -1]` is the last column of every row (`[S, V]`): for an off-path row that is the trie node we want, and for the gold row it is the position after the closing `]`."),
 
-    ("_logits", "hs, last = modeling.batched_hidden", {}, "Hidden states and last logits",
-     "`hs[i]` are row i's hidden states and `last[i]` is its next-token distribution at the end. Row 0 is the gold sequence, so `last[0]` is the distribution after the final `]`."),
-    ("_logits", "head = model.get_base_model().lm_head", {}, "The LM head",
-     "The same output projection, applied below to chosen gold-path positions."),
     ("_logits", "pos = [p for p, _, _ in", {}, "Which positions we need",
      "The T gold-path positions plus the reply position: T + 1 indices into the gold sequence."),
-    ("_logits", "at = head(hs[0][pos]", {}, "Logits at those positions",
-     "`hs[0][pos]` picks the gold row's states at those indices and the head turns them into `[T + 1, V]` fp32 logits. Row t is the distribution that should put the gold token of step t on top."),
+    ("_logits", "at, last = modeling.batched_logits", {}, "Logits at those positions",
+     "`at` is `[T + 1, V]`: row t is the distribution that should put the gold token of step t on top. `last[i]` is sequence i's next-token distribution at its end; row 0 is the gold sequence, so `last[0]` is the distribution after the final `]`."),
     ("_logits", "return TensorDict(path=at[:-1]", {"ret": True}, "Package the logits",
      "`path` is the first T rows, `reply` the last, and `last` the S last-position distributions."),
     ("compute", "ref = _logits(", {}, "p0: the reference",
@@ -184,8 +174,8 @@ FLOW = """flowchart LR
   SEQS["seqs<br/>gold + off-path rows"]
   IN["legal mask<br/>gold ids · weights"]
   PAD["left-pad<br/>ids · mask · pos"]
-  FWD["transformer<br/>forward"]
-  LMH["LM head<br/>path · reply · last"]
+  FWD["forward<br/>LM head on kept columns"]
+  LMH["logits<br/>path · reply · last"]
   REF["ref = p0<br/>adapter off"]
   CUR["cur = p_θ<br/>adapter on"]
   NODES["trie nodes<br/>[N, V]"]
@@ -216,8 +206,7 @@ FLOW = """flowchart LR
 NODES = {
     "compute": ("IN", {"": "EX", "prompt =": "SEQS", "seqs =": "SEQS", "ref = ": "REF",
                        "cur = ": "CUR", "tree, mass, out, pos": "OUT", "return": "OUT"}),
-    "batched_hidden": ("PAD", {"base =": "FWD", "out =": "FWD", "last = out": "FWD",
-                               "logits =": "LMH", "last = last": "LMH", "return": "LMH"}),
+    "batched_logits": ("PAD", {"at =": "FWD", "logits =": "FWD", "return": "LMH"}),
     "_logits": ("LMH", {}),
     "legal_mask": ("IN", {}),
     "_loss_terms": ("NODES", {"anchor =": "ANCH", "sites": "POS", "ref_sites": "POS", "return": "OUT"}),
