@@ -12,12 +12,14 @@
     "data:anchors": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_anchors.py",
     "data:contextcite": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_contextcite.py",
     "data:losscode": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_loss_code.py",
+    "data:results": "cd .. && .venv/bin/python blogs/export_results.py",
     "data:at2": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_at2.py",
     "api": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/server.py --port 8767"
   },
   "dependencies": {
     "framer-motion": "11.11.17",
     "katex": "^0.16.11",
+    "mermaid": "11.4.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

@@ -53,8 +53,10 @@ FUNCTIONS = {
 
 # (function, anchor text of the line, options, title, body). Options: call
 # (which call of the function, default the first), occ="last" (last pass of a
-# loop), ret (show the returned value), entry (show the arguments, before any
-# line runs). Steps are ordered by when their line finishes.
+# loop), to (a loop: the anchor is its header, `to` its last line, and the step
+# shows the state after the loop), ret (show the returned value), entry (show
+# the arguments, before any line runs). Steps are ordered by when their line
+# finishes.
 STEPS = [
     ("compute", "", {"entry": True}, "The inputs",
      "`ex` is the dict from `answers.encode`: token ids (prompt + gold suffix), the gold path (position, legal tokens, gold token at each step), the reply position and the sampled off-path nodes. Token ids are decoded here for reading; the code works on ids."),
@@ -69,10 +71,8 @@ STEPS = [
      "`ids` is an `[S, n]` matrix of the pad token. The real tokens are written over it next."),
     ("batched_hidden", "mask = torch.zeros(", {}, "An empty attention mask",
      "`mask` is 1 where a real token will sit and 0 on padding."),
-    ("batched_hidden", "ids[i, n - len(x):] = torch.tensor(x)", {"occ": "last"}, "Left-pad each row",
-     "Each sequence is written into the right end of its row, so the padding sits on the left and every row's last real token is in column `n - 1`. That alignment lets `last[:, -1]` read the final position of every row. The panel shows the state after the last row is written."),
-    ("batched_hidden", "mask[i, n - len(x):] = 1", {"occ": "last"}, "Mark the real tokens",
-     "The same slice of the mask is set to 1."),
+    ("batched_hidden", "for i, x in enumerate(seqs):", {"to": "mask[i, n - len(x):] = 1"}, "Left-pad each row",
+     "The loop writes each sequence into the right end of its row of `ids` and sets `mask` to 1 over the real tokens. The padding sits on the left, so every row's last real token is in column `n - 1`; that alignment lets `last[:, -1]` read the final position of every row. The panel shows the state after the loop."),
     ("batched_hidden", "ids, mask = ids.to(device)", {}, "Move to the GPU", "Both matrices go to the device."),
     ("batched_hidden", "pos = (mask.cumsum", {}, "Position ids that skip padding",
      "`cumsum - 1` numbers the real tokens 0, 1, 2, … from the first real token, and `clamp(min=0)` puts padded slots at 0. Without it, a left-padded row would get shifted rotary positions and different logits than the same sequence run alone."),
@@ -108,15 +108,17 @@ STEPS = [
 
     ("legal_mask", "mask = torch.zeros(", {}, "An all-False matrix",
      "One row per trie node (N), one column per vocabulary token (V). The width is the model's full vocabulary, not the trie's."),
-    ("legal_mask", "mask[i, tokens] = True", {"occ": "last"}, "Set each node's legal columns",
-     "Row i gets True at the tokens the trie allows after node i: the option digits at the root, `]` at the digit nodes. Shown after the last row."),
+    ("legal_mask", "for i, tokens in enumerate(legal):", {"to": "mask[i, tokens] = True"}, "Set each node's legal columns",
+     "Row i gets True at the tokens the trie allows after node i: the option digits at the root, `]` at the digit nodes. Shown after the loop."),
     ("legal_mask", "return mask", {"ret": True}, "The legal mask",
      "Rows are ordered gold-path nodes first, then off-path nodes, the same order in which `_loss_terms` concatenates the logits."),
+    ("compute", "legal = legal_mask(", {}, "Back in compute: the mask",
+     "`legal` is the `[N, V]` mask, N = T + O rows in the order the logits are stacked later."),
     ("compute", "gold = torch.tensor(", {}, "Gold token ids", "The gold token at each of the T path steps."),
     ("compute", "weight = torch.tensor(", {}, "Node weights",
      "Gold-path nodes share a total weight of 0.5 and off-path nodes share 0.5, each split evenly within its group. These weight the L_mass and L_out sums."),
 
-    ("_loss_terms", "T = cur_path.shape[0]", {}, "Inside `_loss_terms`",
+    ("_loss_terms", "T = cur_path.shape[0]", {}, "Inside _loss_terms",
      "The pure-tensor part of the loss. It sees only logits, the mask, the gold ids and the weights. `T` is the number of gold-path nodes."),
     ("_loss_terms", "nodes = torch.cat([cur_path", {}, "All trie nodes, p_theta",
      "The T gold-path rows followed by the O off-path rows (`cur_last[1:]`). `cur_last[0]` is skipped: it is the distribution after the final `]`, not a trie node. The result is `[N, V]` and lines up with `legal`."),
@@ -128,6 +130,8 @@ STEPS = [
      "Legal columns become -inf. What remains is the model's mass outside the trie. Its highest token is the model's favourite way to answer outside the format."),
     ("_split", "return TensorDict(", {"ret": True}, "Legal and illegal mass",
      "`log_m` is the log of the mass on legal tokens and `log_r` the log of the mass on illegal tokens, each by its own logsumexp. The illegal mass is summed directly, not computed as `1 - m`, which rounds to 0 in fp32 when the legal mass is nearly 1."),
+    ("node_stats", "s = _split(logits, legal)", {}, "Split p0 into legal and illegal",
+     "`s` is the result of the `_split` call above: p0's log-probabilities, its illegal part and the two masses."),
     ("node_stats", "lp, idx = (s[", {}, "p0's top illegal tokens",
      "Subtracting `log_r` renormalizes the illegal log-probabilities into a distribution over illegal tokens only. The top 64 (`TOP`) are kept: `idx` their ids, `lp` their log-probabilities. Only these enter the L_out anchor."),
     ("node_stats", "return TensorDict(log_m", {"ret": True}, "The reference statistics",
@@ -167,11 +171,72 @@ STEPS = [
      "The same top-K-plus-remainder KL as before, one value per site. `_loss_terms` sums the two and multiplies by 0.5."),
     ("_loss_terms", "return torch.stack([", {"ret": True}, "Four scalars",
      "[L_tree, L_mass, L_out, L_pos]. L_tree sums over the path; L_mass and L_out are the `weight`-weighted sums of the per-node vectors; L_pos is 0.5 times the sum over its two sites."),
-    ("compute", "tree, mass, out, pos = loss_terms(", {}, "Back in `compute`",
+    ("compute", "tree, mass, out, pos = loss_terms(", {}, "Back in compute",
      "The four scalars come back as separate tensors."),
     ("compute", "return TensorDict(tree=tree", {"ret": True}, "The result",
      "`train.py` combines them as `tree + lam * (mass + out + pos)` and calls backward."),
 ]
+
+
+# The data flow of compute, as Mermaid. Node ids are the values of NODES below.
+FLOW = """flowchart LR
+  EX["ex<br/>encode dict"]
+  SEQS["seqs<br/>gold + off-path rows"]
+  IN["legal mask<br/>gold ids · weights"]
+  PAD["left-pad<br/>ids · mask · pos"]
+  FWD["transformer<br/>forward"]
+  LMH["LM head<br/>path · reply · last"]
+  REF["ref = p0<br/>adapter off"]
+  CUR["cur = p_θ<br/>adapter on"]
+  NODES["trie nodes<br/>[N, V]"]
+  STATS["node_stats<br/>p0 mass · top illegal"]
+  ANCH["node_anchor<br/>L_mass · L_out"]
+  TREE["tree_loss<br/>L_tree"]
+  POS["pos anchor<br/>L_pos"]
+  OUT["tree · mass<br/>out · pos"]
+  EX --> SEQS --> PAD --> FWD --> LMH
+  LMH --> REF
+  LMH --> CUR
+  EX --> IN
+  REF --> NODES
+  CUR --> NODES
+  NODES --> STATS --> ANCH
+  NODES --> ANCH
+  IN --> TREE
+  IN --> ANCH
+  CUR --> TREE
+  REF --> POS
+  CUR --> POS
+  TREE --> OUT
+  ANCH --> OUT
+  POS --> OUT
+"""
+
+# function -> (node of its lines, {anchor prefix: node} overrides)
+NODES = {
+    "compute": ("IN", {"": "EX", "prompt =": "SEQS", "seqs =": "SEQS", "ref = ": "REF",
+                       "cur = ": "CUR", "tree, mass, out, pos": "OUT", "return": "OUT"}),
+    "batched_hidden": ("PAD", {"base =": "FWD", "out =": "FWD", "last = out": "FWD",
+                               "logits =": "LMH", "last = last": "LMH", "return": "LMH"}),
+    "_logits": ("LMH", {}),
+    "legal_mask": ("IN", {}),
+    "_loss_terms": ("NODES", {"anchor =": "ANCH", "sites": "POS", "ref_sites": "POS", "return": "OUT"}),
+    "_split": ("STATS", {}),
+    "node_stats": ("STATS", {}),
+    "node_anchor": ("ANCH", {}),
+    "_kl_top": ("ANCH", {}),
+    "tree_loss": ("TREE", {}),
+    "pos_stats": ("POS", {}),
+    "pos_anchor": ("POS", {}),
+}
+
+
+def node_of(fn: str, anchor: str) -> str:
+    default, overrides = NODES[fn]
+    for prefix, node in overrides.items():
+        if anchor == prefix if prefix == "" else anchor.startswith(prefix):
+            return node
+    return default
 
 
 class Formatter:
@@ -371,7 +436,7 @@ def build_steps(tracer: Tracer, funcs: dict) -> list[dict]:
             first = events[0]
             line = 1
             after, when, before, stack = first["vars"], first["t"] - 0.5, {}, first["stack"]
-            returned = None
+            returned, last_line = None, 1
         else:
             line = next((i for i, t in enumerate(src["lines"], 1) if anchor in t), None)
             if line is None:
@@ -381,20 +446,33 @@ def build_steps(tracer: Tracer, funcs: dict) -> list[dict]:
             if not hits:
                 raise SystemExit(f"{fn}: line {line} ({anchor!r}) never ran")
             k = hits[-1] if opts.get("occ") == "last" else hits[0]
+            last_line = line  # the last source line the step covers
             end = src["start"] + src["ends"].get(line, line) - 1
             before, stack = events[k]["vars"], events[k]["stack"]
-            if opts.get("ret"):
+            if "to" in opts:  # a loop: the state after its last pass
+                last_line = next(i for i, t in enumerate(src["lines"], 1) if opts["to"] in t)
+                last_abs = src["start"] + last_line - 1
+                end = src["start"] + src["ends"].get(last_line, last_line) - 1
+                k_last = [j for j, e in enumerate(events) if e["line"] == last_abs][-1]
+                nxt = next(e for e in events[k_last + 1:]
+                           if e["line"] is None or not last_abs <= e["line"] <= end)
+                last_line = src["ends"].get(last_line, last_line)
+            elif opts.get("ret"):
                 nxt = events[-1]
+                last_line = src["ends"].get(line, line)
             else:
                 nxt = next(e for e in events[k + 1:]
                            if e["line"] is None or not absolute <= e["line"] <= end)
+                last_line = src["ends"].get(line, line)
             after, when = nxt["vars"], nxt["t"]
             returned = nxt.get("return") if nxt["line"] is None and opts.get("ret") else None
         variables = [{"name": n, "shape": s, "text": t, "changed": before.get(n) != (s, t)}
                      for n, (s, t) in after.items()]
         if returned is not None:
             variables.append({"name": "return", "shape": returned[0], "text": returned[1], "changed": True})
-        steps.append({"fn": fn, "line": src["index"][line], "title": title, "body": body,
+        steps.append({"fn": fn, "line": src["index"][line], "line_end": src["index"][last_line],
+                      "node": node_of(fn, anchor),
+                      "title": title, "body": body,
                       "stack": stack, "vars": variables, "t": when})
     steps.sort(key=lambda s: s["t"])
     for s in steps:
@@ -436,6 +514,7 @@ def main() -> None:
             "gold": ex["gold"],
             "tokens": len(ex["input_ids"]),
         },
+        "flow": FLOW,
         "funcs": {name: {"lines": f["shown"]} for name, f in funcs.items()},
         "steps": build_steps(tracer, funcs),
     }

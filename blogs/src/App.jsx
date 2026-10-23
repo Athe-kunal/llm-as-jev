@@ -1,8 +1,8 @@
 import PromptAndData from "./sections/PromptAndData.jsx";
 import TrieLoss from "./sections/TrieLoss.jsx";
 import Anchors from "./sections/Anchors.jsx";
-import FinalLoss from "./sections/FinalLoss.jsx";
 import LossCode from "./sections/LossCode.jsx";
+import Results from "./sections/Results.jsx";
 import ContextCite from "./sections/ContextCite.jsx";
 import AT2 from "./sections/AT2.jsx";
 import TryIt from "./sections/TryIt.jsx";
@@ -13,8 +13,8 @@ const SECTIONS = [
   { n: 1, title: "Prompt and data", id: "top", ready: true },
   { n: 2, title: "Trie and tree loss", id: "trie", ready: true },
   { n: 3, title: "KL anchors", id: "anchors", ready: true },
-  { n: 4, title: "Final loss", id: "final", ready: true },
-  { n: 5, title: "Loss in code", id: "losscode", ready: true },
+  { n: 4, title: "Loss in code", id: "losscode", ready: true },
+  { n: 5, title: "Results", id: "results", ready: true },
   { n: 6, title: "ContextCite", id: "contextcite", ready: true },
   { n: 7, title: "AT2", id: "at2", ready: true },
   { n: 8, title: "Try it", id: "try", ready: true },
@@ -43,8 +43,8 @@ export default function App() {
       <PromptAndData />
       <TrieLoss />
       <Anchors />
-      <FinalLoss />
       <LossCode />
+      <Results />
       <ContextCite />
       <AT2 />
       <TryIt />
