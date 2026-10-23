@@ -1,20 +1,13 @@
 """Fine-tuning a decision model: tree-factorized listwise loss + KL anchors.
 
-Usage (Accelerate, FSDP2 or DDP over the visible GPUs; see scripts/train.sh):
-  CUDA_VISIBLE_DEVICES=0,1,2,3 .venv/bin/accelerate launch \
-      --config_file configs/accelerate_fsdp2.yaml --num_processes 4 \
+Usage (see scripts/train.sh):
+  .venv/bin/accelerate launch --config_file configs/accelerate_fsdp2.yaml \
       -m llm_jev.train.train --model Qwen/Qwen3-0.6B --out runs/qwen3_0.6b
 
 Follows Li & Wagle, arXiv 2610.02076v3 (§3.4); defaults are the paper's Table 2
 (every setting is a flag, see scripts/train.sh). Evaluates before training, at
 the end and every --eval-every steps. --data is a local folder of Parquet
 splits or a Hugging Face dataset id.
-
---batch-size is the global batch: each process takes batch_size /
-num_processes rows per step. Rows longer than --max-tokens are dropped before
-training, since every process must run the same number of forward and backward
-passes. Evaluation runs the same rows on every process; the main process
-writes the results.
 """
 
 import argparse
@@ -23,7 +16,6 @@ import json
 import math
 import pathlib
 import random
-import sys
 import time
 
 from loguru import logger
@@ -41,11 +33,7 @@ TERMS = ("tree", "mass", "out", "pos")
 
 
 def fitting_rows(acc, train: list, tok, args) -> list[int]:
-    """Indices of the training rows of at most --max-tokens tokens.
-
-    Each process encodes a share of the rows, with the same per-row rng the
-    training loop uses.
-    """
+    """Indices of the training rows of at most --max-tokens tokens."""
     from accelerate.utils import gather_object
 
     mine = [(i, len(answers.encode(
@@ -56,13 +44,10 @@ def fitting_rows(acc, train: list, tok, args) -> list[int]:
 
 
 def save_adapter(acc, model, path: pathlib.Path) -> None:
-    """Saves the LoRA weights from the main process; every process must call it.
-
-    Only the adapter's shards are gathered, not the base model's.
-    """
+    """Saves the LoRA weights; every process must call it."""
     from torch.distributed.tensor import DTensor
 
-    peft = acc.unwrap_model(model)  # DDP's state_dict keys carry "module."
+    peft = acc.unwrap_model(model)
     state = {k: (v.full_tensor() if isinstance(v, DTensor) else v).cpu()
              for k, v in peft.state_dict().items() if "lora_" in k}
     peft.save_pretrained(
@@ -79,7 +64,7 @@ def main() -> None:
     parser.add_argument("--eval-split", default="eval")
     parser.add_argument("--out", required=True)
     parser.add_argument("--batch-size", type=int, default=32,
-                        help="global: rows per optimizer step over all GPUs")
+                        help="over all GPUs")
     parser.add_argument("--lr", type=float, default=1e-4, help="peak")
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
@@ -112,7 +97,7 @@ def main() -> None:
     if args.batch_size % acc.num_processes:
         raise ValueError(f"--batch-size {args.batch_size} is not divisible by "
                          f"{acc.num_processes} processes")
-    set_seed(args.seed)  # the same on every process: identical LoRA init
+    set_seed(args.seed)
     if acc.is_main_process:
         logger.add(out / "train.log")
         (out / "args.json").write_text(json.dumps(
@@ -120,7 +105,6 @@ def main() -> None:
              "num_processes": acc.num_processes}, indent=2))
     else:
         logger.remove()
-        logger.add(sys.stderr, level="WARNING")
     acc.init_trackers("tb")
     tok = AutoTokenizer.from_pretrained(args.model)
     pad = tok.pad_token_id
@@ -142,14 +126,13 @@ def main() -> None:
     model.gradient_checkpointing_enable(
         gradient_checkpointing_kwargs={"use_reentrant": False})
     lora = [p for p in model.parameters() if p.requires_grad]
-    logger.info("trainable parameters: {:,} ({}), {} processes",
-                sum(p.numel() for p in lora), lora[0].dtype, acc.num_processes)
+    logger.info("trainable parameters: {:,} ({})",
+                sum(p.numel() for p in lora), lora[0].dtype)
     opt = torch.optim.AdamW(lora, lr=args.lr, weight_decay=args.weight_decay)
     total = len(rows) // args.batch_size
     if args.max_steps > 0:
         total = min(total, args.max_steps)
     warm = min(args.warmup_steps, total)
-    # Not passed to prepare(): Accelerate would step it once per process.
     sched = SequentialLR(opt, [
         LinearLR(opt, start_factor=1 / warm, end_factor=1.0,
                  total_iters=max(1, warm - 1)),
@@ -160,7 +143,6 @@ def main() -> None:
 
     def run_eval(step: int, tag: str) -> None:
         t0 = time.time()
-        # The PEFT model itself: DDP's wrapper has no generate().
         metrics, examples = evaluate.evaluate(acc.unwrap_model(model), tok,
                                               evals, gen_rows, device)
         if acc.is_main_process:
@@ -183,7 +165,6 @@ def main() -> None:
         for j, i in enumerate(mine):
             ex = answers.encode(
                 train[i], tok, random.Random(f"{args.seed}:{i}"))
-            # Gradients are reduced across processes after the last row only.
             last = j == len(mine) - 1
             with contextlib.nullcontext() if last else acc.no_sync(model):
                 L = losses.compute(model, ex, device, pad)

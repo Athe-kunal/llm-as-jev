@@ -164,15 +164,14 @@ loss_terms = torch.compile(_loss_terms, dynamic=True)
 def compute(model, ex: dict, device, pad: int) -> TensorDict:
     """L_tree and the anchors L_mass, L_out, L_pos (Eqs. 2-3) for one example.
 
-    p0 is the same model with the adapter disabled, run without gradients
-    (under DDP, on the PEFT model it wraps: no gradients to synchronize).
+    p0 is the same model with the adapter disabled, run without gradients.
     Weights: gold-path nodes and off-path nodes share 0.5 each; the reply start
     and the position after "]" get 0.5 each in L_pos. Returns a TensorDict []
     of four scalars.
     """
     prompt = ex["input_ids"][: ex["path"][0][0] + 1]
     seqs = [ex["input_ids"]] + [prompt + n for n, _ in ex["off_path"]]  # S sequences
-    peft = getattr(model, "module", model)                              # DDP wraps the PEFT model
+    peft = getattr(model, "module", model)                              # unwrap DDP
     with torch.no_grad(), peft.disable_adapter():
         ref = _logits(peft, ex, seqs, device, pad)                      # p0
     cur = _logits(model, ex, seqs, device, pad)                         # p_theta

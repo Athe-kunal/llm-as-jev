@@ -1,11 +1,3 @@
-# Accelerate launch config: DDP over the GPUs of one node (every GPU holds the
-# whole model; for models that fit, e.g. Qwen3-0.6B).
-# num_processes is set by scripts/train.sh from the GPU list.
-compute_environment: LOCAL_MACHINE
 distributed_type: MULTI_GPU
 mixed_precision: bf16
 num_machines: 1
-machine_rank: 0
-rdzv_backend: static
-same_network: true
-use_cpu: false

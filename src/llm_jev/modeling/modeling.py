@@ -49,10 +49,7 @@ def batched_logits(model, seqs: list[list[int]], keep: list[int], device,
                    pad: int):
     """Logits at positions `keep` of the first sequence, and every sequence's last logits.
 
-    Sequences are left-padded; each row matches a batch-of-one forward up to
-    bf16 rounding. The forward goes through the top-level model (LoRA active),
-    so FSDP's root hooks gather the sharded weights; logits_to_keep limits the
-    LM head to the kept positions. Returns [len(keep), V] and [S, V] in fp32.
+    Sequences are left-padded. Returns [len(keep), V] and [S, V] in fp32.
     """
     n = max(len(x) for x in seqs)
     ids = torch.full((len(seqs), n), pad, dtype=torch.long)
@@ -65,5 +62,5 @@ def batched_logits(model, seqs: list[list[int]], keep: list[int], device,
     at = torch.tensor([n - len(seqs[0]) + p for p in keep] + [n - 1],
                       device=device)
     logits = model(input_ids=ids, attention_mask=mask, position_ids=pos,
-                   use_cache=False, logits_to_keep=at).logits.float()  # [S, K+1, V]
+                   use_cache=False, logits_to_keep=at).logits.float()
     return logits[0, :-1], logits[:, -1]
