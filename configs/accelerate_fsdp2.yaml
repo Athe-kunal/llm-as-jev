@@ -1,0 +1,18 @@
+# Accelerate launch config: FSDP2 over the GPUs of one node.
+# num_processes is set by scripts/train.sh from the GPU list.
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+mixed_precision: bf16          # frozen base stays bf16; LoRA weights are fp32 masters
+num_machines: 1
+machine_rank: 0
+rdzv_backend: static
+same_network: true
+use_cpu: false
+fsdp_config:
+  fsdp_version: 2
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP   # one unit per decoder layer (_no_split_modules)
+  fsdp_reshard_after_forward: true
+  fsdp_state_dict_type: SHARDED_STATE_DICT
+  fsdp_offload_params: false
+  fsdp_cpu_ram_efficient_loading: false
+  fsdp_activation_checkpointing: false             # train.py uses transformers' gradient checkpointing

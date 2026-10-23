@@ -45,11 +45,14 @@ def load(model_id: str, adapter: str | None = None, merge: bool = True, device: 
     return model.merge_and_unload() if merge else model
 
 
-def batched_hidden(model, seqs: list[list[int]], device: str, pad: int):
-    """Last-layer states and last-position logits for several sequences.
+def batched_logits(model, seqs: list[list[int]], keep: list[int], device,
+                   pad: int):
+    """Logits at positions `keep` of the first sequence, and every sequence's last logits.
 
     Sequences are left-padded; each row matches a batch-of-one forward up to
-    bf16 rounding. Returns per-row hidden states (padding removed) and logits.
+    bf16 rounding. The forward goes through the top-level model (LoRA active),
+    so FSDP's root hooks gather the sharded weights; logits_to_keep limits the
+    LM head to the kept positions. Returns [len(keep), V] and [S, V] in fp32.
     """
     n = max(len(x) for x in seqs)
     ids = torch.full((len(seqs), n), pad, dtype=torch.long)
@@ -59,11 +62,8 @@ def batched_hidden(model, seqs: list[list[int]], device: str, pad: int):
         mask[i, n - len(x):] = 1
     ids, mask = ids.to(device), mask.to(device)
     pos = (mask.cumsum(-1) - 1).clamp(min=0)
-    # Language model only, last layer only (no output_hidden_states); LoRA stays active.
-    base = model.get_base_model() if hasattr(model, "get_base_model") else model
-    out = base.model(input_ids=ids, attention_mask=mask, position_ids=pos,
-                     use_cache=False)
-    last = out.last_hidden_state
-    logits = base.lm_head(last[:, -1]).float()
-    last = last.float()
-    return [last[i, n - len(x):] for i, x in enumerate(seqs)], logits
+    at = torch.tensor([n - len(seqs[0]) + p for p in keep] + [n - 1],
+                      device=device)
+    logits = model(input_ids=ids, attention_mask=mask, position_ids=pos,
+                   use_cache=False, logits_to_keep=at).logits.float()  # [S, K+1, V]
+    return logits[0, :-1], logits[:, -1]
