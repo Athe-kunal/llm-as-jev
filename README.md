@@ -106,7 +106,10 @@ client (`llm_jev.serving.sglang_client`) sends our own prompt as token ids to
 `/v1/score`; it does not use `/v1/decisions`, which renders its own A-Z
 prompt. ContextCite there deletes the dropped sentences (the reference
 method): the radix cache reuses each ablated prompt's prefix, and the trie's
-deeper nodes are sent after the prompts so they hit the cache.
+deeper nodes are sent after the prompts so they hit the cache. The server
+schedules shortest uncached prefill first; `--rows-in-flight` keeps several
+rows queued, and the run ends with rows/s and p50/p95 row seconds. Why and how
+to measure: `docs/inference_performance.md`.
 
 ```python
 from transformers import AutoTokenizer
