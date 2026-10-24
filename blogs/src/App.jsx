@@ -3,6 +3,7 @@ import TrieLoss from "./sections/TrieLoss.jsx";
 import Anchors from "./sections/Anchors.jsx";
 import LossCode from "./sections/LossCode.jsx";
 import Results from "./sections/Results.jsx";
+import Ablation from "./sections/Ablation.jsx";
 import ContextCite from "./sections/ContextCite.jsx";
 import AT2 from "./sections/AT2.jsx";
 import TryIt from "./sections/TryIt.jsx";
@@ -15,10 +16,11 @@ const SECTIONS = [
   { n: 3, title: "KL anchors", id: "anchors", ready: true },
   { n: 4, title: "Loss in code", id: "losscode", ready: true },
   { n: 5, title: "Results", id: "results", ready: true },
-  { n: 6, title: "ContextCite", id: "contextcite", ready: true },
-  { n: 7, title: "AT2", id: "at2", ready: true },
-  { n: 8, title: "Try it", id: "try", ready: true },
-  { n: 9, title: "Span data", id: "spans", ready: true },
+  { n: 6, title: "Loss ablation", id: "ablation", ready: true },
+  { n: 7, title: "ContextCite", id: "contextcite", ready: true },
+  { n: 8, title: "AT2", id: "at2", ready: true },
+  { n: 9, title: "Try it", id: "try", ready: true },
+  { n: 10, title: "Span data", id: "spans", ready: true },
 ];
 
 export default function App() {
@@ -45,6 +47,7 @@ export default function App() {
       <Anchors />
       <LossCode />
       <Results />
+      <Ablation />
       <ContextCite />
       <AT2 />
       <TryIt />

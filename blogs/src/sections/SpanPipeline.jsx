@@ -54,7 +54,7 @@ export default function SpanPipeline() {
   const d = DETAILS[sel];
   return (
     <section className="trie-section" id="spans">
-      <p className="eyebrow">9 · Span data</p>
+      <p className="eyebrow">10 · Span data</p>
       <h2>Labelling evidence with best-of-N</h2>
       <p className="lede small">
         <code>src/span_generation/</code>: a 27B model proposes citation sets and then scores them on our decision prompt;

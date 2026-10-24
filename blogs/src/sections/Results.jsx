@@ -31,7 +31,7 @@ function smooth(points, a) {
 }
 
 /** A tooltip that follows the pointer inside a `position: relative` box. */
-function useTip() {
+export function useTip() {
   const box = useRef(null);
   const [tip, setTip] = useState(null);
   const show = (e, content) => {
@@ -161,7 +161,7 @@ function Table({ rows, get, groupLabel, digits = 0 }) {
 }
 
 /** Small multiple: one metric over steps for every run, with a crosshair readout. */
-function LineChart({ title, series, xmax, a = 0, markers = false, format = num, note, wide = false }) {
+export function LineChart({ title, series, xmax, a = 0, markers = false, format = num, note, wide = false }) {
   const { box, show, hide, view } = useTip();
   const W = wide ? 560 : 360, H = wide ? 230 : 190, P = { l: 52, r: 12, t: 12, b: 26 };
   const lines = series.map((s) => ({ ...s, shown: a > 0 ? smooth(s.points, a) : s.points }));

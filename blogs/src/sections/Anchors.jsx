@@ -1,62 +1,75 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import a from "../../data/anchors.json";
 import t from "../../data/trie_loss.json";
 import { Stepper, Toggle } from "../components/Controls.jsx";
+import { buildLayout } from "./TrieLoss.jsx";
 
 const txt = (id) => a.tokText[String(id)] ?? t.tokText[String(id)];
+const key = (path) => path.join(",");
 const show = (s) => JSON.stringify(s).slice(1, -1); // makes "\n" visible
 const nodeName = (path) => (path.length ? path.map(txt).join("") : "root");
 const sci = (x) => (x === 0 ? "0" : x >= 0.01 ? x.toFixed(3) : x.toExponential(1));
 const pct = (p) => (p < 0.001 ? "<0.1%" : `${(p * 100).toFixed(1)}%`);
-const small = (p) => `${(p * 100).toPrecision(2)}%`;
 export const ADAPTERS = [["lam1", "λ = 1"], ["lam001", "λ = 0.01"]];
+const LAMBDA = { lam1: 1, lam001: 0.01 };
+
+// The same six nodes are anchored for both adapters.
+const NODES = a.adapters.lam1.nodes;
+const POS = a.adapters.lam1.positions;
+const N0 = 2; // first node step
+const P0 = N0 + NODES.length; // first position step
+const TOTAL = P0 + POS.length;
+const goldSuffix = t.suffixes[t.row.gold];
+const goldKeys = new Set(goldSuffix.map((_, i) => key(goldSuffix.slice(0, i + 1))));
 
 const STEPS = [
-  { title: "What L_tree leaves free", sub: "the parts of the distribution no loss has touched yet" },
-  { title: "L_mass: the legal mass", sub: "does the model still bet on valid answer tokens?" },
-  { title: "L_out: the illegal tokens", sub: "if it leaves the format, does it leave the same way as before?" },
-  { title: "Which nodes are anchored", sub: "the gold path plus a few random other nodes" },
-  { title: "L_pos: outside the trie", sub: "the reply start and the text after the answer" },
+  { title: "One distribution, four pieces" },
+  { title: "Six anchored nodes" },
+  ...NODES.map((n) => ({ title: `${n.kind === "gold" ? "Gold" : "Off-path"} node ${nodeName(n.path)}` })),
+  { title: "Reply start" },
+  { title: "After the closing ]" },
+  { title: "Everything together" },
 ];
 
 export default function Anchors() {
   const [step, setStep] = useState(0);
-  const [ad, setAd] = useState("lam001");
-  const [node, setNode] = useState(0);
+  const [ad, setAd] = useState("lam1");
   const A = a.adapters[ad];
+  const node = step >= N0 && step < P0 ? step - N0 : null;
+  const pos = step >= P0 && step < TOTAL ? step - P0 : null;
 
   return (
     <section className="trie-section" id="anchors">
       <p className="eyebrow">3 · KL anchors</p>
       <h2>What keeps the rest of the distribution in place</h2>
       <p className="lede small">
-        Same row. p<sub>0</sub> is the model with the LoRA adapter switched off; p<sub>θ</sub> is the trained adapter. Every
-        number below comes from <code>train/losses.py</code> on this row.
+        Same row, same trie. p<sub>0</sub> is the model with the LoRA adapter off; p<sub>θ</sub> is the trained adapter. Each
+        anchor is a KL divergence to p<sub>0</sub>, so it is 0 until training moves something.
       </p>
-      <Glossary />
-      <h3 className="sub-h">Step by step</h3>
       <Stepper steps={STEPS} step={step} setStep={setStep} sectionId="anchors">
-        {step >= 1 && <Toggle id="adapter" label="Adapter" options={ADAPTERS} value={ad} onChange={setAd} />}
+        {step >= 2 && <Toggle id="adapter" label="Adapter" options={ADAPTERS} value={ad} onChange={setAd} />}
       </Stepper>
       <div className="trie-grid">
-        <div className="viz-card">
-          <AnimatePresence mode="wait">
-            <motion.div key={`${step}-${ad}-${node}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
-              {step === 0 && <Decomposition />}
-              {step === 1 && <MassPlot A={A} />}
-              {step === 2 && <OutView A={A} node={node} setNode={setNode} />}
-              {step === 3 && <NodeMap A={A} />}
-              {step === 4 && <PosView A={A} />}
+        <AnimatePresence mode="wait">
+          {step === 0 && <Card key="split"><Decomposition /></Card>}
+          {step >= 1 && step < P0 && (
+            <motion.div key="trie" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ minWidth: 0 }}>
+              <AnchorTrie A={A} node={node} showMarks={step >= 1} />
             </motion.div>
-          </AnimatePresence>
-        </div>
+          )}
+          {pos !== null && <Card key="timeline"><Timeline active={pos} /></Card>}
+          {step === TOTAL && <Card key="table"><Contributions A={A} /></Card>}
+        </AnimatePresence>
         <div className="panel">
           <AnimatePresence mode="wait">
             <motion.div key={`${step}-${ad}`} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.22 }}>
               <h3 className="panel-title">{STEPS[step].title}</h3>
-              <p className="panel-sub">{STEPS[step].sub}</p>
-              <Text step={step} A={A} node={node} />
+              {step === 0 && <Pieces />}
+              {step === 1 && <NodeMap />}
+              {node !== null && <NodePanel A={A} i={node} />}
+              {pos !== null && <PosPanel A={A} i={pos} />}
+              {step === TOTAL && <Together A={A} lam={LAMBDA[ad]} />}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -65,99 +78,68 @@ export default function Anchors() {
   );
 }
 
-function Text({ step, A, node }) {
-  const tot = A.total;
-  if (step === 0)
-    return (
-      <>
-        <p className="panel-body">At any trie node the next-token distribution splits in two:</p>
-        <div className="eq">
-          <span>p(v) = m · q(v) &nbsp;&nbsp;&nbsp;if v is legal</span>
-          <span>p(v) = (1 − m) · p̄(v) &nbsp;otherwise</span>
-        </div>
-        <div className="who">
-          <span><b className="k-q">q</b> the answer distribution: set by L_tree</span>
-          <span><b className="k-m">m</b> how much mass stays on legal tokens: free under L_tree</span>
-          <span><b className="k-o">p̄</b> the shape of everything illegal: free under L_tree</span>
-          <span><b className="k-p">other positions</b> never touched by L_tree</span>
-        </div>
-        <p className="panel-body">
-          L_tree cancels the full-vocabulary normaliser, so its gradient cannot see m or p̄. The anchors tie each free
-          piece to p<sub>0</sub> with a KL, leaving only q to move.
-        </p>
-      </>
-    );
-  if (step === 1)
-    return (
-      <>
-        <p className="panel-body">A two-outcome KL between p<sub>0</sub>'s and p<sub>θ</sub>'s legal mass, at each anchored node:</p>
-        <div className="eq">
-          <span>L_mass = m₀ log(m₀/m) + (1−m₀) log((1−m₀)/(1−m))</span>
-          <span className="eq-note">both masses are summed directly; 1 − m would round to 0 in fp32</span>
-        </div>
-        <p className="panel-body">
-          Weighted over the six nodes: <b className="num">{sci(tot.mass)}</b>. The plot shows the illegal mass 1 − m on a log
-          scale: training pushes it away from p<sub>0</sub>, and λ decides how far.
-        </p>
-      </>
-    );
-  if (step === 2) {
-    const n = A.nodes[node];
-    return (
-      <>
-        <p className="panel-body">
-          Inside the illegal mass, p̄ is renormalised on both sides, then compared over p<sub>0</sub>'s top {a.top} illegal tokens plus
-          one bucket for the rest (the chart shows the first 8).
-        </p>
-        <div className="eq">
-          <span>L_out = KL(p̄₀ ‖ p̄_θ)</span>
-          <span>
-            at node {nodeName(n.path)}: <b>{sci(n.out)}</b>
-          </span>
-          <span className="eq-note">weighted over the six nodes: {sci(tot.out)}</span>
-        </div>
-        <p className="panel-body">
-          These are the tokens the model would write if it left the trie, e.g. <code>{"]\\n\\n"}</code> or <code>]**</code>. L_tree never
-          sees them.
-        </p>
-      </>
-    );
-  }
-  if (step === 3)
-    return (
-      <>
-        <p className="panel-body">
-          Every gold-path node, plus {a.offPath} internal nodes sampled off the gold path (new ones for every example and
-          epoch), each fed as an extra sequence: prompt + the node's tokens.
-        </p>
-        <div className="eq">
-          <span>gold-path nodes share 0.5 → {(0.5 / A.nodes.filter((n) => n.kind === "gold").length).toFixed(3)} each</span>
-          <span>off-path nodes share 0.5 → {(0.5 / A.nodes.filter((n) => n.kind === "off").length).toFixed(3)} each</span>
-        </div>
-        <p className="panel-body">Without the off-path nodes, the parts of the trie the gold answer never visits could drift freely.</p>
-      </>
-    );
+function Card({ children }) {
   return (
-    <>
-      <p className="panel-body">
-        Two context positions get a full-vocabulary KL (top {a.top} + bucket), 0.5 each:
-      </p>
-      <div className="eq">
-        <span>reply start: KL {sci(A.positions[0].kl)}</span>
-        <span>after the closing ]: KL {sci(A.positions[1].kl)}</span>
-        <span>
-          L_pos = <b>{sci(tot.pos)}</b>
-        </span>
-      </div>
-      <p className="panel-body">
-        Reply start is what the model would write before the forced prefill “{a.replyText} [”. After ] is what follows the
-        answer in free generation. Keeping both at p<sub>0</sub> keeps the chat behaviour of the base model.
-      </p>
-    </>
+    <motion.div className="viz-card" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      {children}
+    </motion.div>
   );
 }
 
-/** Root node of p0: the full vocabulary split into legal and illegal mass, then zoomed. */
+/** The trie of section 2 with the anchored nodes marked; `node` is the one being read. */
+function AnchorTrie({ A, node, showMarks }) {
+  const { nodes, H } = useMemo(buildLayout, []);
+  const X0 = 26, DX = 88, LABEL = X0 + 3 * DX + 24;
+  const anchored = Object.fromEntries(NODES.map((n, i) => [key(n.path), i]));
+  const selKeys = new Set();
+  if (node !== null) NODES[node].path.forEach((_, i) => selKeys.add(key(NODES[node].path.slice(0, i + 1))));
+  return (
+    <div className="trie-wrap">
+      <svg className="trie" viewBox={`0 0 560 ${H}`} role="img" aria-label="answer trie with anchored nodes">
+        {nodes.filter((n) => n.parent).map((n) => {
+          const p = n.parent;
+          const x1 = X0 + p.depth * DX, x2 = X0 + n.depth * DX;
+          const cls = selKeys.has(n.key) ? "edge sel" : goldKeys.has(n.key) ? "edge gold" : "edge";
+          return <path key={n.key} className={cls} strokeWidth={cls === "edge" ? 1.2 : 2.4} d={`M${x1},${p.y} C${x1 + DX * 0.55},${p.y} ${x2 - DX * 0.55},${n.y} ${x2},${n.y}`} />;
+        })}
+        {nodes.map((n) => {
+          const x = X0 + n.depth * DX;
+          const i = anchored[n.key];
+          const marked = showMarks && i !== undefined;
+          const kind = marked ? NODES[i].kind : "";
+          const cls = ["tnode", n.leaf !== null ? "leaf" : "", marked ? kind : "", n.leaf !== null && goldKeys.has(n.key) ? "gold" : "",
+            node !== null && !(marked && i === node) ? "dim" : ""].join(" ");
+          return (
+            <g key={n.key || "root"} className={cls}>
+              {marked && i === node && (
+                <motion.circle cx={x} cy={n.y} className="ring" initial={{ r: 13 }} animate={{ r: [13, 19, 13] }} transition={{ repeat: Infinity, duration: 1.6 }} />
+              )}
+              <circle cx={x} cy={n.y} r={n.key === "" ? 11 : 9} />
+              <text x={x} y={n.y + 4} textAnchor="middle">{n.key === "" ? "[" : txt(n.tok)}</text>
+              {marked && (
+                <g className="badge">
+                  <circle cx={x + 10} cy={n.y - 10} r={6.5} />
+                  <text x={x + 10} y={n.y - 7} textAnchor="middle">{i + 1}</text>
+                </g>
+              )}
+              {n.leaf !== null && <line x1={x + 10} x2={LABEL - 6} y1={n.y} y2={n.y} className="leader" />}
+              {n.leaf !== null && (
+                <text x={LABEL} y={n.y + 4} className={goldKeys.has(n.key) ? "lab gold" : "lab"}>
+                  [{n.leaf + 1}] {t.row.options[n.leaf]}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="trie-legend">
+        <i className="sw gold" /> gold-path node · <i className="sw off" /> sampled off-path node · numbers are the order of the next steps
+      </div>
+    </div>
+  );
+}
+
+/** Root node of p0: the whole vocabulary split into legal and illegal mass, then zoomed. */
 function Decomposition() {
   const root = t.models.base.nodes[""];
   const legal = t.nodes.find((n) => n.path.length === 0).legal;
@@ -197,50 +179,64 @@ function Decomposition() {
         ))}
         <span className="dseg rest" style={{ width: `${n0.illegalRest[0] * 100}%` }} title="the rest" />
       </div>
-      <div className="pieces">
-        <span className="piece k-q">q → L_tree</span>
-        <span className="piece k-m">m → L_mass</span>
-        <span className="piece k-o">p̄ → L_out</span>
-        <span className="piece k-p">positions → L_pos</span>
-      </div>
     </div>
   );
 }
 
-/** Illegal mass 1 − m per node on a log axis: p0 hollow, p_theta filled. */
-function MassPlot({ A }) {
-  const lo = -7, hi = -1, W = 460, X0 = 92, X1 = 400;
-  const x = (v) => X0 + ((Math.log10(Math.max(v, 1e-7)) - lo) / (hi - lo)) * (X1 - X0);
-  const ROW = 38;
-  const H = 40 + A.nodes.length * ROW;
+function Pieces() {
   return (
-    <svg className="massplot" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="illegal mass per node">
+    <>
+      <div className="eq">
+        <span>p(v) = m · q(v) &nbsp;&nbsp;&nbsp;&nbsp;if v is legal</span>
+        <span>p(v) = (1 − m) · p̄(v) &nbsp;otherwise</span>
+      </div>
+      <div className="pieces">
+        <span className="piece k-q">q → L_tree</span>
+        <span className="piece k-m">m → L_mass</span>
+        <span className="piece k-o">p̄ → L_out</span>
+        <span className="piece k-p">other positions → L_pos</span>
+      </div>
+    </>
+  );
+}
+
+function NodeMap() {
+  const weight = (kind) => 0.5 / NODES.filter((n) => n.kind === kind).length;
+  return (
+    <div className="nodemap">
+      <div className="eq">
+        <span>gold path: 0.5 shared → {weight("gold").toFixed(3)} each</span>
+        <span>off path: 0.5 shared → {weight("off").toFixed(3)} each</span>
+      </div>
+      {NODES.map((n, i) => (
+        <motion.div key={i} className={`nm-row ${n.kind}`} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.07 }}>
+          <span className="nm-name">{i + 1} · {nodeName(n.path)}</span>
+          <span className="nm-legal">legal {n.legal.length > 6 ? `${txt(n.legal[0])} … ${txt(n.legal[n.legal.length - 1])}` : n.legal.map(txt).join(" ")}</span>
+          <span className="nm-w">w {n.weight.toFixed(3)}</span>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+/** Illegal mass 1 − m on a log axis: p0 hollow, p_theta filled. */
+function MassDumbbell({ n }) {
+  const lo = -7, hi = -1, W = 440, X0 = 14, X1 = 426;
+  const x = (v) => X0 + ((Math.log10(Math.max(v, 1e-7)) - lo) / (hi - lo)) * (X1 - X0);
+  const clamp = (v) => Math.min(Math.max(v, 46), W - 46);
+  return (
+    <svg className="massplot" viewBox={`0 0 ${W} 74`} role="img" aria-label="illegal mass before and after training">
       {[-7, -5, -3, -1].map((e) => (
         <g key={e}>
-          <line x1={x(10 ** e)} x2={x(10 ** e)} y1={18} y2={H - 8} className="grid" />
-          <text x={x(10 ** e)} y={12} textAnchor="middle" className="tick">1e{e}</text>
+          <line x1={x(10 ** e)} x2={x(10 ** e)} y1={22} y2={50} className="grid" />
+          <text x={x(10 ** e)} y={68} textAnchor="middle" className="tick">1e{e}</text>
         </g>
       ))}
-      <text x={W - 6} y={12} textAnchor="end" className="tick">KL</text>
-      {A.nodes.map((n, i) => {
-        const y = 36 + i * ROW;
-        return (
-          <g key={i}>
-            <text x={8} y={y + 4} className={n.kind === "gold" ? "rowlab gold" : "rowlab"}>{nodeName(n.path)}</text>
-            <text x={8} y={y + 16} className="rowsub">{n.kind === "gold" ? "gold path" : "off path"}</text>
-            <motion.line x1={x(n.r0)} y1={y} y2={y} className="mline" initial={{ x2: x(n.r0) }} animate={{ x2: x(n.r) }} transition={{ duration: 0.8, delay: 0.2 + i * 0.08 }} />
-            <circle cx={x(n.r0)} cy={y} r={5} className="dot0" />
-            <motion.circle cy={y} r={5} className="dot1" initial={{ cx: x(n.r0) }} animate={{ cx: x(n.r) }} transition={{ duration: 0.8, delay: 0.2 + i * 0.08 }} />
-            <text x={W - 6} y={y + 4} textAnchor="end" className="kl">{sci(n.mass)}</text>
-          </g>
-        );
-      })}
-      <g transform={`translate(${X0}, ${H - 2})`}>
-        <circle cx={0} cy={-4} r={4} className="dot0" />
-        <text x={8} y={0} className="tick">p₀</text>
-        <circle cx={40} cy={-4} r={4} className="dot1" />
-        <text x={48} y={0} className="tick">p_θ (illegal mass 1 − m)</text>
-      </g>
+      <motion.line x1={x(n.r0)} y1={36} y2={36} className="mline" initial={{ x2: x(n.r0) }} animate={{ x2: x(n.r) }} transition={{ duration: 0.8 }} />
+      <circle cx={x(n.r0)} cy={36} r={5} className="dot0" />
+      <motion.circle cy={36} r={5} className="dot1" initial={{ cx: x(n.r0) }} animate={{ cx: x(n.r) }} transition={{ duration: 0.8 }} />
+      <text x={clamp(x(n.r0))} y={18} textAnchor="middle" className="kl">p₀ {sci(n.r0)}</text>
+      <text x={clamp(x(n.r))} y={56} textAnchor="middle" className="kl">p_θ {sci(n.r)}</text>
     </svg>
   );
 }
@@ -267,169 +263,164 @@ function PairBars({ rows, rest }) {
   );
 }
 
-function NodeChips({ A, node, setNode }) {
+/** A bar that fills as nodes are added: what is already in, this node's share, and the total. */
+function Running({ cls, label, parts, i, total }) {
+  const before = parts.slice(0, i).reduce((s, v) => s + v, 0);
   return (
-    <div className="node-chips">
-      {A.nodes.map((n, i) => (
-        <button key={i} className={["nchip", n.kind, i === node ? "on" : ""].join(" ")} onClick={() => setNode(i)}>
-          {nodeName(n.path)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function OutView({ A, node, setNode }) {
-  const n = A.nodes[node];
-  return (
-    <div>
-      <span className="viz-label">pick a node</span>
-      <NodeChips A={A} node={node} setNode={setNode} />
-      <span className="viz-label">
-        p̄ at node {nodeName(n.path)}: <i className="sw p0" /> p₀ <i className="sw p1" /> p_θ · KL {sci(n.out)}
+    <div className={`run ${cls}`}>
+      <span className="run-label">{label}</span>
+      <span className="run-track">
+        <motion.span className="run-done" initial={{ width: 0 }} animate={{ width: `${(before / total) * 100}%` }} />
+        <motion.span className="run-now" initial={{ width: 0 }} animate={{ width: `${(parts[i] / total) * 100}%` }} transition={{ delay: 0.15 }} />
       </span>
-      <PairBars rows={n.illegal} rest={n.illegalRest} />
+      <span className="run-val">+{sci(parts[i])} → {sci(before + parts[i])}</span>
     </div>
   );
 }
 
-function NodeMap({ A }) {
+function NodePanel({ A, i }) {
+  const n = A.nodes[i];
+  const wm = A.nodes.map((x) => x.weight * x.mass);
+  const wo = A.nodes.map((x) => x.weight * x.out);
   return (
-    <div className="nodemap">
-      {["gold", "off"].map((kind) => (
-        <div key={kind} className="nm-group">
-          <span className="viz-label">{kind === "gold" ? "gold path (always)" : `${a.offPath} sampled off-path nodes`}</span>
-          {A.nodes
-            .filter((n) => n.kind === kind)
-            .map((n, i) => (
-              <motion.div key={i} className={`nm-row ${kind}`} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.08 + (kind === "off" ? 0.3 : 0) }}>
-                <span className="nm-name">{nodeName(n.path)}</span>
-                <span className="nm-legal">
-                  legal {n.legal.length > 6 ? `${txt(n.legal[0])} … ${txt(n.legal[n.legal.length - 1])}` : n.legal.map(txt).join(" ")}
-                </span>
-                <span className="nm-w">w {n.weight.toFixed(3)}</span>
-                <span className="nm-v">mass {sci(n.mass)} · out {sci(n.out)}</span>
-              </motion.div>
-            ))}
-        </div>
-      ))}
+    <div className="nodepanel">
+      <div className="np-head">
+        <span className={`nchip ${n.kind} on`}>{n.kind === "gold" ? "gold path" : "off path"}</span>
+        <span className="np-w">weight {n.weight.toFixed(3)}</span>
+      </div>
+      <span className="viz-label k-m">L_mass · illegal mass 1 − m <b>KL {sci(n.mass)}</b></span>
+      <MassDumbbell n={n} />
+      <span className="viz-label k-o">
+        L_out · the illegal tokens, renormalised <i className="sw p0" /> p₀ <i className="sw p1" /> p_θ <b>KL {sci(n.out)}</b>
+      </span>
+      <PairBars rows={n.illegal.slice(0, 6)} rest={n.illegalRest} />
+      <span className="viz-label">weight × KL, added to the running totals</span>
+      <Running cls="k-m" label="L_mass" parts={wm} i={i} total={A.total.mass} />
+      <Running cls="k-o" label="L_out" parts={wo} i={i} total={A.total.out} />
     </div>
   );
 }
 
-function PosView({ A }) {
-  return (
-    <div className="posview">
-      {A.positions.map((p, i) => (
-        <div key={i}>
-          <span className="viz-label">
-            {i === 0 ? "reply start (before the prefill)" : "after the closing ]"}: <i className="sw p0" /> p₀ <i className="sw p1" /> p_θ · KL{" "}
-            {sci(p.kl)}
-          </span>
-          <PairBars rows={p.top.slice(0, 5)} rest={p.rest} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** The three anchors in plain words, each with a before/after from this row (λ = 0.01). */
-function Glossary() {
-  const A = a.adapters.lam001;
-  const B = a.adapters.lam1;
-  // the node with the largest illegal mass after training, the root's biggest illegal shift, the post-] shift at λ = 1
-  const mNode = A.nodes.reduce((x, y) => (y.r > x.r ? y : x));
-  const root = A.nodes[0];
-  const moved = [...root.illegal].sort((x, y) => Math.abs(y[2] - y[1]) - Math.abs(x[2] - x[1])).slice(0, 2);
-  const after = B.positions[1].top.slice(0, 2);
-  const cards = [
-    {
-      cls: "k-m",
-      name: "L_mass",
-      plain: "Keeps the share of probability on valid answer tokens where the base model had it.",
-      at: `At each trie node only a few tokens continue a valid answer (the legal tokens). Their total probability is the legal mass m.`,
-      example: (
-        <>
-          At node <code>{nodeName(mNode.path)}</code> the base model puts {small(mNode.r0)} on invalid tokens; after training with
-          λ = 0.01 it puts <b>{small(mNode.r)}</b> there, {Math.round(mNode.r / mNode.r0)}× more.
-        </>
-      ),
-      without: "The model drifts toward writing something other than a digit or ] mid-answer, so free-text answers break format more often.",
-      math: "KL( (m₀, 1−m₀) ‖ (m, 1−m) ): a two-outcome KL, valid vs invalid",
-    },
-    {
-      cls: "k-o",
-      name: "L_out",
-      plain: "Keeps the ranking of the invalid tokens the same as in the base model.",
-      at: "Look only inside the invalid share and renormalise it to 100%: which wrong tokens would the model write if it left the format?",
-      example: (
-        <>
-          At the root, among invalid tokens: {moved.map(([t0, p0, p1], i) => (
-            <span key={i}>
-              {i > 0 && ", "}
-              <code>{show(t0)}</code> {pct(p0)} → <b>{pct(p1)}</b>
-            </span>
-          ))}
-          .
-        </>
-      ),
-      without: "These are ordinary language tokens the model uses everywhere else; reshuffling them is a side effect that leaks into normal generation.",
-      math: "KL( p̄₀ ‖ p̄_θ ) over p₀'s top 64 invalid tokens + one bucket",
-    },
-    {
-      cls: "k-p",
-      name: "L_pos",
-      plain: "Keeps two positions outside the answer exactly as the base model had them.",
-      at: "The start of the reply (what the model would write before the forced “Best answer: [”) and the position right after the closing ].",
-      example: (
-        <>
-          After <code>[27]</code>, the base model continues with {after.map(([t0, p0, p1], i) => (
-            <span key={i}>
-              {i > 0 && " / "}
-              <code>{show(t0)}</code> {pct(p0)}
-            </span>
-          ))}
-          ; the λ = 1 model moved to {after.map(([t0, , p1], i) => (
-            <span key={i}>
-              {i > 0 && " / "}
-              <code>{show(t0)}</code> <b>{pct(p1)}</b>
-            </span>
-          ))}
-          .
-        </>
-      ),
-      without: "L_tree never trains these positions, but LoRA changes shared weights, so they drift anyway: the chat behaviour around the answer changes.",
-      math: "KL( p₀ ‖ p_θ ) over the full vocabulary (top 64 + bucket), 0.5 per position",
-    },
+/** The sequence the model writes, with the two unsupervised positions marked. */
+function Timeline({ active }) {
+  const stops = [
+    { id: 0, label: "reply start", sub: "before the prefill" },
+    { id: 1, label: "after ]", sub: "free text resumes" },
   ];
+  const marker = (s) => (
+    <motion.span key={s.id} className={s.id === active ? "tl-mark on" : "tl-mark"} animate={s.id === active ? { y: [0, -4, 0] } : { y: 0 }} transition={{ repeat: Infinity, duration: 1.4 }}>
+      <b>▼</b>
+      <span>{s.label}</span>
+      <small>{s.sub}</small>
+    </motion.span>
+  );
   return (
-    <div className="gloss">
-      <p className="gloss-intro">
-        All three compare the trained model p<sub>θ</sub> with <b>p₀, the same model with the LoRA adapter switched off</b>{" "}
-        (the model before training). Each is a KL divergence: 0 when nothing changed, growing as the distribution moves.
-        L_tree decides the answer; these three stop training from changing anything else.
-      </p>
-      <div className="gloss-grid">
-        {cards.map((c, i) => (
-          <motion.article
-            key={c.name}
-            className={`gloss-card ${c.cls}`}
-            initial={{ opacity: 0, y: 14 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ delay: i * 0.1 }}
-          >
-            <h4>{c.name}</h4>
-            <p className="g-plain">{c.plain}</p>
-            <p className="g-at">{c.at}</p>
-            <p className="g-ex">
-              <span className="g-tag">this row</span> {c.example}
-            </p>
-            <p className="g-without">
-              <span className="g-tag">without it</span> {c.without}
-            </p>
-            <p className="g-math">{c.math}</p>
-          </motion.article>
+    <div className="timeline">
+      <div className="tl-row">
+        <span className="tl-chip dim">prompt …</span>
+        {marker(stops[0])}
+        <span className="tl-chip">Best answer: [</span>
+        {goldSuffix.map((id, i) => (
+          <span key={i} className="tl-chip gold">{txt(id)}</span>
+        ))}
+        {marker(stops[1])}
+        <span className="tl-chip dim">…</span>
+      </div>
+      <div className="tl-key">
+        <span className="tl-chip gold">answer trie</span> L_tree, L_mass, L_out <span className="tl-chip dim">outside the trie</span> L_pos only
+      </div>
+    </div>
+  );
+}
+
+function PosPanel({ A, i }) {
+  const p = A.positions[i];
+  const before = A.positions.slice(0, i).reduce((s, x) => s + x.weight * x.kl, 0);
+  return (
+    <div className="nodepanel">
+      <span className="viz-label k-p">
+        full-vocabulary next-token distribution <i className="sw p0" /> p₀ <i className="sw p1" /> p_θ <b>KL {sci(p.kl)}</b>
+      </span>
+      <PairBars rows={p.top.slice(0, 6)} rest={p.rest} />
+      <span className="viz-label">0.5 × KL, added to the running total</span>
+      <div className={`run k-p`}>
+        <span className="run-label">L_pos</span>
+        <span className="run-track">
+          <motion.span className="run-done" initial={{ width: 0 }} animate={{ width: `${(before / A.total.pos) * 100}%` }} />
+          <motion.span className="run-now" initial={{ width: 0 }} animate={{ width: `${((p.weight * p.kl) / A.total.pos) * 100}%` }} transition={{ delay: 0.15 }} />
+        </span>
+        <span className="run-val">+{sci(p.weight * p.kl)} → {sci(before + p.weight * p.kl)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Each term's share per node, one column per loss and one scale per column. */
+function Contributions({ A }) {
+  const rows = [
+    ...A.nodes.map((n, i) => ({ name: `${i + 1} · ${nodeName(n.path)}`, kind: n.kind, mass: n.weight * n.mass, out: n.weight * n.out })),
+    ...A.positions.map((p) => ({ name: p.name, kind: "pos", pos: p.weight * p.kl })),
+  ];
+  const max = (k) => Math.max(...rows.map((r) => r[k] ?? 0));
+  const cols = [["mass", "L_mass", "k-m"], ["out", "L_out", "k-o"], ["pos", "L_pos", "k-p"]];
+  return (
+    <div className="contrib">
+      <div className="ct-head">
+        <span />
+        {cols.map(([, name, cls]) => (
+          <b key={name} className={cls}>{name}</b>
+        ))}
+      </div>
+      {rows.map((r, i) => (
+        <div key={i} className={`ct-row ${r.kind}`}>
+          <span className="ct-name">{r.name}</span>
+          {cols.map(([k, , cls]) => (
+            <span key={k} className={`ct-cell ${cls}`}>
+              {r[k] !== undefined && (
+                <>
+                  <motion.span className="ct-bar" initial={{ width: 0 }} animate={{ width: `${(r[k] / max(k)) * 100}%` }} transition={{ delay: 0.1 + i * 0.05 }} />
+                  <em>{sci(r[k])}</em>
+                </>
+              )}
+            </span>
+          ))}
+        </div>
+      ))}
+      <div className="ct-row sum">
+        <span className="ct-name">sum</span>
+        {cols.map(([k, , cls]) => (
+          <span key={k} className={`ct-cell ${cls}`}><em>{sci(A.total[k])}</em></span>
+        ))}
+      </div>
+      <span className="viz-label">each column has its own scale</span>
+    </div>
+  );
+}
+
+function Together({ A, lam }) {
+  const parts = [
+    ["L_tree", A.total.tree, "k-q"],
+    ["λ · L_mass", lam * A.total.mass, "k-m"],
+    ["λ · L_out", lam * A.total.out, "k-o"],
+    ["λ · L_pos", lam * A.total.pos, "k-p"],
+  ];
+  const sum = parts.reduce((s, [, v]) => s + v, 0);
+  return (
+    <div className="together">
+      <div className="eq">
+        <span>L = L_tree + λ (L_mass + L_out + L_pos)</span>
+        <span>
+          λ = {lam} → L = <b>{sum.toFixed(3)}</b>
+        </span>
+      </div>
+      <div className="sbar">
+        {parts.map(([name, v, cls]) => (
+          <motion.span key={name} className={`sseg ${cls}`} initial={{ width: 0 }} animate={{ width: `${(v / sum) * 100}%` }} transition={{ duration: 0.7 }} title={`${name} ${sci(v)}`} />
+        ))}
+      </div>
+      <div className="slegend">
+        {parts.map(([name, v, cls]) => (
+          <span key={name} className={cls}><i className="sw" style={{ background: "currentColor" }} /> {name} <b>{sci(v)}</b></span>
         ))}
       </div>
     </div>

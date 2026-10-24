@@ -28,7 +28,7 @@ export default function ContextCite() {
   const [step, setStep] = useState(0);
   return (
     <section className="trie-section" id="contextcite">
-      <p className="eyebrow">6 · ContextCite</p>
+      <p className="eyebrow">7 · ContextCite</p>
       <h2>Attributing the answer to sentences by ablation</h2>
       <p className="lede small">
         Cohen-Wang et al., NeurIPS 2024, as implemented in <code>src/modeling/context_cite.py</code>. One ContractNLI eval

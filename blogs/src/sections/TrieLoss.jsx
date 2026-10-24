@@ -396,7 +396,7 @@ function Trie({ step, model }) {
 }
 
 /** Nodes (internal and leaves) with depth, y position and first leaf index. */
-function buildLayout() {
+export function buildLayout() {
   const leafOf = Object.fromEntries(d.suffixes.map((s, i) => [key(s), i]));
   const ROW = 21, TOP = 16;
   const nodes = [];

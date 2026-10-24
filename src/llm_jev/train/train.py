@@ -30,6 +30,7 @@ from llm_jev.modeling import modeling
 from llm_jev.train import losses
 
 TERMS = ("tree", "mass", "out", "pos")
+ANCHORS = TERMS[1:]
 
 
 def fitting_rows(acc, train: list, tok, args) -> list[int]:
@@ -72,6 +73,10 @@ def main() -> None:
     parser.add_argument("--min-lr-ratio", type=float, default=0.1,
                         help="final learning rate / peak (linear decay)")
     parser.add_argument("--lam", type=float, default=1.0, help="anchor weight")
+    parser.add_argument("--anchors", default=",".join(ANCHORS),
+                        help="anchor terms added to L_tree (comma-separated "
+                             "subset of mass,out,pos, or 'none'); all four "
+                             "terms are logged either way")
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument("--max-tokens", type=int, default=16384)
     parser.add_argument("--eval-per", type=int, default=100,
@@ -82,8 +87,13 @@ def main() -> None:
         "--eval-every", type=int, default=0,
         help="also evaluate and save the adapter every N steps")
     parser.add_argument("--max-steps", type=int, default=-1, help="smoke tests")
+    parser.add_argument("--skip-base-eval", action="store_true",
+                        help="do not evaluate before training")
     parser.add_argument("--seed", type=int, default=evaluate.SEED)
     args = parser.parse_args()
+    anchors = [] if args.anchors == "none" else args.anchors.split(",")
+    if not set(anchors) <= set(ANCHORS):
+        raise ValueError(f"--anchors {args.anchors!r} is not a subset of {ANCHORS}")
 
     from accelerate import Accelerator
     from accelerate.utils import set_seed
@@ -153,7 +163,8 @@ def main() -> None:
         logger.info("eval {} at step {} took {:.1f}m", tag, step,
                     (time.time() - t0) / 60)
 
-    run_eval(0, "base")
+    if not args.skip_base_eval:
+        run_eval(0, "base")
     model.train()
     order = list(rows)
     random.Random(args.seed).shuffle(order)
@@ -168,7 +179,7 @@ def main() -> None:
             last = j == len(mine) - 1
             with contextlib.nullcontext() if last else acc.no_sync(model):
                 L = losses.compute(model, ex, device, pad)
-                loss = L["tree"] + args.lam * (L["mass"] + L["out"] + L["pos"])
+                loss = L["tree"] + args.lam * sum(L[k] for k in anchors)
                 acc.backward(loss / len(mine))
             sums += torch.stack([L[k] for k in TERMS]).detach()
         sums = acc.reduce(sums, "sum") / args.batch_size

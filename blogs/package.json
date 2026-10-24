@@ -13,6 +13,7 @@
     "data:contextcite": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_contextcite.py",
     "data:losscode": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_loss_code.py",
     "data:results": "cd .. && .venv/bin/python blogs/export_results.py",
+    "data:ablation": "cd .. && .venv/bin/python blogs/export_ablation.py",
     "data:at2": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_at2.py",
     "api": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/server.py --port 8767"
   },

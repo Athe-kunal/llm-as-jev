@@ -172,9 +172,11 @@ def compute(model, ex: dict, device, pad: int) -> TensorDict:
     prompt = ex["input_ids"][: ex["path"][0][0] + 1]
     seqs = [ex["input_ids"]] + [prompt + n for n, _ in ex["off_path"]]  # S sequences
     peft = getattr(model, "module", model)                              # unwrap DDP
+    # cur runs first: FSDP2 initializes on the first forward, and it must see the
+    # adapter enabled (disable_adapter clears requires_grad on the LoRA weights).
+    cur = _logits(model, ex, seqs, device, pad)                         # p_theta
     with torch.no_grad(), peft.disable_adapter():
         ref = _logits(peft, ex, seqs, device, pad)                      # p0
-    cur = _logits(model, ex, seqs, device, pad)                         # p_theta
     T, O = len(ex["path"]), len(ex["off_path"])
     legal = legal_mask([l for _, l, _ in ex["path"]] + [l for _, l in ex["off_path"]],
                        cur["path"].shape[-1], device)                   # [N, V]
