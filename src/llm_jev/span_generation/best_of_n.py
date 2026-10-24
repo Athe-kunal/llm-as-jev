@@ -74,15 +74,25 @@ async def propose(client, model: str, example: schema.Example, sources: list[dic
 async def option_scores(client, model: str, prompt: list[int], suffixes: list[list[int]]) -> torch.Tensor:
     """s_k = log p(suffix k | prompt) for every option (Eq. 1).
 
-    Uses the server's echoed prompt log-probabilities. Token ids are sent, so
-    the server does not re-tokenise.
+    Each trie node is one prefill-only request for the log-probabilities of
+    its legal next tokens (vLLM's logprob_token_ids), one depth at a time so
+    deeper nodes reuse the prompt from the prefix cache. Token ids are sent,
+    so the server does not re-tokenise.
     """
-    async def one(suffix):
-        r = await client.completions.create(model=model, prompt=prompt + suffix, max_tokens=1,
-                                            echo=True, logprobs=0, temperature=0)
-        lp = r.choices[0].logprobs.token_logprobs[: len(prompt) + len(suffix)]  # drops the generated token
-        return sum(lp[len(prompt):])
-    return torch.tensor(await asyncio.gather(*(one(s) for s in suffixes)), dtype=torch.float64)
+    nodes = answers.trie(suffixes)
+
+    async def one(node):
+        r = await client.completions.create(
+            model=model, prompt=prompt + list(node), max_tokens=1, logprobs=len(nodes[node]), temperature=0,
+            extra_body={"logprob_token_ids": nodes[node], "return_tokens_as_token_ids": True})
+        top = r.choices[0].logprobs.top_logprobs[0]
+        return node, {t: top[f"token_id:{t}"] for t in nodes[node]}
+
+    lp: dict[tuple[int, ...], dict[int, float]] = {}
+    for d in sorted({len(n) for n in nodes}):
+        lp.update(await asyncio.gather(*(one(n) for n in nodes if len(n) == d)))
+    return torch.tensor([sum(lp[tuple(s[:t])][s[t]] for t in range(len(s))) for s in suffixes],
+                        dtype=torch.float64)
 
 
 async def rewards(client, model: str, tok, example: schema.Example, sources: list[dict[str, Any]],

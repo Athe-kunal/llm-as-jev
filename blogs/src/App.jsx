@@ -8,6 +8,7 @@ import ContextCite from "./sections/ContextCite.jsx";
 import AT2 from "./sections/AT2.jsx";
 import TryIt from "./sections/TryIt.jsx";
 import SpanPipeline from "./sections/SpanPipeline.jsx";
+import Serving from "./sections/Serving.jsx";
 
 // Sections in reading order; later ones are added as the walkthrough grows.
 const SECTIONS = [
@@ -21,6 +22,7 @@ const SECTIONS = [
   { n: 8, title: "AT2", id: "at2", ready: true },
   { n: 9, title: "Try it", id: "try", ready: true },
   { n: 10, title: "Span data", id: "spans", ready: true },
+  { n: 11, title: "Faster inference", id: "serving", ready: true },
 ];
 
 export default function App() {
@@ -52,6 +54,7 @@ export default function App() {
       <AT2 />
       <TryIt />
       <SpanPipeline />
+      <Serving />
     </div>
   );
 }

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Deploys the labelling LLM with vLLM, OpenAI-compatible, on 127.0.0.1. The
 # same server proposes citations (chat) and scores the ablations
-# (completions with echoed prompt log-probabilities).
+# (one-token completions with logprob_token_ids: vLLM >= 0.32). Prefix caching
+# serves the trie's deeper nodes from their prompt's cache; echoed prompt
+# log-probabilities would bypass it.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 model=${MODEL:-Qwen/Qwen3.6-27B}

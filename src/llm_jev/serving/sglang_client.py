@@ -33,36 +33,41 @@ def post(url: str, payload: dict[str, Any], timeout: float = 600) -> dict[str, A
         return json.loads(reply.read())
 
 
-def score_prompts(url: str, tok, prompts: list[list[int]], ks: list[int], chunk: int = 32,
+def score_prompts(url: str, tok, prompts: list[list[int]], ks: list[int], chunk: int = 8,
                   workers: int = 8) -> list[tuple]:
     """answers.score_batch through the server: (s, root legal mass, decoded) per prompt.
 
-    prompts[i] ends at "Best answer: [" and has ks[i] options. Items are sent
-    one trie depth at a time so the server's prefix cache can reuse prompts.
+    prompts[i] ends at "Best answer: [" and has ks[i] options. Prompts go in
+    chunks; each chunk sends its deeper trie nodes as soon as its own prompts
+    are scored, so they hit the prefix cache while later chunks still prefill.
     """
-    depths: dict[int, list] = {}
-    for i, (p, k) in enumerate(zip(prompts, ks)):
-        for node in answers.candidates(tok, k)[1]:
-            depths.setdefault(len(node), []).append((i, node, p + list(node)))
     labels = sorted({t for k in set(ks) for legal in answers.candidates(tok, k)[1].values() for t in legal})
+    width = labels[-1] + 1
 
-    def request(items: list[list[int]]) -> list[list[float]]:
+    def request(items: list[list[int]]) -> list[torch.Tensor]:
         reply = post(f"{url}/v1/score", {"query": [], "items": items, "label_token_ids": labels,
                                          "return_token_logprobs": True})
-        return reply["token_logprobs"]
+        rows = []
+        for row_lp in reply["token_logprobs"]:
+            lp = torch.full((width,), -torch.inf, dtype=torch.float64)
+            lp[labels] = torch.tensor(row_lp, dtype=torch.float64)
+            rows.append(lp)
+        return rows
 
-    owners, scores = [], []
-    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+    def score_chunk(idx: list[int]) -> list[dict]:
+        depths: dict[int, list] = {}
+        for j, i in enumerate(idx):
+            for node in answers.candidates(tok, ks[i])[1]:
+                depths.setdefault(len(node), []).append((j, node))
+        logp: list[dict] = [{} for _ in idx]
         for _, level in sorted(depths.items()):
-            parts = [[x[2] for x in level[c:c + chunk]] for c in range(0, len(level), chunk)]
-            scores += [row for part in pool.map(request, parts) for row in part]
-            owners += [(i, node) for i, node, _ in level]
-    width = labels[-1] + 1
-    logp: list[dict] = [{} for _ in prompts]
-    for (i, node), row_lp in zip(owners, scores):
-        lp = torch.full((width,), -torch.inf, dtype=torch.float64)
-        lp[labels] = torch.tensor(row_lp, dtype=torch.float64)
-        logp[i][node] = lp
+            for (j, node), lp in zip(level, request([prompts[idx[j]] + list(node) for j, node in level])):
+                logp[j][node] = lp
+        return logp
+
+    parts = [list(range(c, min(c + chunk, len(prompts)))) for c in range(0, len(prompts), chunk)]
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        logp = [lp for part in pool.map(score_chunk, parts) for lp in part]
     out = []
     for lp, k in zip(logp, ks):
         suffixes, nodes = answers.candidates(tok, k)
@@ -84,16 +89,23 @@ def predict(url: str, tok, example: schema.Example) -> tuple[int, torch.Tensor]:
 
 def attribute(url: str, tok, example: schema.Example, num_ablations: int | None = None,
               keep_prob: float = 0.5, alpha: float = 0.01, seed: int = 0, **request) -> dict[str, Any]:
-    """context_cite.attribute through the server; num_ablations None uses masked_cite.ablation_count."""
-    answer, s = predict(url, tok, example)
+    """context_cite.attribute through the server; num_ablations None uses masked_cite.ablation_count.
+
+    The full prompt is scored with the ablations: the answer is only needed
+    once every score is back.
+    """
     sources = context_cite.split_sources(example)
     if not sources:  # nothing to cite: the decision alone
+        answer, s = predict(url, tok, example)
         return context_cite.no_sources_result(s, answer)
     n = num_ablations or masked_cite.ablation_count(len(sources))
     masks = context_cite.ablation_masks(n, len(sources), keep_prob, seed)
-    prompts = [prompt_ids(tok, context_cite.ablate(example, sources, keep)) for keep in masks]
-    scored = score_prompts(url, tok, prompts, [len(example.options)] * n, **request)
-    y = np.array([context_cite.logit_q(s_i, answer) for s_i, _, _ in scored])
+    prompts = [prompt_ids(tok, example)]
+    prompts += [prompt_ids(tok, context_cite.ablate(example, sources, keep)) for keep in masks]
+    scored = score_prompts(url, tok, prompts, [len(example.options)] * (n + 1), **request)
+    s = scored[0][0]
+    answer = int(s.argmax())
+    y = np.array([context_cite.logit_q(s_i, answer) for s_i, _, _ in scored[1:]])
     return context_cite.result(s, answer, sources, masks, y, alpha)
 
 
@@ -107,6 +119,8 @@ def main() -> None:
     parser.add_argument("--source", nargs="*", help="only these datasets")
     parser.add_argument("--per", type=int, default=5, help="rows per dataset")
     parser.add_argument("--ablations", type=int, help="default: masked_cite.ablation_count")
+    parser.add_argument("--rows-in-flight", type=int, default=4,
+                        help="rows attributed at once (1: per-row seconds are unloaded latency)")
     parser.add_argument("--out", help="JSON lines of the results")
     args = parser.parse_args()
 
@@ -119,18 +133,31 @@ def main() -> None:
     by: dict[str, list] = {}
     for r in rows:
         by.setdefault(r.source, []).append(r)
+    picked = [row for _, rs in sorted(by.items())
+              for row in random.Random(0).sample(rs, min(args.per, len(rs)))]
+
+    def timed(row: schema.Example) -> tuple[schema.Example, dict[str, Any], float]:
+        t0 = time.time()
+        res = attribute(args.url, tok, row, args.ablations)
+        return row, res, time.time() - t0
+
     out = open(args.out, "w") if args.out else None
-    for source, rs in sorted(by.items()):
-        for row in random.Random(0).sample(rs, min(args.per, len(rs))):
-            t0 = time.time()
-            res = attribute(args.url, tok, row, args.ablations)
-            took = time.time() - t0
+    seconds = []
+    start = time.time()
+    with concurrent.futures.ThreadPoolExecutor(args.rows_in_flight) as pool:
+        for row, res, took in pool.map(timed, picked):
+            seconds.append(took)
             top = sorted(res["sources"], key=lambda x: -x["w"])[:3]
-            logger.info("{} {}: {} sentences, {:.2f} s, q {:.3f}, top w {}, {}", source, row.id,
+            logger.info("{} {}: {} sentences, {:.2f} s, q {:.3f}, top w {}, {}", row.source, row.id,
                         len(res["sources"]), took, res["q"], [round(x["w"], 3) for x in top],
                         context_cite.span_metrics(row, res))
             if out:
                 out.write(json.dumps({"id": row.id, "seconds": took, **res}) + "\n")
+    wall = time.time() - start
+    if seconds:
+        logger.info("{} rows in {:.1f} s ({:.2f} rows/s, {} in flight): row seconds p50 {:.2f}, p95 {:.2f}",
+                    len(seconds), wall, len(seconds) / wall, args.rows_in_flight,
+                    np.percentile(seconds, 50), np.percentile(seconds, 95))
     if out:
         out.close()
         logger.info("wrote {}", pathlib.Path(args.out))

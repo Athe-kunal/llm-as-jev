@@ -10,6 +10,9 @@
 # sglang==0.5.22`), outside this project's venv: its torch and transformers
 # pins differ from training's. The radix cache stays on: ablated prompts share
 # their prefix up to the first dropped sentence, trie items their whole prompt.
+# Every request is prefill-only (docs/inference_performance.md): shortest
+# uncached prefill first, re-estimated at each step; no chunked prefill; no
+# decode CUDA graphs.
 # Output: logs/sglang_<port>.log; logs/sglang_<port>.pid holds the server's
 # process id (its process group: make sglang-stop). Prints the process id.
 set -euo pipefail
@@ -22,9 +25,9 @@ CONTEXT=${CONTEXT:-32768}            # longest prompt, tokens
 # torch was built for; hence the triton backend default.
 ATTENTION=${ATTENTION:-triton}
 SAMPLING=${SAMPLING:-pytorch}
-# tokens per prefill batch: a ContextCite row is 64+ prompts of up to ~6k
-# tokens (SGLang's default, 8192, fits one or two)
-PREFILL=${PREFILL:-32768}
+POLICY=${POLICY:-shortest-prefill-first}
+# tokens per prefill batch; SGLang raises it to CONTEXT if lower
+PREFILL=${PREFILL:-$CONTEXT}
 
 model=${1:?model dir or HF id}; gpu=${2:-0}; port=${3:-30000}; shift $(( $# < 3 ? $# : 3 ))
 python=$(uv tool dir)/sglang/bin/python
@@ -33,7 +36,8 @@ CUDA_VISIBLE_DEVICES=$gpu setsid nohup "$python" -m sglang.launch_server \
     --model-path "$model" --host 127.0.0.1 --port "$port" \
     --mem-fraction-static "$MEM" --context-length "$CONTEXT" \
     --attention-backend "$ATTENTION" --sampling-backend "$SAMPLING" \
-    --chunked-prefill-size "$PREFILL" --max-prefill-tokens $((2 * PREFILL)) "$@" \
+    --schedule-policy "$POLICY" --chunked-prefill-size -1 --max-prefill-tokens "$PREFILL" \
+    --disable-decode-cuda-graph "$@" \
     > "logs/sglang_$port.log" 2>&1 &
 echo $! > "logs/sglang_$port.pid"
 echo "sglang $model on GPU $gpu -> http://127.0.0.1:$port (pid $!, log logs/sglang_$port.log)"
