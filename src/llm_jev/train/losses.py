@@ -11,6 +11,7 @@ import math
 
 import torch
 from tensordict import TensorDict
+from torch.profiler import record_function
 
 from llm_jev.modeling import modeling
 
@@ -174,8 +175,11 @@ def compute(model, ex: dict, device, pad: int) -> TensorDict:
     peft = getattr(model, "module", model)                              # unwrap DDP
     # cur runs first: FSDP2 initializes on the first forward, and it must see the
     # adapter enabled (disable_adapter clears requires_grad on the LoRA weights).
-    cur = _logits(model, ex, seqs, device, pad)                         # p_theta
-    with torch.no_grad(), peft.disable_adapter():
+    # record_function names the phases in a torch.profiler trace (see
+    # llm_jev.profiling.profile_step); outside a profiler it does nothing.
+    with record_function("p_theta_forward"):
+        cur = _logits(model, ex, seqs, device, pad)                     # p_theta
+    with record_function("p0_forward"), torch.no_grad(), peft.disable_adapter():
         ref = _logits(peft, ex, seqs, device, pad)                      # p0
     T, O = len(ex["path"]), len(ex["off_path"])
     legal = legal_mask([l for _, l, _ in ex["path"]] + [l for _, l in ex["off_path"]],
@@ -183,7 +187,8 @@ def compute(model, ex: dict, device, pad: int) -> TensorDict:
     gold = torch.tensor([g for _, _, g in ex["path"]], device=device)   # [T]
     weight = torch.tensor([0.5 / T] * T + [0.5 / max(O, 1)] * O,
                           device=device)                                # [N]
-    tree, mass, out, pos = loss_terms(
-        cur["path"], cur["last"], cur["reply"],
-        ref["path"], ref["last"], ref["reply"], legal, gold, weight)
+    with record_function("loss_terms"):
+        tree, mass, out, pos = loss_terms(
+            cur["path"], cur["last"], cur["reply"],
+            ref["path"], ref["last"], ref["reply"], legal, gold, weight)
     return TensorDict(tree=tree, mass=mass, out=out, pos=pos, batch_size=[])
