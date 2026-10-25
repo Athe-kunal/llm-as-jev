@@ -90,8 +90,7 @@ export default function TryIt() {
           <select id="try-source" value={source} onChange={(e) => setSource(e.target.value)}>
             {datasets.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.id} ({d.rows}
-                {d.withSpans ? `, ${d.withSpans} with evidence` : ""})
+                {d.id}{d.withSpans ? " (with evidence)" : ""}
               </option>
             ))}
           </select>

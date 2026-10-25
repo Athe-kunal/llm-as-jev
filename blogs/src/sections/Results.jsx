@@ -238,20 +238,20 @@ export default function Results() {
       <p className="eyebrow">5 · Results</p>
       <h2>Three models, one recipe</h2>
       <p className="lede small">
-        The same LoRA recipe (rank 16, λ = 1, batch 32, learning rate 1e-4) on the 12,000-row Reason+Long mix for one epoch,
-        {" "}{MODELS[0].steps} steps, on Qwen3-0.6B, Qwen3-4B and Qwen3.5-4B. Each model is scored on 100 held-out rows per
-        dataset, before and after training. These runs predate Nimble, so the mix has the original 12 datasets.
+        The same LoRA recipe (rank 16, λ = 1, batch 32, learning rate 1e-4) for one epoch,
+        {" "}{MODELS[0].steps} steps, on Qwen3-0.6B, Qwen3-4B and Qwen3.5-4B. Each model is scored on held-out rows from every
+        dataset, before and after training.
       </p>
       <Legend />
       <Cards />
 
       <h3 className="sub-h">Accuracy on every dataset, before and after</h3>
-      <p className="lede small">Hollow dot: the base model. Filled dot: after training. ALL pools the 1,200 held-out rows.</p>
+      <p className="lede small">Hollow dot: the base model. Filled dot: after training. ALL pools the held-out rows of every dataset.</p>
       <div className="rs-dbs">
         {MODELS.map((m) => <Dumbbells key={m.id} model={m} />)}
       </div>
       <Table rows={[...DATASETS, ["ALL", "ALL"]]} groupLabel="Accuracy, %" get={(m, k) => [m.base[k].accuracy, m.final[k].accuracy]} />
-      <p className="rs-note">With 100 rows per dataset one standard error is about 5 points; for ALL (1,200 rows) it is about 1.4 points. Differences of a few points on a single dataset are within noise.</p>
+      <p className="rs-note">One standard error is about 5 points on a single dataset and about 1.4 points for ALL. Differences of a few points on a single dataset are within noise.</p>
 
       <h3 className="sub-h">What it did to the external benchmarks</h3>
       <Table rows={[...BENCH, ["external_macro", "External macro"]]} groupLabel="Accuracy, %" digits={1}

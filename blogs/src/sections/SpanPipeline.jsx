@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 // score on the bottom lane.
 const W = 930, H = 560;
 const N = {
-  row:    { x: 20,   y: 60,  w: 150, h: 64, title: "Reason+Long-12k row", sub: "question + gold", kind: "data" },
+  row:    { x: 20,   y: 60,  w: 150, h: 64, title: "Training row", sub: "question + gold", kind: "data" },
   split:  { x: 200,  y: 60,  w: 140, h: 64, title: "split_sources", sub: "nltk · merged", kind: "step" },
   prompt: { x: 370,  y: 60,  w: 140, h: 64, title: "cite.j2", sub: "+ gold answer", kind: "step" },
   filter: { x: 560,  y: 60,  w: 170, h: 64, title: "dedupe · ≤ 384 tok", sub: "m candidate sets", kind: "step" },

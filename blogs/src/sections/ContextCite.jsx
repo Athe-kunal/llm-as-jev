@@ -91,7 +91,7 @@ function Text({ step }) {
         <Part label="In code">
           <code>ablate(row, sources, keep)</code>: each kept sentence is preceded by its own separator (except the first kept
           one of its part); whitespace before the first and after the last sentence is always kept, so{" "}
-          <Tex>{"x_{\\mathbf 1}=x"}</Tex> byte for byte (checked on all 5,991 eval rows). Options stay in release order, so a
+          <Tex>{"x_{\\mathbf 1}=x"}</Tex> byte for byte (checked on every eval row). Options stay in release order, so a
           means the same option under every mask.
         </Part>
         <Part label="On this row">
@@ -188,8 +188,7 @@ function Text({ step }) {
         of the full ranking by w (threshold-free); a random ranking scores the gold fraction in expectation.
       </Part>
       <Part label="In code">
-        <code>gold_sentences</code>, <code>span_metrics(row, result, k=3, beta=1)</code>; 20 eval rows per span dataset,
-        64 ablations each.
+        <code>gold_sentences</code>, <code>span_metrics(row, result, k=3, beta=1)</code>; 64 ablations per row.
       </Part>
       <Part label="Caveat">
         ContextCite explains the predicted answer. When the prediction is wrong, the sentences that drove it need not be the

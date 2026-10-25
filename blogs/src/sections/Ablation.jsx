@@ -62,7 +62,7 @@ function Scoreboard() {
           <tr>
             <th rowSpan={2}>Run</th>
             <th colSpan={4} className="rs-grp">terms optimised</th>
-            <th colSpan={3} className="rs-grp">held-out ({N_EVAL.toLocaleString("en-US")} rows)</th>
+            <th colSpan={3} className="rs-grp">held-out</th>
             <th colSpan={2} className="rs-grp">format</th>
             <th rowSpan={2} className="rs-sub">External macro</th>
           </tr>
@@ -168,7 +168,7 @@ function Summary() {
   if (!DONE.length) return <p className="ab-status">No run has finished yet, so there is nothing to plot.</p>;
   return (
     <div className="rs-grid-charts three">
-      <DotPlot title="Held-out accuracy" rows={acc} base={a.base?.ALL.accuracy} format={(v) => `${(v * 100).toFixed(1)}%`} note={`Whiskers: ±1 standard error of the ${N_EVAL.toLocaleString("en-US")} held-out rows.`} />
+      <DotPlot title="Held-out accuracy" rows={acc} base={a.base?.ALL.accuracy} format={(v) => `${(v * 100).toFixed(1)}%`} note={`Whiskers: ±1 standard error over the held-out rows.`} />
       <DotPlot title="Held-out log p(gold)" rows={lp} base={a.base?.ALL.log_p_gold} format={(v) => v.toFixed(2)} note="Higher is better; it is not subject to the 0/1 rounding of accuracy." />
       {ext.length > 0 && <DotPlot title="External macro accuracy" rows={ext} base={a.bench_base?.external_macro.accuracy} format={(v) => `${(v * 100).toFixed(1)}%`} note="Mean of the eight outside benchmarks; the base score comes from the earlier Qwen3-0.6B evaluation." />}
     </div>
@@ -251,7 +251,7 @@ export default function Ablation() {
       <h2>Do the three extra terms earn their keep?</h2>
       <p className="lede small">
         {a.model}, one epoch ({a.total_steps} steps, batch {a.batch_size}, rank {a.lora_rank}, learning rate {a.lr}, λ = {a.lam}) on the
-        Nimble-mixed training set, the same data order and seed for every run. Only the loss changes: L_tree alone, each anchor
+        same training set, the same data order and seed for every run. Only the loss changes: L_tree alone, each anchor
         added alone, and the full loss with each anchor left out. Held-out and benchmark numbers come from the final adapter.
       </p>
       <Status />
@@ -273,7 +273,7 @@ export default function Ablation() {
 
       <h3 className="sub-h">Held-out accuracy by dataset</h3>
       <DatasetTable title="Accuracy, %" rows={[...NAMES.map((k) => [k, LABELS[k] ?? k]), ["ALL", "ALL"]]} get={(r, k) => (r ? r.final?.[k]?.accuracy : a.base?.[k]?.accuracy)} />
-      <p className="rs-note">Shading compares each run with the L_tree-only run. With 100 rows per dataset one standard error is about 5 points, so single-dataset differences are mostly noise.</p>
+      <p className="rs-note">Shading compares each run with the L_tree-only run. One standard error is about 5 points on a single dataset, so single-dataset differences are mostly noise.</p>
 
       <h3 className="sub-h">External benchmarks</h3>
       <DatasetTable title="Accuracy, %" digits={1} rows={BENCH} get={(r, k) => (r ? r.bench_final?.[k]?.accuracy : a.bench_base?.[k]?.accuracy)} />

@@ -130,7 +130,7 @@ function Text({ step, sel }) {
           {1 + t.uniform.filter((v) => v > t.uniform[gold]).length} of {d}.
           {t.eval && (
             <>
-              {" "}On 20 eval rows per dataset its AP is{" "}
+              {" "}On the eval rows its AP is{" "}
               {Object.entries(t.eval).map(([k, m]) => `${f2(m.average_attention.ap)} (${k})`).join(", ")}
               {Object.values(t.eval)[0].contextcite && (
                 <>, against ContextCite's {Object.values(t.eval).map((m) => f2(m.contextcite.ap)).join(" / ")}</>
@@ -173,21 +173,21 @@ function Text({ step, sel }) {
         <Part label="Data">
           {t.trainRows ? (
             <>
-              {t.trainRows.toLocaleString("en-US")} training rows ({Object.entries(t.trainSources).map(([k, v]) => `${k} ${v}`).join(", ")}), each with m ={" "}
+              Each training row has m ={" "}
               {t.y.length} masks. Stored per row: <Tex>{`X_r\\in\\mathbb R^{${t.y.length}\\times ${F}}`}</Tex> (rows{" "}
               <Tex>{"x_{v_i}"}</Tex>) and <Tex>{`y_r\\in\\mathbb R^{${t.y.length}}`}</Tex>. Mean ρ with uniform θ over these rows:{" "}
               <b className="num">{f2(t.trainPearsonUniform)}</b>.
             </>
           ) : (
-            <>2,000 training rows (250 from each of the 8 multi-sentence datasets), each with 32 masks; being computed.</>
+            <>Each training row has 32 masks; being computed.</>
           )}
         </Part>
         <Part label="Cost">
-          32 scored ablations + 1 attention pass per row, once: about 66,000 prompt passes. After that, training touches only
+          32 scored ablations + 1 attention pass per row, once. After that, training touches only
           the stored <Tex>{"X_r, y_r"}</Tex>, never the LM.
         </Part>
         <Part label="Optimisation">
-          As the reference: Adam, learning rate 10⁻³ with a cosine schedule, 1,000 steps of 512 rows, gradient clipping at 1,
+          As the reference: Adam, learning rate 10⁻³ with a cosine schedule, 1,000 steps, gradient clipping at 1,
           then <Tex>{"\\theta\\leftarrow\\theta/\\lVert\\theta\\rVert_1"}</Tex> (scores' scale is irrelevant under ρ).
         </Part>
       </>
@@ -216,7 +216,7 @@ function Text({ step, sel }) {
               ))}
             </tbody>
           </table>
-          20 eval rows per dataset, scored with <code>span_metrics</code> (§5 step 7).
+          Scored with <code>span_metrics</code> (§5 step 7).
         </Part>
       )}
     </>
@@ -390,7 +390,7 @@ function Pipeline() {
     ["32 masks", "v ~ Bernoulli(½)^d"],
     ["32 targets", "y = logit q(a | x_v)"],
     ["store", `X = (2V − 1)Φ  (32 × ${F}),  y (32)`],
-    ["fit θ", "−Pearson, Adam, 1,000 × 512"],
+    ["fit θ", "−Pearson, Adam, 1,000 steps"],
   ];
   return (
     <div className="pipeline">

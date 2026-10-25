@@ -9,7 +9,6 @@ const reduced =
 
 const FACTS = [
   { big: "12", text: "datasets: 3 intent, 6 short reasoning, 3 long input" },
-  { big: "1,000", text: "training rows from each one (Reason+Long-12k)" },
   { big: "[k]", text: "options are reshuffled for every training example" },
   { big: "10,240", text: "token cap; longer rows are dropped, never truncated" },
 ];
@@ -128,7 +127,7 @@ function Browser() {
                         <motion.span layoutId="rail-pill" className="pill" transition={{ type: "spring", stiffness: 500, damping: 38 }} />
                       )}
                       <span className="rail-name">{d.title}</span>
-                      <span className="rail-count">{fmt(d.rows)}</span>
+                      
                     </button>
                   ))}
               </div>
