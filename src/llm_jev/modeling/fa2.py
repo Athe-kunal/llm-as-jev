@@ -33,6 +33,7 @@ def kernel():
     return module
 
 
+@torch.compiler.disable  # one kernel already; keeps modeling.fuse's graphs on either side of it
 def attention(module, query, key, value, attention_mask, scaling=None, fa2_gather=None, **kwargs):
     """transformers attention function: query [1, H, N, D], key / value
     [1, Hkv, N, D] -> [1, N, H, D]."""

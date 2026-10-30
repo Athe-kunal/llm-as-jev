@@ -48,19 +48,24 @@ def timed(fn, *args, **kwargs) -> tuple[Any, float]:
     return out, time.time() - t0
 
 
-def run_methods(model, tok, row: schema.Example) -> dict[str, tuple[dict, float]]:
-    """Each method's (result, seconds) on one row."""
-    return {
-        "contextcite": timed(masked_cite.attribute, model, tok, row, removal="full"),
-        "attnlrp_logit": timed(attn_lrp.attribute, model, tok, row, target="logit"),
-        "attnlrp_contrast": timed(attn_lrp.attribute, model, tok, row, target="contrast"),
-    }
+METHODS = {
+    "contextcite": lambda model, tok, row: masked_cite.attribute(model, tok, row, removal="full"),
+    "attnlrp_logit": lambda model, tok, row: attn_lrp.attribute(model, tok, row, target="logit"),
+    "attnlrp_contrast": lambda model, tok, row: attn_lrp.attribute(model, tok, row, target="contrast"),
+}
 
 
-def evaluate_row(model, tok, row: schema.Example, lds_masks: int = 32,
-                 seed: int = 1_000_000) -> dict[str, Any]:
+def run_methods(model, tok, row: schema.Example,
+                methods: tuple[str, ...] = tuple(METHODS)) -> dict[str, tuple[dict, float]]:
+    """Each method's (result, seconds) on one row; contextcite always runs first."""
+    names = ["contextcite"] + [m for m in methods if m != "contextcite"]
+    return {m: timed(METHODS[m], model, tok, row) for m in names}
+
+
+def evaluate_row(model, tok, row: schema.Example, lds_masks: int = 32, seed: int = 1_000_000,
+                 methods: tuple[str, ...] = tuple(METHODS)) -> dict[str, Any]:
     """One row's metrics for every method (all explain ContextCite's answer)."""
-    results = run_methods(model, tok, row)
+    results = run_methods(model, tok, row, methods)
     sources = results["contextcite"][0]["sources"]
     S = len(sources)
     answer = results["contextcite"][0]["answer"]
@@ -131,6 +136,9 @@ def main() -> None:
     parser.add_argument("--spans", action="store_true",
                         help="gold spans from --data's generated `spans` config (train rows) instead of the rows' own")
     parser.add_argument("--lds-masks", type=int, default=32, help="held-out ablations for the LDS")
+    parser.add_argument("--methods", nargs="*", default=list(METHODS), choices=list(METHODS),
+                        help="contextcite always runs (the others explain its answer)")
+    parser.add_argument("--fuse", action="store_true", help="compile the decoder layers (modeling.fuse)")
     parser.add_argument("--out", required=True, help="folder for rows.jsonl and summary.json")
     args = parser.parse_args()
 
@@ -139,6 +147,8 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(args.model)
     model = modeling.load(args.model, args.adapter)
     fa2.use(model)
+    if args.fuse:
+        modeling.fuse(model)
     rows = storage.load_examples(args.data, args.split)
     if args.spans:
         generated = {r["id"]: r["spans"] for r in datasets.load_dataset(args.data, "spans", split="train")}
@@ -153,12 +163,14 @@ def main() -> None:
         by.setdefault(r.source, []).append(r)
     picks = [random.Random(0).sample(rs, min(args.per, len(rs))) for _, rs in sorted(by.items())]
     chosen = [p[j] for j in range(args.per) for p in picks if j < len(p)][: args.limit]   # round-robin over datasets
+    if args.fuse and chosen:
+        masked_cite.attribute(model, tok, chosen[0], removal="full")      # compiles outside the timings
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     done = []
     with open(out / "rows.jsonl", "w") as f:
         for i, row in enumerate(chosen):
-            r = evaluate_row(model, tok, row, args.lds_masks)
+            r = evaluate_row(model, tok, row, args.lds_masks, methods=tuple(args.methods))
             f.write(json.dumps(r) + "\n")
             f.flush()
             done.append(r)

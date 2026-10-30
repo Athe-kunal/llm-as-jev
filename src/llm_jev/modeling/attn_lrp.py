@@ -96,7 +96,8 @@ def rules(model):
     model.requires_grad_(False)
     model.set_attn_implementation(ATTENTION)
     try:
-        yield model
+        with torch.compiler.set_stance("force_eager"):                  # modeling.fuse's layers would skip the patches
+            yield model
     finally:
         model.set_attn_implementation(impl)
         for m in patched:
