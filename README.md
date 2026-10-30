@@ -27,6 +27,14 @@ Two parts, one package (`llm_jev`):
   is the fastest but leaks (later sentences can carry a dropped sentence's
   content), so it is not equivalent to deletion; full masking is.
 
+  AttnLRP (`attn_lrp.attribute`, Achtibat et al., ICML 2024) is the
+  gradient-based alternative: one forward and one backward with LRP rules
+  (the Gradient*Input form of lxt), attention on FA2. It explains either the
+  answer's suffix logits (`target="logit"`) or their margin over the other
+  legal options (`target="contrast"`, closer to ContextCite's logit q).
+  `scripts/attribution.sh` compares the three on the eval rows with gold
+  spans: span AP / top-1, top-k removal drop, LDS and time.
+
 ## Install
 
 Requires Python 3.11+, a CUDA GPU for training and attribution, and
@@ -58,6 +66,7 @@ The console scripts run the same modules as `python -m llm_jev.<module>`:
 | `llm-jev-train` | `llm_jev.train.train` | one epoch of L_tree + KL anchors, evaluated before and after |
 | `llm-jev-evaluate` | `llm_jev.evaluation.evaluate` | eval split metrics |
 | `llm-jev-benchmarks` | `llm_jev.evaluation.benchmarks` | external benchmarks (BoolQ, MMLU, ARC-C, ... and JevBench) |
+| `llm-jev-attribution` | `llm_jev.evaluation.attribution` | ContextCite (FA2) vs AttnLRP on eval rows with gold spans |
 | `llm-jev-merge` | `llm_jev.serving.merge` | merges a LoRA adapter into its base model for SGLang |
 | `llm-jev-sglang-cite` | `llm_jev.serving.sglang_client` | decisions and ContextCite through an SGLang server |
 | `llm-jev-spans` | `llm_jev.span_generation.best_of_n` | best-of-N evidence labels from a vLLM server (`span_generation/serve.sh`; `uv sync --extra spans`) |
@@ -127,15 +136,16 @@ src/llm_jev/
                  prompts.py (Jinja loader)
   modeling/      modeling.py (base and LoRA models, batched forward), context_cite.py (ContextCite by
                  deletion), masked_cite.py (one-pass ContextCite: reader and full masking), fa2.py
-                 (FlashAttention-2 varlen next to flex attention)
+                 (FlashAttention-2 varlen next to flex attention), attn_lrp.py (AttnLRP)
   train/         losses.py (L_tree, KL anchors), train.py
   serving/       merge.py (LoRA merged into the weights), sglang_client.py (decisions and ContextCite
                  over SGLang's /v1/score)
   span_generation/  best_of_n.py (best-of-N evidence labels, SelfCite reward), cite.j2, serve.sh
                  (vLLM labelling server)
-  evaluation/    evaluate.py (eval split metrics), benchmarks.py (external benchmarks)
+  evaluation/    evaluate.py (eval split metrics), benchmarks.py (external benchmarks),
+                 attribution.py (ContextCite vs AttnLRP)
   prompts/       decision.j2 (the decision prompt; package data)
-scripts/         train.sh, evaluate.sh, sglang_serve.sh (launchers)
+scripts/         train.sh, evaluate.sh, attribution.sh, sglang_serve.sh (launchers)
 configs/         Accelerate configs for training (FSDP2, DDP)
 ```
 

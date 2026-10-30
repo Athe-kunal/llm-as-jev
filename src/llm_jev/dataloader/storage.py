@@ -73,6 +73,8 @@ def load_dataset(
     if pathlib.Path(source).exists():
         raise FileNotFoundError(f"no {split}.parquet in {source}")
     dataset = datasets.load_dataset(source, split=split)
+    if "source_spans" in dataset.column_names:  # the Hub release's name for spans
+        dataset = dataset.rename_column("source_spans", "spans")
     logger.info("{} examples from the Hub: {} ({})", len(dataset), source, split)
     return dataset
 

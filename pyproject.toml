@@ -33,6 +33,7 @@ profile = ["matplotlib"]              # llm_jev.profiling (memory timeline HTML)
 llm-jev-train = "llm_jev.train.train:main"
 llm-jev-evaluate = "llm_jev.evaluation.evaluate:main"
 llm-jev-benchmarks = "llm_jev.evaluation.benchmarks:main"
+llm-jev-attribution = "llm_jev.evaluation.attribution:main"
 llm-jev-build-data = "llm_jev.dataloader.build:main"
 llm-jev-merge = "llm_jev.serving.merge:main"
 llm-jev-spans = "llm_jev.span_generation.best_of_n:main"

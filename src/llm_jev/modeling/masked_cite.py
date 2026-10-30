@@ -201,6 +201,24 @@ def score_full(model, batch: dict[str, Any], tok, k: int, device: str = "cuda") 
             for row in logits]
 
 
+def score_keep(model, tok, ids: list[int], owner: np.ndarray, keep: np.ndarray, k: int,
+               budget: int = 65536, device: str = "cuda") -> list[torch.Tensor]:
+    """s [K] for every keep row [n, S] under full masking, in FA2 passes of at most `budget` tokens.
+
+    The model must use modeling.fa2.
+    """
+    nodes = list(answers.candidates(tok, k)[1])
+    kept = ((owner[None] < 0) | keep[:, np.maximum(owner, 0)]).sum(1)  # [n] tokens per copy
+    s, c = [], 0
+    while c < len(keep):                                                # chunks of at most `budget` tokens
+        e = c + 1
+        while e < len(keep) and kept[c: e + 1].sum() <= budget:
+            e += 1
+        s += [x[0] for x in score_full(model, full_batch(ids, owner, keep[c:e], nodes, device), tok, k, device)]
+        c = e
+    return s
+
+
 def predict(model, tok, example: schema.Example,
             device: str = "cuda") -> tuple[int, torch.Tensor]:
     """The decision on the full prompt through the packed scorer: the predicted option and s [K].
@@ -256,14 +274,7 @@ def attribute(model, tok, example: schema.Example, num_ablations: int | None = N
         with torch.no_grad():
             s = [x[0] for x in score_copies(model, packed, block_mask(packed, owner, keep, device), tok, k, device)]
     else:
-        kept = ((owner[None] < 0) | keep[:, np.maximum(owner, 0)]).sum(1)  # [1 + n] tokens per copy
-        s, c = [], 0
-        while c < len(keep):                                            # chunks of at most `budget` tokens
-            e = c + 1
-            while e < len(keep) and kept[c: e + 1].sum() <= budget:
-                e += 1
-            s += [x[0] for x in score_full(model, full_batch(ids, owner, keep[c:e], nodes, device), tok, k, device)]
-            c = e
+        s = score_keep(model, tok, ids, owner, keep, k, budget, device)
     answer = int(s[0].argmax())
     y = np.array([context_cite.logit_q(x, answer) for x in s[1:]])
     return context_cite.result(s[0], answer, sources, masks, y, alpha)
