@@ -49,20 +49,6 @@ def attention(module, query, key, value, attention_mask, scaling=None, fa2_gathe
     return out[None], None
 
 
-def dense_mask(fa2_cu_q, fa2_cu_k, fa2_gather, **_) -> torch.Tensor:
-    """The attention of fa2_* inputs as a [N, N] bool mask (True = attends), for SDPA.
-
-    Segment j's queries see its gathered keys, causally aligned to the end
-    (flash-attn's causal=True when there are more keys than queries).
-    """
-    cu_q, cu_k, gather = fa2_cu_q.tolist(), fa2_cu_k.tolist(), fa2_gather.cpu()
-    mask = torch.zeros(cu_q[-1], cu_q[-1], dtype=torch.bool)
-    for q0, q1, k0, k1 in zip(cu_q, cu_q[1:], cu_k, cu_k[1:]):
-        for i in range(q1 - q0):
-            mask[q0 + i, gather[k0: k1 - (q1 - q0) + i + 1]] = True
-    return mask
-
-
 def use(model) -> None:
     """Switches the model to ATTENTION (flex for BlockMasks, FA2 for fa2_* inputs)."""
     from transformers import AttentionInterface

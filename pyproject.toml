@@ -38,6 +38,7 @@ llm-jev-build-data = "llm_jev.dataloader.build:main"
 llm-jev-merge = "llm_jev.serving.merge:main"
 llm-jev-spans = "llm_jev.span_generation.best_of_n:main"
 llm-jev-sglang-cite = "llm_jev.serving.sglang_client:main"
+llm-jev-predict = "llm_jev.serving.predict:main"
 
 # CUDA 12.8 wheels.
 [[tool.uv.index]]

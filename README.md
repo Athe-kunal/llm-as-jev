@@ -27,13 +27,13 @@ Two parts, one package (`llm_jev`):
   is the fastest but leaks (later sentences can carry a dropped sentence's
   content), so it is not equivalent to deletion; full masking is.
 
-  AttnLRP (`attn_lrp.attribute`, Achtibat et al., ICML 2024) is the
-  gradient-based alternative: one forward and one backward with LRP rules
-  (the Gradient*Input form of lxt), attention on FA2. It explains either the
-  answer's suffix logits (`target="logit"`) or their margin over the other
-  legal options (`target="contrast"`, closer to ContextCite's logit q).
-  `scripts/attribution.sh` compares the three on the eval rows with gold
-  spans: span AP / top-1, top-k removal drop, LDS and time.
+  `modeling.fuse` compiles the decoder layers so RMSNorm, RoPE, SwiGLU and
+  the residual adds run as fused kernels: about half of a full-masking
+  forward was these memory-bound ops, and fusing them makes ContextCite
+  ~1.7x faster at equal quality (eval rows with gold spans: span AP 0.386
+  vs 0.383, LDS 0.699 vs 0.694; 237 s vs 400 s for 200 rows on an A100).
+  `scripts/attribution.sh` measures ContextCite on the rows with gold spans:
+  span AP / top-1, top-k removal drop, LDS and time.
 
 ## Install
 
@@ -66,8 +66,9 @@ The console scripts run the same modules as `python -m llm_jev.<module>`:
 | `llm-jev-train` | `llm_jev.train.train` | one epoch of L_tree + KL anchors, evaluated before and after |
 | `llm-jev-evaluate` | `llm_jev.evaluation.evaluate` | eval split metrics |
 | `llm-jev-benchmarks` | `llm_jev.evaluation.benchmarks` | external benchmarks (BoolQ, MMLU, ARC-C, ... and JevBench) |
-| `llm-jev-attribution` | `llm_jev.evaluation.attribution` | ContextCite (FA2) vs AttnLRP on eval rows with gold spans |
+| `llm-jev-attribution` | `llm_jev.evaluation.attribution` | ContextCite (full masking, fused kernels) on rows with gold spans |
 | `llm-jev-merge` | `llm_jev.serving.merge` | merges a LoRA adapter into its base model for SGLang |
+| `llm-jev-predict` | `llm_jev.serving.predict` | decisions for a split; `--cite` adds ContextCite evidence |
 | `llm-jev-sglang-cite` | `llm_jev.serving.sglang_client` | decisions and ContextCite through an SGLang server |
 | `llm-jev-spans` | `llm_jev.span_generation.best_of_n` | best-of-N evidence labels from a vLLM server (`span_generation/serve.sh`; `uv sync --extra spans`) |
 | `llm-jev-build-data` | `llm_jev.dataloader.build` | builds the training mix, Reason+Long-12k + Nimble (`--download` fetches the pinned sources into the Hugging Face cache) |
@@ -82,10 +83,22 @@ from llm_jev.modeling import fa2, masked_cite, modeling
 tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
 model = modeling.load("Qwen/Qwen3-0.6B", "runs/qwen3_0.6b/adapter")
 fa2.use(model)                                   # flex attention and FA2 dispatch
+modeling.fuse(model)                             # fused kernels (compiles on the first call)
 example = storage.load_examples(split="eval")[0]
 res = masked_cite.attribute(model, tok, example, removal="full")   # or removal="reader"
 top = sorted(res["sources"], key=lambda s: -s["w"])[:3]         # per-sentence weights w
 ```
+
+Decisions for a split from the command line, with ContextCite evidence only when asked for:
+
+```bash
+llm-jev-predict --model Athekunal/llm-jev-qwen3-0.6b --data Athekunal/llm-jev-reason-long \
+    --split eval --out runs/predict/eval.jsonl                 # decisions only (batched SDPA)
+llm-jev-predict --model Athekunal/llm-jev-qwen3-0.6b --data Athekunal/llm-jev-reason-long \
+    --split eval --limit 100 --cite --out runs/predict/eval_cited.jsonl   # + top-3 evidence per row
+```
+
+`--cite` runs full masking on FA2 with fused kernels (`--no-fuse` for eager).
 
 Training uses Accelerate with FSDP2 (`configs/accelerate_fsdp2.yaml`); set
 `ACCELERATE_CONFIG=configs/accelerate_ddp.yaml` for DDP. `BATCH_SIZE` is the
@@ -136,14 +149,14 @@ src/llm_jev/
                  prompts.py (Jinja loader)
   modeling/      modeling.py (base and LoRA models, batched forward), context_cite.py (ContextCite by
                  deletion), masked_cite.py (one-pass ContextCite: reader and full masking), fa2.py
-                 (FlashAttention-2 varlen next to flex attention), attn_lrp.py (AttnLRP)
+                 (FlashAttention-2 varlen next to flex attention)
   train/         losses.py (L_tree, KL anchors), train.py
-  serving/       merge.py (LoRA merged into the weights), sglang_client.py (decisions and ContextCite
-                 over SGLang's /v1/score)
+  serving/       merge.py (LoRA merged into the weights), predict.py (decisions, with ContextCite
+                 behind --cite), sglang_client.py (decisions and ContextCite over SGLang's /v1/score)
   span_generation/  best_of_n.py (best-of-N evidence labels, SelfCite reward), cite.j2, serve.sh
                  (vLLM labelling server)
   evaluation/    evaluate.py (eval split metrics), benchmarks.py (external benchmarks),
-                 attribution.py (ContextCite vs AttnLRP)
+                 attribution.py (ContextCite against gold spans)
   prompts/       decision.j2 (the decision prompt; package data)
 scripts/         train.sh, evaluate.sh, attribution.sh, sglang_serve.sh (launchers)
 configs/         Accelerate configs for training (FSDP2, DDP)

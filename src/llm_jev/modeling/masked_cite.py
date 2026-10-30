@@ -219,6 +219,18 @@ def score_keep(model, tok, ids: list[int], owner: np.ndarray, keep: np.ndarray, 
     return s
 
 
+def decide(model, tok, example: schema.Example, device: str = "cuda") -> torch.Tensor:
+    """s [K] of the full prompt as one FA2 sequence (score_keep with nothing to drop).
+
+    For a model on modeling.fa2, whose attention ignores padding masks, so
+    context_cite.predict's batched scoring does not apply.
+    """
+    ex = answers.encode(example, tok, None)
+    ids = ex["input_ids"][: ex["path"][0][0] + 1]
+    return score_keep(model, tok, ids, np.full(len(ids), -1), np.ones((1, 1), bool), len(example.options),
+                      device=device)[0]
+
+
 def predict(model, tok, example: schema.Example,
             device: str = "cuda") -> tuple[int, torch.Tensor]:
     """The decision on the full prompt through the packed scorer: the predicted option and s [K].
@@ -227,8 +239,8 @@ def predict(model, tok, example: schema.Example,
     """
     sources = context_cite.split_sources(example)
     if not sources:  # nothing to mask: the plain decision
-        _, answer, s = context_cite.predict(model, tok, example, device)
-        return answer, s
+        s = decide(model, tok, example, device)
+        return int(s.argmax()), s
     ids, owner, reader = token_owners(tok, example, sources)
     k = len(example.options)
     packed = pack(ids, reader, 1, list(answers.candidates(tok, k)[1]))
@@ -261,8 +273,8 @@ def attribute(model, tok, example: schema.Example, num_ablations: int | None = N
         raise ValueError(f"removal must be 'reader' or 'full', not {removal!r}")
     sources = context_cite.split_sources(example)
     if not sources:  # nothing to cite: the decision alone
-        _, answer, s = context_cite.predict(model, tok, example, device)
-        return context_cite.no_sources_result(s, answer)
+        s = decide(model, tok, example, device)
+        return context_cite.no_sources_result(s, int(s.argmax()))
     n = num_ablations or ablation_count(len(sources))
     masks = context_cite.ablation_masks(n, len(sources), keep_prob, seed)
     ids, owner, reader = token_owners(tok, example, sources)
