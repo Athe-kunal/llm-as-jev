@@ -70,15 +70,9 @@ def score_prompts(url: str, tok, prompts: list[list[int]], ks: list[int], chunk:
     return out
 
 
-def prompt_ids(tok, example: schema.Example) -> list[int]:
-    """The example's prompt up to "Best answer: [", options in release order."""
-    ex = answers.encode(example, tok, None)
-    return ex["input_ids"][: ex["path"][0][0] + 1]
-
-
 def predict(url: str, tok, example: schema.Example) -> tuple[int, torch.Tensor]:
     """The predicted option (argmax s) and the candidate scores s [K]."""
-    s, _, _ = score_prompts(url, tok, [prompt_ids(tok, example)], [len(example.options)])[0]
+    s, _, _ = score_prompts(url, tok, [answers.prompt_ids(example, tok)], [len(example.options)])[0]
     return int(s.argmax()), s
 
 
@@ -91,7 +85,7 @@ def attribute(url: str, tok, example: schema.Example, num_ablations: int | None 
         return context_cite.no_sources_result(s, answer)
     n = num_ablations or masked_cite.ablation_count(len(sources))
     masks = context_cite.ablation_masks(n, len(sources), keep_prob, seed)
-    prompts = [prompt_ids(tok, context_cite.ablate(example, sources, keep)) for keep in masks]
+    prompts = [answers.prompt_ids(context_cite.ablate(example, sources, keep), tok) for keep in masks]
     scored = score_prompts(url, tok, prompts, [len(example.options)] * n, **request)
     y = np.array([context_cite.logit_q(s_i, answer) for s_i, _, _ in scored])
     return context_cite.result(s, answer, sources, masks, y, alpha)

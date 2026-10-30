@@ -29,21 +29,6 @@ from llm_jev.modeling import masked_cite
 from llm_jev.modeling import modeling
 
 
-def decide(model, tok, rows: list[schema.Example], device: str = "cuda", batch_tokens: int = 32768,
-           batch_rows: int = 64) -> list[torch.Tensor]:
-    """s [K] for every row, from batched scoring of the prompts (options in release order)."""
-    encoded = [answers.encode(r, tok, None) for r in rows]
-    prompts = [ex["input_ids"][: ex["path"][0][0] + 1] for ex in encoded]
-    s: list = [None] * len(rows)
-    with torch.no_grad():
-        for batch in answers.batches([len(p) for p in prompts], batch_tokens, batch_rows):
-            scored = answers.score_batch(model, [prompts[i] for i in batch], tok,
-                                         [len(rows[i].options) for i in batch], device, batch_tokens, batch_rows)
-            for i, (x, _, _) in zip(batch, scored):
-                s[i] = x
-    return s
-
-
 def evidence(row: schema.Example, sources: list[dict[str, Any]], k: int = 3) -> list[dict[str, Any]]:
     """The k highest-weighted sources with w > 0, strongest first, with their text."""
     top = sorted((x for x in sources if x["w"] > 0), key=lambda x: -x["w"])[:k]
@@ -83,7 +68,9 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
         if not args.cite:
-            for row, s in zip(rows, decide(model, tok, rows)):
+            with torch.no_grad():
+                scored = answers.score_examples(model, rows, tok, "cuda")
+            for row, (s, _, _) in zip(rows, scored):
                 answer = int(s.argmax())
                 f.write(json.dumps(record(row, answer, torch.softmax(s, 0)[answer].item())) + "\n")
         else:

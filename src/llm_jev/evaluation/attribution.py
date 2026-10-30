@@ -15,7 +15,6 @@ import argparse
 import dataclasses
 import json
 import pathlib
-import random
 import time
 from collections import defaultdict
 from typing import Any
@@ -28,6 +27,7 @@ import torch
 
 from llm_jev.dataloader import schema
 from llm_jev.dataloader import storage
+from llm_jev.evaluation import evaluate
 from llm_jev.modeling import context_cite
 from llm_jev.modeling import fa2
 from llm_jev.modeling import masked_cite
@@ -96,7 +96,6 @@ def main() -> None:
     parser.add_argument("--split", default="eval")
     parser.add_argument("--source", nargs="*", help="only these datasets")
     parser.add_argument("--per", type=int, default=50, help="rows per dataset")
-    parser.add_argument("--limit", type=int, help="at most this many rows in all, spread over the datasets")
     parser.add_argument("--spans", action="store_true",
                         help="gold spans from --data's generated `spans` config (train rows) instead of the rows' own")
     parser.add_argument("--lds-masks", type=int, default=32, help="held-out ablations for the LDS")
@@ -119,13 +118,9 @@ def main() -> None:
                 for r in rows if generated.get(r.id)]
     rows = [r for r in rows
             if r.spans and (not args.source or r.source in args.source)
-            and len(context_cite.split_sources(r)) >= 2
-            and context_cite.gold_sentences(r, context_cite.split_sources(r))]  # spans not between sentences
-    by: dict[str, list] = {}
-    for r in rows:
-        by.setdefault(r.source, []).append(r)
-    picks = [random.Random(0).sample(rs, min(args.per, len(rs))) for _, rs in sorted(by.items())]
-    chosen = [p[j] for j in range(args.per) for p in picks if j < len(p)][: args.limit]   # round-robin over datasets
+            and len(srcs := context_cite.split_sources(r)) >= 2
+            and context_cite.gold_sentences(r, srcs)]                    # spans not between sentences
+    chosen = evaluate.subset(rows, args.per, seed=0)
     if args.fuse and chosen:
         masked_cite.attribute(model, tok, chosen[0], removal="full")      # compiles outside the timings
     out = pathlib.Path(args.out)

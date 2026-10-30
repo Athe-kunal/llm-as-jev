@@ -225,29 +225,9 @@ def decide(model, tok, example: schema.Example, device: str = "cuda") -> torch.T
     For a model on modeling.fa2, whose attention ignores padding masks, so
     context_cite.predict's batched scoring does not apply.
     """
-    ex = answers.encode(example, tok, None)
-    ids = ex["input_ids"][: ex["path"][0][0] + 1]
+    ids = answers.prompt_ids(example, tok)
     return score_keep(model, tok, ids, np.full(len(ids), -1), np.ones((1, 1), bool), len(example.options),
                       device=device)[0]
-
-
-def predict(model, tok, example: schema.Example,
-            device: str = "cuda") -> tuple[int, torch.Tensor]:
-    """The decision on the full prompt through the packed scorer: the predicted option and s [K].
-
-    Equal to copy 0 of attribute. The model must use flex attention.
-    """
-    sources = context_cite.split_sources(example)
-    if not sources:  # nothing to mask: the plain decision
-        s = decide(model, tok, example, device)
-        return int(s.argmax()), s
-    ids, owner, reader = token_owners(tok, example, sources)
-    k = len(example.options)
-    packed = pack(ids, reader, 1, list(answers.candidates(tok, k)[1]))
-    keep = np.ones((1, len(sources)), bool)
-    with torch.no_grad():
-        s = score_copies(model, packed, block_mask(packed, owner, keep, device), tok, k, device)[0][0]
-    return int(s.argmax()), s
 
 
 def ablation_count(num_sources: int, low: int = 32, high: int = 256) -> int:
