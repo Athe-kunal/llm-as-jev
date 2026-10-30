@@ -14,6 +14,7 @@ Methods: contextcite, attnlrp_logit and attnlrp_contrast (attn_lrp.goal).
 """
 
 import argparse
+import dataclasses
 import json
 import pathlib
 import random
@@ -21,6 +22,7 @@ import time
 from collections import defaultdict
 from typing import Any
 
+import datasets
 from loguru import logger
 import numpy as np
 from scipy.stats import spearmanr
@@ -117,7 +119,7 @@ def table(summary: dict, group: str = "all") -> str:
 
 
 def main() -> None:
-    """Attributes --per seeded eval rows with gold spans per dataset and writes the comparison."""
+    """Attributes --per seeded rows with gold spans per dataset and writes the comparison."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default="Athekunal/llm-jev-qwen3-0.6b", help="merged model id or folder")
     parser.add_argument("--adapter", help="LoRA adapter on --model (merged before use)")
@@ -125,6 +127,9 @@ def main() -> None:
     parser.add_argument("--split", default="eval")
     parser.add_argument("--source", nargs="*", help="only these datasets")
     parser.add_argument("--per", type=int, default=50, help="rows per dataset")
+    parser.add_argument("--limit", type=int, help="at most this many rows in all, spread over the datasets")
+    parser.add_argument("--spans", action="store_true",
+                        help="gold spans from --data's generated `spans` config (train rows) instead of the rows' own")
     parser.add_argument("--lds-masks", type=int, default=32, help="held-out ablations for the LDS")
     parser.add_argument("--out", required=True, help="folder for rows.jsonl and summary.json")
     args = parser.parse_args()
@@ -134,20 +139,25 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(args.model)
     model = modeling.load(args.model, args.adapter)
     fa2.use(model)
-    rows = [r for r in storage.load_examples(args.data, args.split)
+    rows = storage.load_examples(args.data, args.split)
+    if args.spans:
+        generated = {r["id"]: r["spans"] for r in datasets.load_dataset(args.data, "spans", split="train")}
+        rows = [dataclasses.replace(r, spans=tuple(schema.Span(**s) for s in generated[r.id]))
+                for r in rows if generated.get(r.id)]
+    rows = [r for r in rows
             if r.spans and (not args.source or r.source in args.source)
-            and len(context_cite.split_sources(r)) >= 2]
+            and len(context_cite.split_sources(r)) >= 2
+            and context_cite.gold_sentences(r, context_cite.split_sources(r))]  # spans not between sentences
     by: dict[str, list] = {}
     for r in rows:
         by.setdefault(r.source, []).append(r)
-    chosen = [r for _, rs in sorted(by.items()) for r in random.Random(0).sample(rs, min(args.per, len(rs)))]
+    picks = [random.Random(0).sample(rs, min(args.per, len(rs))) for _, rs in sorted(by.items())]
+    chosen = [p[j] for j in range(args.per) for p in picks if j < len(p)][: args.limit]   # round-robin over datasets
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     done = []
     with open(out / "rows.jsonl", "w") as f:
         for i, row in enumerate(chosen):
-            if not context_cite.gold_sentences(row, context_cite.split_sources(row)):
-                continue                                                # spans fall between sentences
             r = evaluate_row(model, tok, row, args.lds_masks)
             f.write(json.dumps(r) + "\n")
             f.flush()
