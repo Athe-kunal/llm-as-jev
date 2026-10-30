@@ -151,6 +151,12 @@ def encode(
     }
 
 
+def prompt_ids(example: schema.Example, tokenizer: Any) -> list[int]:
+    """The example's prompt token ids up to "Best answer: [", options in release order."""
+    ex = encode(example, tokenizer, None)
+    return ex["input_ids"][: ex["path"][0][0] + 1]
+
+
 def batches(lengths: list[int], budget: int, max_rows: int) -> list[list[int]]:
     """Row indices sorted by length, packed so rows x longest <= budget and
     rows <= max_rows."""
@@ -219,6 +225,20 @@ def score_batch(model, prompts: list[list[int]], tokenizer: Any,
             for (i, node), lp in zip(chunk, torch.log_softmax(o.logits[:, -1].float(), -1)):
                 logp[i][node] = lp
     return [read_trie(lp, suffixes, nodes) for lp, (suffixes, nodes) in zip(logp, tries)]
+
+
+def score_examples(model, examples: list[schema.Example], tokenizer: Any, device: str,
+                   budget: int = 32768, max_rows: int = 64) -> list[tuple]:
+    """score_batch's (s, root legal mass, decoded) for every example (options in
+    release order), in length-sorted batches of their prompts."""
+    prompts = [prompt_ids(e, tokenizer) for e in examples]
+    out: list = [None] * len(examples)
+    for batch in batches([len(p) for p in prompts], budget, max_rows):
+        scored = score_batch(model, [prompts[i] for i in batch], tokenizer,
+                             [len(examples[i].options) for i in batch], device, budget, max_rows)
+        for i, x in zip(batch, scored):
+            out[i] = x
+    return out
 
 
 def read_trie(lp: dict[tuple[int, ...], torch.Tensor], suffixes: list[list[int]],

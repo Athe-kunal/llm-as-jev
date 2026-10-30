@@ -201,23 +201,33 @@ def score_full(model, batch: dict[str, Any], tok, k: int, device: str = "cuda") 
             for row in logits]
 
 
-def predict(model, tok, example: schema.Example,
-            device: str = "cuda") -> tuple[int, torch.Tensor]:
-    """The decision on the full prompt through the packed scorer: the predicted option and s [K].
+def score_keep(model, tok, ids: list[int], owner: np.ndarray, keep: np.ndarray, k: int,
+               budget: int = 65536, device: str = "cuda") -> list[torch.Tensor]:
+    """s [K] for every keep row [n, S] under full masking, in FA2 passes of at most `budget` tokens.
 
-    Equal to copy 0 of attribute. The model must use flex attention.
+    The model must use modeling.fa2.
     """
-    sources = context_cite.split_sources(example)
-    if not sources:  # nothing to mask: the plain decision
-        _, answer, s = context_cite.predict(model, tok, example, device)
-        return answer, s
-    ids, owner, reader = token_owners(tok, example, sources)
-    k = len(example.options)
-    packed = pack(ids, reader, 1, list(answers.candidates(tok, k)[1]))
-    keep = np.ones((1, len(sources)), bool)
-    with torch.no_grad():
-        s = score_copies(model, packed, block_mask(packed, owner, keep, device), tok, k, device)[0][0]
-    return int(s.argmax()), s
+    nodes = list(answers.candidates(tok, k)[1])
+    kept = ((owner[None] < 0) | keep[:, np.maximum(owner, 0)]).sum(1)  # [n] tokens per copy
+    s, c = [], 0
+    while c < len(keep):                                                # chunks of at most `budget` tokens
+        e = c + 1
+        while e < len(keep) and kept[c: e + 1].sum() <= budget:
+            e += 1
+        s += [x[0] for x in score_full(model, full_batch(ids, owner, keep[c:e], nodes, device), tok, k, device)]
+        c = e
+    return s
+
+
+def decide(model, tok, example: schema.Example, device: str = "cuda") -> torch.Tensor:
+    """s [K] of the full prompt as one FA2 sequence (score_keep with nothing to drop).
+
+    For a model on modeling.fa2, whose attention ignores padding masks, so
+    context_cite.predict's batched scoring does not apply.
+    """
+    ids = answers.prompt_ids(example, tok)
+    return score_keep(model, tok, ids, np.full(len(ids), -1), np.ones((1, 1), bool), len(example.options),
+                      device=device)[0]
 
 
 def ablation_count(num_sources: int, low: int = 32, high: int = 256) -> int:
@@ -243,8 +253,8 @@ def attribute(model, tok, example: schema.Example, num_ablations: int | None = N
         raise ValueError(f"removal must be 'reader' or 'full', not {removal!r}")
     sources = context_cite.split_sources(example)
     if not sources:  # nothing to cite: the decision alone
-        _, answer, s = context_cite.predict(model, tok, example, device)
-        return context_cite.no_sources_result(s, answer)
+        s = decide(model, tok, example, device)
+        return context_cite.no_sources_result(s, int(s.argmax()))
     n = num_ablations or ablation_count(len(sources))
     masks = context_cite.ablation_masks(n, len(sources), keep_prob, seed)
     ids, owner, reader = token_owners(tok, example, sources)
@@ -256,14 +266,7 @@ def attribute(model, tok, example: schema.Example, num_ablations: int | None = N
         with torch.no_grad():
             s = [x[0] for x in score_copies(model, packed, block_mask(packed, owner, keep, device), tok, k, device)]
     else:
-        kept = ((owner[None] < 0) | keep[:, np.maximum(owner, 0)]).sum(1)  # [1 + n] tokens per copy
-        s, c = [], 0
-        while c < len(keep):                                            # chunks of at most `budget` tokens
-            e = c + 1
-            while e < len(keep) and kept[c: e + 1].sum() <= budget:
-                e += 1
-            s += [x[0] for x in score_full(model, full_batch(ids, owner, keep[c:e], nodes, device), tok, k, device)]
-            c = e
+        s = score_keep(model, tok, ids, owner, keep, k, budget, device)
     answer = int(s[0].argmax())
     y = np.array([context_cite.logit_q(x, answer) for x in s[1:]])
     return context_cite.result(s[0], answer, sources, masks, y, alpha)

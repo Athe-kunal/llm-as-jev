@@ -45,6 +45,18 @@ def load(model_id: str, adapter: str | None = None, merge: bool = True, device: 
     return model.merge_and_unload() if merge else model
 
 
+def fuse(model) -> None:
+    """Compiles each decoder layer (dynamic shapes) so its elementwise ops fuse.
+
+    Eager RMSNorm, RoPE, SwiGLU and residual adds are about half of a
+    ContextCite forward's GPU time (memory-bound kernels). Fused kernels round
+    bf16 less often, so outputs change, by no more than eager's own error
+    against fp32. The first call compiles (~20 s).
+    """
+    for layer in model.model.layers:
+        layer.compile(dynamic=True)
+
+
 def batched_logits(model, seqs: list[list[int]], keep: list[int], device,
                    pad: int):
     """Logits at positions `keep` of the first sequence, and every sequence's last logits.

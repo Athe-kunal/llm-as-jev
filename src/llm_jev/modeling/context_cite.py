@@ -130,18 +130,9 @@ def ablation_targets(model, tok, example: schema.Example, sources: list[dict[str
 
     Options stay in release order, so `answer` is the same option under every mask.
     """
-    prompts = []
-    for keep in masks:
-        ex = answers.encode(ablate(example, sources, keep), tok, None)
-        prompts.append(ex["input_ids"][: ex["path"][0][0] + 1])
-    k = len(example.options)
-    y = np.empty(len(prompts))
-    for batch in answers.batches([len(p) for p in prompts], batch_tokens, batch_rows):
-        scored = answers.score_batch(model, [prompts[i] for i in batch], tok, [k] * len(batch),
-                                     device, batch_tokens, batch_rows)
-        for i, (s, _, _) in zip(batch, scored):
-            y[i] = logit_q(s, answer)
-    return y
+    ablated = [ablate(example, sources, keep) for keep in masks]
+    scored = answers.score_examples(model, ablated, tok, device, batch_tokens, batch_rows)
+    return np.array([logit_q(s, answer) for s, _, _ in scored])
 
 
 def fit_surrogate(masks: np.ndarray, y: np.ndarray, alpha: float = 0.01,
@@ -163,9 +154,8 @@ def fit_surrogate(masks: np.ndarray, y: np.ndarray, alpha: float = 0.01,
 def predict(model, tok, example: schema.Example,
             device: str = "cuda") -> tuple[list[int], int, torch.Tensor]:
     """The prompt (options in release order), the predicted option, and the scores s [K]."""
-    ex = answers.encode(example, tok, None)
-    prompt = ex["input_ids"][: ex["path"][0][0] + 1]
-    s, _, _ = answers.score(model, prompt, tok, ex["n_options"], device)
+    prompt = answers.prompt_ids(example, tok)
+    s, _, _ = answers.score(model, prompt, tok, len(example.options), device)
     return prompt, int(s.argmax()), s
 
 
