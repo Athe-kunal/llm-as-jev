@@ -3,6 +3,7 @@ name: Deploy blog
 on:
   push:
     branches: [main]
+    paths: ["blogs/**", ".github/workflows/blog.yml"]
   workflow_dispatch:
 
 permissions:

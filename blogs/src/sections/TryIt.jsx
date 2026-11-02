@@ -8,6 +8,7 @@ const ABLATIONS = [["auto", "auto"], ["64", "64"], ["256", "256"]];
 // reader: a dropped sentence is hidden from the question and answer only (the document is shared, one pass);
 // full: hidden from every later token, the document included (the document recomputed per ablation)
 const REMOVAL = [["reader", "reader-only"], ["full", "full masking"]];
+const DEFAULT_MODEL = "Athekunal/llm-jev-qwen3-0.6b"; // the attribution.py default
 const SHOW_OPTIONS = 8; // options listed: the most probable ones, plus gold and the answer
 
 async function api(path) {
@@ -24,7 +25,10 @@ export default function TryIt() {
   const [attr, setAttr] = useState();
   const [ablations, setAblations] = useState("auto");
   const [removal, setRemoval] = useState("reader");
-  const query = (id, a, m) => `/api/attribute?id=${encodeURIComponent(id)}&ablations=${a}&removal=${m}`;
+  const [model, setModel] = useState(DEFAULT_MODEL); // HF id or folder path
+  const [cite, setCite] = useState(true);
+  const query = (id, a, m, mod = model, c = cite) =>
+    `/api/attribute?id=${encodeURIComponent(id)}&ablations=${a}&removal=${m}&model=${encodeURIComponent(mod.trim())}&cite=${c ? 1 : 0}`;
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -42,15 +46,17 @@ export default function TryIt() {
     setAttr(undefined);
     try {
       const { id } = await api(`/api/sample?source=${source}&spans=${withSpans ? 1 : 0}`);
-      setRow(await api(`/api/row?id=${encodeURIComponent(id)}`));
-      setAttr("loading");
-      setAttr(await api(query(id, ablations, removal)));
+      setRow(await api(`/api/row?id=${encodeURIComponent(id)}&model=${encodeURIComponent(model.trim())}`));
+      if (cite) {
+        setAttr("loading");
+        setAttr(await api(query(id, ablations, removal)));
+      }
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
     }
-  }, [source, withSpans, ablations, removal]);
+  }, [source, withSpans, ablations, removal, model, cite]);
 
   // re-run ContextCite on the current row with another ablation count or removal
   const rerun = useCallback(async (n, m) => {
@@ -67,7 +73,21 @@ export default function TryIt() {
     } finally {
       setBusy(false);
     }
-  }, [row]);
+  }, [row, model, cite]);
+
+  // turning citations on for the current row runs ContextCite on it; off just hides the panel
+  const toggleCite = (on) => {
+    setCite(on);
+    if (on && row) {
+      setBusy(true);
+      setError(null);
+      setAttr("loading");
+      api(query(row.id, ablations, removal, model, true))
+        .then(setAttr)
+        .catch((e) => setError(e.message))
+        .finally(() => setBusy(false));
+    }
+  };
 
   useEffect(() => {
     if (datasets.length) next();
@@ -95,6 +115,16 @@ export default function TryIt() {
             ))}
           </select>
         </label>
+        <label className="try-field">
+          <span>Model (HF id or path)</span>
+          <input id="try-model" type="text" value={model} spellCheck={false} placeholder={DEFAULT_MODEL}
+                 onChange={(e) => setModel(e.target.value)}
+                 onKeyDown={(e) => e.key === "Enter" && model.trim() && !busy && next()} />
+        </label>
+        <label className="try-check">
+          <input id="try-cite" type="checkbox" checked={cite} onChange={(e) => toggleCite(e.target.checked)} />
+          citations (ContextCite)
+        </label>
         <label className="try-check">
           <input id="try-spans" type="checkbox" checked={withSpans} disabled={!chosen?.withSpans}
                  onChange={(e) => setSpansOnly(e.target.checked)} />
@@ -117,7 +147,7 @@ export default function TryIt() {
         {row && (
           <motion.div key={row.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
             <Answer row={row} />
-            <Explain row={row} res={attr} ablations={ablations} removal={removal} onRerun={rerun} busy={busy} />
+            {cite && <Explain row={row} res={attr} ablations={ablations} removal={removal} onRerun={rerun} busy={busy} />}
           </motion.div>
         )}
       </AnimatePresence>
