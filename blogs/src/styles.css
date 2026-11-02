@@ -621,7 +621,8 @@ a.sec { text-decoration: none; }
 /* section 7: try it */
 .try-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 18px; margin: 22px 0 18px; }
 .try-field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-.try-field select { font: 14px var(--body); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; max-width: 100%; }
+.try-field select, .try-field input[type="text"] { font: 14px var(--body); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; max-width: 100%; }
+.try-field input[type="text"] { width: 22em; }
 .try-check { display: flex; gap: 8px; align-items: center; font-size: 14px; padding-bottom: 8px; }
 .try-go { border: 0; background: var(--accent); color: var(--surface); font-weight: 600; padding: 10px 18px; border-radius: 999px; box-shadow: var(--shadow); transition: transform 0.15s, opacity 0.2s; }
 .try-go:hover:not(:disabled) { transform: translateY(-1px); }
