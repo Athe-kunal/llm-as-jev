@@ -35,6 +35,18 @@ Two parts, one package (`llm_jev`):
   `scripts/attribution.sh` measures ContextCite on the rows with gold spans:
   span AP / top-1, top-k removal drop, LDS and time.
 
+## Released
+
+The Reason+Long mix and the trained checkpoints are on the Hugging Face Hub.
+Each checkpoint has the merged weights at the top level and the LoRA adapter
+in `adapter/`.
+
+- 🤗 [Athekunal/llm-jev-reason-long](https://huggingface.co/datasets/Athekunal/llm-jev-reason-long):
+  training and held-out decisions, plus generated evidence spans. ReClor is
+  withheld from this release.
+- [Athekunal/llm-jev-qwen3-0.6b](https://huggingface.co/Athekunal/llm-jev-qwen3-0.6b)
+- [Athekunal/llm-jev-qwen3-4b](https://huggingface.co/Athekunal/llm-jev-qwen3-4b)
+
 ## Install
 
 Requires Python 3.11+, a CUDA GPU for training and attribution, and
