@@ -53,8 +53,8 @@ def fitting_rows(acc, train: list[schema.Example], tok: Any, fmt: mlm.Format,
     return [i for i in range(len(train)) if lengths[i] <= max_tokens]
 
 
-def run_eval(acc, scorer, tok: Any, fmt: mlm.Format,
-             rows: list[schema.Example]) -> dict[str, dict[str, float]]:
+def run_eval(acc, scorer, tok: Any, fmt: mlm.Format, rows: list[schema.Example],
+             budget: int) -> dict[str, dict[str, float]]:
     """evaluation.evaluate_mlm metrics (the decoder's format: "ALL" averages
     the datasets), with the rows split over the processes and gathered."""
     from accelerate.utils import gather_object
@@ -63,7 +63,7 @@ def run_eval(acc, scorer, tok: Any, fmt: mlm.Format,
     was_training = model.training
     model.eval()
     mine = evaluate_mlm.records(model, tok, fmt, rows[acc.process_index::acc.num_processes],
-                                str(acc.device), log_every=float("inf"))
+                                str(acc.device), log_every=float("inf"), budget=budget)
     model.train(was_training)
     return evaluate_mlm.summarize(gather_object(mine))
 
@@ -134,7 +134,7 @@ def main() -> None:
 
     def evaluate_and_log(step: int, tag: str) -> None:
         t0 = time.time()
-        metrics = run_eval(acc, scorer, tok, fmt, evals)
+        metrics = run_eval(acc, scorer, tok, fmt, evals, cfg.model.pack_tokens)
         if acc.is_main_process:
             (out / f"eval_{tag}.json").write_text(json.dumps(metrics, indent=2))
         acc.log({f"eval/{k}/{m}": x for k, v in metrics.items()

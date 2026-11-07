@@ -6,7 +6,8 @@
 model:
   id: dmis-lab/UltraBERT-380M
   revision: 671a38c087233c0cc72c5bfceea6fffa2822f1db
-  attention: sdpa
+  attention: varlen        # FA2 varlen (modeling/encoder_varlen.py); or sdpa / eager
+  pack_tokens: 32768       # tokens per packed forward pass in evaluation (varlen only)
   gradient_checkpointing: true
 
 format:

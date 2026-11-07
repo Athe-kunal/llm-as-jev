@@ -194,7 +194,8 @@ def main() -> None:
         from llm_jev.evaluation import evaluate_mlm
 
         scorer, tok, fmt = evaluate_mlm.load_run(args.encoder, attention=args.encoder_attention)
-        metrics, examples = evaluate_mlm.evaluate(scorer, tok, fmt, rows), []
+        budget = evaluate_mlm.run_config(args.encoder).model.pack_tokens
+        metrics, examples = evaluate_mlm.evaluate(scorer, tok, fmt, rows, budget=budget), []
     else:
         gen_rows = evaluate.subset(rows, args.gen_per, SEED)
         tok = AutoTokenizer.from_pretrained(args.model)

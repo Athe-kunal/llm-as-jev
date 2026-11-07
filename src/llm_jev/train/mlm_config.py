@@ -15,6 +15,7 @@ from omegaconf import OmegaConf
 
 from llm_jev.dataloader import mlm
 from llm_jev.evaluation import evaluate
+from llm_jev.modeling import encoder
 
 
 @dataclasses.dataclass
@@ -23,7 +24,9 @@ class ModelConfig:
 
     id: str = MISSING                  # Hub id or local path
     revision: str | None = None        # Hub commit (None: latest)
-    attention: str = "sdpa"            # transformers attn_implementation
+    attention: str = encoder.VARLEN    # "varlen" (FA2 varlen: no masks, packed evaluation),
+                                       # or a transformers attn_implementation ("sdpa", ...)
+    pack_tokens: int = 32768           # tokens per packed forward (varlen evaluation)
     gradient_checkpointing: bool = True
 
 

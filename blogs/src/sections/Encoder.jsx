@@ -140,7 +140,10 @@ function Latency() {
       <p className="lede small">
         Milliseconds to score one held-out row, one row at a time, on one A100 (the same rows for every model). The
         decoders prefill the prompt and walk the answer trie; the encoder runs one forward pass. Batched throughput is
-        what evaluation uses; the encoder has no batched path yet (FA2 varlen packing is pending), so its column is empty.
+        what evaluation uses: the decoders pad a batch, while the encoder on FlashAttention-2 varlen packs rows of up to
+        32K tokens into one sequence with no padding and no attention masks (<code>modeling/encoder_varlen.py</code>), at
+        the same accuracy as SDPA. Its throughput includes tokenizing every row. The SDPA rows run one row per forward pass,
+        so they have no batched number.
       </p>
       <div className="results-wrap">
         <table className="rs-table">

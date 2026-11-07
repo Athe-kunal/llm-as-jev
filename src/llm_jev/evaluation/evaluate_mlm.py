@@ -41,11 +41,16 @@ def load_run(run: str | pathlib.Path, device: str = "cuda",
     from transformers import AutoTokenizer
 
     run = pathlib.Path(run)
-    cfg = mlm_config.resolve(mlm_config.load(run / "config.yaml"))
+    cfg = run_config(run)
     tok = AutoTokenizer.from_pretrained(run / "model")
     model = encoder.load(str(run / "model"), attention=attention or cfg.model.attention,
                          device=device, dtype=dtype)
     return encoder.Scorer(model, tok, cfg.format).eval(), tok, cfg.format
+
+
+def run_config(run: str | pathlib.Path) -> mlm_config.Config:
+    """The resolved config a run was trained with (<run>/config.yaml; schema defaults fill new keys)."""
+    return mlm_config.resolve(mlm_config.load(pathlib.Path(run) / "config.yaml"))
 
 
 def is_packed(scorer) -> bool:
@@ -103,9 +108,9 @@ def summarize(recs: list[tuple]) -> dict[str, dict[str, float]]:
 
 
 def evaluate(scorer, tok: Any, fmt: mlm.Format, rows: list[schema.Example],
-             device: str = "cuda") -> dict[str, dict[str, float]]:
-    """summarize(records(...)): the metrics of `rows`."""
-    return summarize(records(scorer, tok, fmt, rows, device))
+             device: str = "cuda", budget: int = 32768) -> dict[str, dict[str, float]]:
+    """summarize(records(...)): the metrics of `rows` (budget: tokens per packed forward)."""
+    return summarize(records(scorer, tok, fmt, rows, device, budget=budget))
 
 
 def main() -> None:
@@ -130,7 +135,7 @@ def main() -> None:
     rows = decoder_eval.subset(storage.load_examples(args.data, args.split),
                                args.eval_per, args.seed)
     scorer, tok, fmt = load_run(args.run, dtype=getattr(torch, args.dtype), attention=args.attention)
-    metrics = evaluate(scorer, tok, fmt, rows)
+    metrics = evaluate(scorer, tok, fmt, rows, budget=run_config(args.run).model.pack_tokens)
     decoder_eval.save(out, args.tag, metrics, [])
     decoder_eval.log_summary(args.tag, metrics)
 

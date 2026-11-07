@@ -81,6 +81,7 @@ def time_encoder(run: str, rows: list, warmup: int, dtype: torch.dtype,
                  attention: str | None = None) -> dict:
     """Latency one row at a time; on FA2 varlen also packed throughput (evaluate_mlm.records)."""
     scorer, tok, fmt = evaluate_mlm.load_run(run, dtype=dtype, attention=attention)
+    budget = evaluate_mlm.run_config(run).model.pack_tokens
     encoded = [mlm.encode(r, tok, fmt) for r in rows]
 
     def one(ex):
@@ -92,8 +93,10 @@ def time_encoder(run: str, rows: list, warmup: int, dtype: torch.dtype,
     secs = [timed(lambda ex=ex: one(ex)) for ex in encoded]
     throughput = None
     if evaluate_mlm.is_packed(scorer):
-        evaluate_mlm.records(scorer, tok, fmt, rows[:warmup * 10], log_every=float("inf"))  # warm-up
-        packed = timed(lambda: evaluate_mlm.records(scorer, tok, fmt, rows, log_every=float("inf")))
+        evaluate_mlm.records(scorer, tok, fmt, rows[:warmup * 10], log_every=float("inf"),
+                             budget=budget)  # warm-up
+        packed = timed(lambda: evaluate_mlm.records(scorer, tok, fmt, rows, log_every=float("inf"),
+                                                    budget=budget))
         throughput = {"rows": len(rows), "seconds": packed, "rows_per_s": len(rows) / packed}
     return {"latency": summary(secs, [len(ex["input_ids"]) for ex in encoded]),
             "throughput": throughput}
