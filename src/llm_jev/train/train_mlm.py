@@ -14,7 +14,6 @@ every run.eval_every steps.
 """
 
 import argparse
-import collections
 import contextlib
 import json
 import math
@@ -33,6 +32,7 @@ from llm_jev.dataloader import mlm
 from llm_jev.dataloader import schema
 from llm_jev.dataloader import storage
 from llm_jev.evaluation import evaluate
+from llm_jev.evaluation import evaluate_mlm
 from llm_jev.modeling import encoder
 from llm_jev.train import mlm_config
 
@@ -53,41 +53,19 @@ def fitting_rows(acc, train: list[schema.Example], tok: Any, fmt: mlm.Format,
     return [i for i in range(len(train)) if lengths[i] <= max_tokens]
 
 
-@torch.no_grad()
-def run_eval(acc, scorer, tok: Any, fmt: mlm.Format, rows: list[schema.Example],
-             mixed_precision: str) -> dict[str, dict[str, float]]:
-    """Per-source accuracy, mean q(gold) and loss (options in release order).
-
-    Rows are split over the processes and gathered. "ALL" pools every row;
-    "MACRO" averages the sources.
-    """
+def run_eval(acc, scorer, tok: Any, fmt: mlm.Format,
+             rows: list[schema.Example]) -> dict[str, dict[str, float]]:
+    """evaluation.evaluate_mlm metrics (the decoder's format: "ALL" averages
+    the datasets), with the rows split over the processes and gathered."""
     from accelerate.utils import gather_object
 
     model = acc.unwrap_model(scorer)
     was_training = model.training
     model.eval()
-    autocast = (torch.autocast(acc.device.type, dtype=torch.bfloat16)
-                if mixed_precision == "bf16" else contextlib.nullcontext())
-    mine = []
-    for r in rows[acc.process_index::acc.num_processes]:
-        ex = mlm.encode(r, tok, fmt)
-        with autocast:
-            s = encoder.score(model, ex, acc.device)
-        q = s.softmax(0)
-        mine.append((r.source, float(s.argmax() == ex["gold"]),
-                     q[ex["gold"]].item(), -q[ex["gold"]].log().item()))
+    mine = evaluate_mlm.records(model, tok, fmt, rows[acc.process_index::acc.num_processes],
+                                str(acc.device), log_every=float("inf"))
     model.train(was_training)
-    by: dict[str, list] = collections.defaultdict(list)
-    for source, *values in gather_object(mine):
-        by[source].append(values)
-        by["ALL"].append(values)
-    out = {k: {"n": len(v), **{m: sum(x[j] for x in v) / len(v)
-                               for j, m in enumerate(("accuracy", "q_gold", "loss"))}}
-           for k, v in sorted(by.items())}
-    sources = [k for k in out if k != "ALL"]
-    out["MACRO"] = {m: sum(out[k][m] for k in sources) / len(sources)
-                    for m in ("accuracy", "q_gold", "loss")}
-    return out
+    return evaluate_mlm.summarize(gather_object(mine))
 
 
 def main() -> None:
@@ -156,17 +134,16 @@ def main() -> None:
 
     def evaluate_and_log(step: int, tag: str) -> None:
         t0 = time.time()
-        metrics = run_eval(acc, scorer, tok, fmt, evals, cfg.run.mixed_precision)
+        metrics = run_eval(acc, scorer, tok, fmt, evals)
         if acc.is_main_process:
             (out / f"eval_{tag}.json").write_text(json.dumps(metrics, indent=2))
         acc.log({f"eval/{k}/{m}": x for k, v in metrics.items()
                  for m, x in v.items()}, step=step)
-        logger.info("eval {} at step {} ({:.1f}m): ALL acc {:.4f} q_gold {:.4f} | "
-                    "MACRO acc {:.4f} | {}", tag, step, (time.time() - t0) / 60,
-                    metrics["ALL"]["accuracy"], metrics["ALL"]["q_gold"],
-                    metrics["MACRO"]["accuracy"],
+        logger.info("eval {} at step {} ({:.1f}m): ALL acc {:.4f} log_p_gold {:.4f} | {}",
+                    tag, step, (time.time() - t0) / 60, metrics["ALL"]["accuracy"],
+                    metrics["ALL"]["log_p_gold"],
                     " ".join(f"{k} {v['accuracy']:.2f}" for k, v in metrics.items()
-                             if k not in ("ALL", "MACRO")))
+                             if k != "ALL"))
 
     if not cfg.run.skip_base_eval:
         evaluate_and_log(0, "base")

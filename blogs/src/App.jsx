@@ -8,6 +8,7 @@ import ContextCite from "./sections/ContextCite.jsx";
 // import AT2 from "./sections/AT2.jsx";
 // import TryIt from "./sections/TryIt.jsx";
 import SpanPipeline from "./sections/SpanPipeline.jsx";
+import Encoder from "./sections/Encoder.jsx";
 
 // Sections in reading order; later ones are added as the walkthrough grows.
 const SECTIONS = [
@@ -22,6 +23,7 @@ const SECTIONS = [
   // the Try it API (blogs/server.py) needs a GPU, so the section is off for the static build
   // { n: 9, title: "Try it", id: "try", ready: !import.meta.env.PROD },
   { n: 8, title: "Span data", id: "spans", ready: true },
+  { n: 9, title: "Encoder", id: "encoder", ready: true },
 ];
 
 export default function App() {
@@ -53,6 +55,7 @@ export default function App() {
       {/* <AT2 /> */}
       {/* {!import.meta.env.PROD && <TryIt />} */}
       <SpanPipeline />
+      <Encoder />
     </div>
   );
 }

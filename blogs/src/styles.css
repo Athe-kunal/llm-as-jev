@@ -17,6 +17,7 @@
   --c6: #15803d;
   --gold-bg: rgba(21, 128, 61, 0.11);
   --m1: #2a78d6; --m2: #eb6834; --m3: #1baf7a; /* model series, validated on #fff */
+  --e1: #6250d6; --e2: #eda100; --e3: #e87ba4; --e4: #008300; /* encoder sweep runs (slots 7, 4, 5, 6): validated as a set on #fff; legend + table carry identity */
   --shadow: 0 1px 2px rgba(22, 26, 46, 0.05), 0 12px 32px -12px rgba(22, 26, 46, 0.18);
   --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
@@ -41,6 +42,7 @@
     --c6: #4ade80;
     --gold-bg: rgba(74, 222, 128, 0.13);
     --m1: #3987e5; --m2: #d95926; --m3: #199e70; /* validated on the dark surface */
+    --e1: #9085e9; --e2: #c98500; --e3: #d55181; --e4: #008300; /* encoder sweep runs, validated on the dark surface (green/yellow CVD 6.9: legend + table required) */
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -16px rgba(0, 0, 0, 0.7);
     color-scheme: dark;
   }
@@ -62,6 +64,7 @@
   --c6: #4ade80;
   --gold-bg: rgba(74, 222, 128, 0.13);
     --m1: #3987e5; --m2: #d95926; --m3: #199e70; /* validated on the dark surface */
+    --e1: #9085e9; --e2: #c98500; --e3: #d55181; --e4: #008300; /* encoder sweep runs, validated on the dark surface (green/yellow CVD 6.9: legend + table required) */
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -16px rgba(0, 0, 0, 0.7);
   color-scheme: dark;
 }
@@ -816,3 +819,6 @@ a.sec { text-decoration: none; }
 .ab-whisker { stroke-width: 2; opacity: 0.55; stroke-linecap: round; }
 .ab-dots .rs-dot { stroke: var(--surface); stroke-width: 2; }
 .ab-table th { white-space: nowrap; }
+
+.rs-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+.rs-key-none { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
