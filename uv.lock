@@ -1496,6 +1496,7 @@ dependencies = [
     { name = "loguru" },
     { name = "nltk" },
     { name = "nvitop" },
+    { name = "omegaconf" },
     { name = "peft" },
     { name = "pydantic" },
     { name = "scikit-learn" },
@@ -1530,6 +1531,7 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'profile'" },
     { name = "nltk", specifier = ">=3.10.3" },
     { name = "nvitop", specifier = ">=1.7.1" },
+    { name = "omegaconf", specifier = ">=2.3" },
     { name = "openai", marker = "extra == 'spans'", specifier = ">=1.50" },
     { name = "peft", specifier = "==0.21.0" },
     { name = "pydantic", specifier = ">=2" },
@@ -1539,7 +1541,7 @@ requires-dist = [
     { name = "tensordict", specifier = ">=0.14.3" },
     { name = "torch", specifier = "==2.9.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchvision", specifier = "==0.24.0", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "transformers", specifier = "==5.17.0" },
+    { name = "transformers", specifier = "==5.20.2" },
 ]
 provides-extras = ["spans", "dev", "profile"]
 
@@ -2398,6 +2400,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ee/86/81c262e9c4adee00dd4eb968c8a7c4b2395a9f466299b87f5f422e503609/nvitop-1.7.1.tar.gz", hash = "sha256:3803112a1d4a7e01989ae5bf5a5e42f0366bf791d68ad8e3b1859d7ed747140c", size = 222479, upload-time = "2026-07-10T11:26:33.894Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/4b/ca5d6242f27d0606b7f4fdf58bd5a150ed686a56eee4c1d3f967c6bdefea/nvitop-1.7.1-py3-none-any.whl", hash = "sha256:af757193bb41156d0154d7cc51957a287647092e78dc4f5e20bbec7d73819825", size = 207976, upload-time = "2026-07-10T11:26:31.603Z" },
+]
+
+[[package]]
+name = "omegaconf"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cc/10/1cabf3188a4d9684a06568c7fd76f9536eede625733c8399cf1f5337b83e/omegaconf-2.4.0.tar.gz", hash = "sha256:7e219a70bea371da250285b9c01c7db027bc421722799c2cc4ff14bc4a2a753b", size = 3544508, upload-time = "2026-10-09T12:44:02.326Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/bd/0d9f8247b0819385213d09564eda5c52d3673313c2414d51f72883ec24cd/omegaconf-2.4.0-py3-none-any.whl", hash = "sha256:f141a664c777582405e3cc6e0545ecc79429e79f844995b1a6e71c35946a025c", size = 254152, upload-time = "2026-10-09T12:43:59.764Z" },
 ]
 
 [[package]]
@@ -3825,7 +3839,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.17.0"
+version = "5.20.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -3839,9 +3853,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0e/9e/750649904a065007a838981785b2bd8d9ff26154c6c341ac67d0b7f82c68/transformers-5.17.0.tar.gz", hash = "sha256:a153be279169b55b92d8000bf4af294aed684503d091cca7804da2dd8a9de000", size = 9817878, upload-time = "2026-09-09T15:39:56.886Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/4e/3cd6f08cc84ee612d40f3cdb1649475e7c997f2d5cbd95ade8780708af62/transformers-5.20.2.tar.gz", hash = "sha256:080871e061546d720be57f5846fce426f46b44d61574907cc7404c2cba49d180", size = 10225379, upload-time = "2026-10-19T17:46:03.092Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e8/d0/c502b60d684adbd98a8dc7d5bb866842772b816ac4354e4608be240041ae/transformers-5.17.0-py3-none-any.whl", hash = "sha256:78ec1ce21579b38dfb83950a0658cd119f87212a2fcfdff478096ce9d6c03801", size = 12295140, upload-time = "2026-09-09T15:39:53.746Z" },
+    { url = "https://files.pythonhosted.org/packages/96/b6/724faefed06913dd3e42e0476fe2c42448675c42f687a12bf810aa098005/transformers-5.20.2-py3-none-any.whl", hash = "sha256:7ae75dbc1fb3922aff1b6c97b9e5479d6cf26fd86a8866bfb71324190479f807", size = 12844921, upload-time = "2026-10-19T17:45:59.293Z" },
 ]
 
 [[package]]

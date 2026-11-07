@@ -23,20 +23,24 @@ OFF_PATH = 3
 
 
 def user_message(
-    example: schema.Example, order: Sequence[int]
+    example: schema.Example, order: Sequence[int], template: str = "decision",
+    **values: Any,
 ) -> tuple[str, list[tuple[int, int]]]:
     """The paper's user message (prompts/decision.j2) and each part's (start, end) range in it.
 
-    Options are numbered from 1 in the given order.
+    Options are numbered from 1 in the given order. `template` picks another
+    prompt (e.g. "decision_mlm" for the encoder); `values` are its extra
+    variables (e.g. mask).
     """
     # Render with markers in place of the texts, then substitute the texts:
     # searching for the texts could match the template's own words.
     marks = [f"\x00{i}\x00" for i in range(len(example.parts))]
     marked = prompts.render(
-        "decision",
+        template,
         parts=[schema.Part(p.name, m) for p, m in zip(example.parts, marks)],
         question=example.question,
         options=[example.options[i] for i in order],
+        **values,
     )
     pieces, where, cursor, length = [], [], 0, 0
     for part, mark in zip(example.parts, marks):

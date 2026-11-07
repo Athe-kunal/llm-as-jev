@@ -10,7 +10,7 @@ dependencies = [
     "nvitop>=1.7.1",
     "torch==2.9.0",
     "torchvision==0.24.0",
-    "transformers==5.17.0",
+    "transformers==5.20.2",  # >= 5.20: native UltraBERT
     "peft==0.21.0",
     "accelerate==1.15.0",
     "tensorboard",
@@ -22,6 +22,7 @@ dependencies = [
     "tensordict>=0.14.3",
     "nltk>=3.10.3",
     "scikit-learn>=1.9.1",
+    "omegaconf>=2.3",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +32,7 @@ profile = ["matplotlib"]              # llm_jev.profiling (memory timeline HTML)
 
 [project.scripts]
 llm-jev-train = "llm_jev.train.train:main"
+llm-jev-train-mlm = "llm_jev.train.train_mlm:main"
 llm-jev-evaluate = "llm_jev.evaluation.evaluate:main"
 llm-jev-benchmarks = "llm_jev.evaluation.benchmarks:main"
 llm-jev-attribution = "llm_jev.evaluation.attribution:main"
