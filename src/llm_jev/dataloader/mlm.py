@@ -29,6 +29,9 @@ class Format:
         the `mask` variable exactly once per option, in option order.
       yes_token: Verbalizer: s_k is the MLM logit of this single token at mask k.
       no_token: If set, s_k = logit(yes_token) - logit(no_token) at mask k.
+      no_word: The negative word the prompt's instruction names, when it
+        differs from no_token (e.g. scored on yes_token alone but described as
+        " correct" / " incorrect"). Default: no_token, else " no".
 
     (Not `yes` / `no`: YAML reads those bare words as booleans, even as keys.)
     """
@@ -36,6 +39,11 @@ class Format:
     template: str = "decision_mlm"
     yes_token: str = " yes"
     no_token: str | None = None
+    no_word: str | None = None
+
+    def words(self) -> tuple[str, str]:
+        """The (positive, negative) words the instruction names, without leading spaces."""
+        return self.yes_token.strip(), (self.no_word or self.no_token or " no").strip()
 
 
 def _single_token(tokenizer: Any, text: str) -> int:
@@ -62,8 +70,10 @@ def build_prompt(
     """
     if tokenizer.mask_token is None:
         raise ValueError("the tokenizer has no mask token")
+    yes_word, no_word = fmt.words()
     return answers.user_message(
-        example, order, fmt.template, mask=tokenizer.mask_token)
+        example, order, fmt.template, mask=tokenizer.mask_token,
+        yes_word=yes_word, no_word=no_word)
 
 
 def encode(

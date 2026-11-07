@@ -13,7 +13,9 @@ prompt format, so a model is always scored the way it was trained.
 
 import argparse
 import collections
+import json
 import pathlib
+import random
 import time
 from typing import Any
 
@@ -59,18 +61,16 @@ def is_packed(scorer) -> bool:
 
 
 @torch.no_grad()
-def records(scorer, tok: Any, fmt: mlm.Format, rows: list[schema.Example],
-            device: str = "cuda", log_every: float = 60.0,
-            budget: int = 32768) -> list[tuple]:
-    """(source, correct, log q(gold), top option) per row, options in release order.
+def score_encoded(scorer, encoded: list[dict], device: str = "cuda", log_every: float = 60.0,
+                  budget: int = 32768) -> list[torch.Tensor]:
+    """s [K] per mlm.encode output, in order.
 
     On FA2 varlen (is_packed) rows are scored in packs of up to `budget`
     tokens (encoder_varlen.groups); otherwise one row per forward.
     """
-    encoded = [mlm.encode(r, tok, fmt) for r in rows]
     batches = (encoder_varlen.groups([len(e["input_ids"]) for e in encoded], budget)
-               if is_packed(scorer) else [[i] for i in range(len(rows))])
-    scores: list = [None] * len(rows)
+               if is_packed(scorer) else [[i] for i in range(len(encoded))])
+    scores: list = [None] * len(encoded)
     done, start, last = 0, time.time(), time.time()
     for batch in batches:
         with torch.autocast(torch.device(device).type, dtype=torch.bfloat16):
@@ -82,16 +82,53 @@ def records(scorer, tok: Any, fmt: mlm.Format, rows: list[schema.Example],
         for i, s in zip(batch, out):
             scores[i] = s
         done += len(batch)
-        if time.time() - last > log_every or done == len(rows):
+        if time.time() - last > log_every or done == len(encoded):
             last, el = time.time(), time.time() - start
-            logger.info("scored {}/{} rows, {:.1f}m, eta {:.1f}m", done, len(rows),
-                        el / 60, el / done * (len(rows) - done) / 60)
+            logger.info("scored {}/{} rows, {:.1f}m, eta {:.1f}m", done, len(encoded),
+                        el / 60, el / done * (len(encoded) - done) / 60)
+    return scores
+
+
+def records(scorer, tok: Any, fmt: mlm.Format, rows: list[schema.Example],
+            device: str = "cuda", log_every: float = 60.0,
+            budget: int = 32768) -> list[tuple]:
+    """(source, correct, log q(gold), top option) per row, options in release order."""
+    encoded = [mlm.encode(r, tok, fmt) for r in rows]
     out = []
-    for r, ex, s in zip(rows, encoded, scores):
+    for r, ex, s in zip(rows, encoded, score_encoded(scorer, encoded, device, log_every, budget)):
         logq = torch.log_softmax(s, 0)
         out.append((r.source, float(s.argmax() == ex["gold"]),
                     logq[ex["gold"]].item(), int(s.argmax())))
     return out
+
+
+def label_shares(scorer, tok: Any, fmt: mlm.Format, rows: list[schema.Example],
+                 shuffles: int = 3, max_labels: int = 5, device: str = "cuda",
+                 budget: int = 32768) -> dict[str, dict[str, dict[str, float]]]:
+    """Per dataset with one fixed label set (<= max_labels options), each label's
+    gold share and predicted share, with the options shuffled `shuffles` times.
+
+    A model that prefers a label (not a slot) shows predicted >> gold for it
+    whatever its position; shuffling rules out position bias. Datasets whose
+    options differ between rows (e.g. multiple-choice QA) are skipped.
+    """
+    by: dict[str, list] = collections.defaultdict(list)
+    for r in rows:
+        by[r.source].append(r)
+    fixed = {src: rs for src, rs in by.items()
+             if len({r.options for r in rs}) == 1 and len(rs[0].options) <= max_labels}
+    jobs = [(r, mlm.encode(r, tok, fmt, random.Random(f"labels:{r.id}:{k}")))
+            for rs in fixed.values() for r in rs for k in range(shuffles)]
+    scores = score_encoded(scorer, [ex for _, ex in jobs], device, float("inf"), budget)
+    gold: dict = collections.defaultdict(collections.Counter)
+    pred: dict = collections.defaultdict(collections.Counter)
+    for (r, ex), s in zip(jobs, scores):
+        gold[r.source][r.options[r.gold]] += 1
+        pred[r.source][r.options[ex["order"][int(s.argmax())]]] += 1
+    return {src: {label: {"gold": gold[src][label] / sum(gold[src].values()),
+                          "predicted": pred[src][label] / sum(pred[src].values())}
+                  for label in rs[0].options}
+            for src, rs in sorted(fixed.items())}
 
 
 def summarize(recs: list[tuple]) -> dict[str, dict[str, float]]:
@@ -126,6 +163,9 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=decoder_eval.SEED)
     parser.add_argument("--dtype", choices=["float32", "bfloat16"], default="float32",
                         help="weights (scoring runs under bf16 autocast either way)")
+    parser.add_argument("--label-shares", action="store_true",
+                        help="also write eval_<tag>_labels.json: gold vs predicted label shares "
+                             "under shuffled option orders (label bias, see label_shares)")
     parser.add_argument("--attention", help="override the run's model.attention, "
                         "e.g. varlen to score packed rows with FlashAttention-2")
     args = parser.parse_args()
@@ -138,6 +178,12 @@ def main() -> None:
     metrics = evaluate(scorer, tok, fmt, rows, budget=run_config(args.run).model.pack_tokens)
     decoder_eval.save(out, args.tag, metrics, [])
     decoder_eval.log_summary(args.tag, metrics)
+    if args.label_shares:
+        shares = label_shares(scorer, tok, fmt, rows, budget=run_config(args.run).model.pack_tokens)
+        (out / f"eval_{args.tag}_labels.json").write_text(json.dumps(shares, indent=2))
+        for src, labels in shares.items():
+            logger.info("{}: {}", src, " | ".join(
+                f"{l[:28]} gold {v['gold']:.2f} pred {v['predicted']:.2f}" for l, v in labels.items()))
 
 
 if __name__ == "__main__":

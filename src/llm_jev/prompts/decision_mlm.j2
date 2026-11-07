@@ -3,7 +3,7 @@ State: {% for part in parts %}
 
 {% endfor %}
 {{ question }}
-Mark the correct option with yes and every other option with no.
+Mark the correct option with {{ yes_word }} and every other option with {{ no_word }}.
 Options:
 {% for desc in options %}
 [{{ loop.index }}] {{ mask }} {{ desc }}

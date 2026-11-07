@@ -14,6 +14,7 @@ format:
   template: decision_mlm
   yes_token: " yes"
   no_token: null        # " no" scores logit(yes) - logit(no)
+  no_word: null         # negative word the instruction names (default: no_token, else " no")
 
 data:
   source: Athekunal/llm-jev-reason-long
