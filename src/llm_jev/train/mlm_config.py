@@ -36,6 +36,8 @@ class DataConfig:
     eval_split: str = "eval"
     max_tokens: int = 32768            # longer encoded rows are dropped
     eval_per: int = 100                # eval rows per source dataset
+    eval_seed: int = evaluate.SEED     # picks the eval rows; separate from run.seed so
+                                       # seed replicates are scored on the same rows
 
 
 @dataclasses.dataclass

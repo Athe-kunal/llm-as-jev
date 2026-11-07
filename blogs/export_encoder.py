@@ -15,6 +15,7 @@ Usage:
 import argparse
 import json
 import pathlib
+import statistics
 
 from omegaconf import OmegaConf
 from tensorboard.backend.event_processing import event_accumulator
@@ -29,6 +30,8 @@ BASELINES = [
 CURVES = ["loss", "accuracy", "grad_norm", "lr"]
 EXTERNAL = ("boolq", "mmlu", "mmlu_pro", "arc_challenge", "winogrande", "sciq")
 FEATURED_EPOCHS = 1  # the decoders were trained for one epoch
+DEFAULT_SEED = 20260922  # run.seed of the sweep; other seeds are replicates of a setting
+LATENCY = RUNS / "latency.json"  # profiling.decision_latency output (optional)
 
 
 def read_json(path: pathlib.Path):
@@ -62,6 +65,45 @@ def curves(folder: pathlib.Path) -> dict:
             for k in CURVES if f"train/{k}" in tags}
 
 
+def fold_seeds(encoders: list[dict]) -> list[dict]:
+    """One entry per (lr, epochs): the DEFAULT_SEED run, with every seed's totals under "seeds"."""
+    groups: dict[tuple, list[dict]] = {}
+    for m in encoders:
+        groups.setdefault((m["lr"], m["epochs"]), []).append(m)
+    out = []
+    for members in groups.values():
+        rep = next((m for m in members if m["seed"] == DEFAULT_SEED), members[0])
+        if len(members) > 1:
+            rep["seeds"] = [{"seed": m["seed"], "id": m["id"], "ALL": m["final"]["ALL"],
+                             "external_macro": (m["bench"] or {}).get("external_macro")}
+                            for m in sorted(members, key=lambda m: m["seed"] != DEFAULT_SEED)]
+            for key in ("ALL", "external_macro"):
+                vals = [x[key] for x in rep["seeds"] if x[key] is not None]
+                if len(vals) > 1:
+                    rep[f"seed_{key}"] = {"mean": statistics.fmean(vals), "sd": statistics.stdev(vals),
+                                          "n": len(vals)}
+        out.append(rep)
+    return out
+
+
+def latency(baselines: list[dict], encoders: list[dict]) -> list[dict] | None:
+    """Rows of the latency table (ms per decision), if LATENCY exists."""
+    data = read_json(LATENCY)
+    if data is None:
+        return None
+    names = {b["model"]: b["label"] for b in baselines}
+    names.update({f"runs/{m['id']}": "UltraBERT-380M" for m in encoders})
+    rows = []
+    for key, r in data["models"].items():
+        model, _, variant = key.partition(" (")
+        lat = r["latency"]
+        rows.append({"label": names.get(model, model), "variant": variant.rstrip(")") or "bf16 weights",
+                     "mean_ms": lat["mean_ms"], "median_ms": lat["median_ms"], "p90_ms": lat["p90_ms"],
+                     "buckets": {k: v["mean_ms"] for k, v in lat.items() if k.startswith("ms_tokens_")},
+                     "batched_rows_per_s": (r.get("throughput") or {}).get("rows_per_s")})
+    return rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default="blogs/data/encoder.json")
@@ -76,7 +118,7 @@ def main() -> None:
         if final is None:
             continue  # still training
         encoders.append({
-            "id": folder.name, "model": cfg.model.id, "lr": cfg.optim.lr,
+            "id": folder.name, "model": cfg.model.id, "lr": cfg.optim.lr, "seed": cfg.run.seed,
             "batch_size": cfg.optim.batch_size, "epochs": cfg.run.epochs,
             "format": OmegaConf.to_container(cfg.format),
             "base": accuracies(read_json(folder / "eval_base.json")),
@@ -98,6 +140,7 @@ def main() -> None:
         m["bench"] = with_totals(m["bench"], benches, bench=True)
         if m.get("base"):
             m["base"] = with_totals(m["base"], datasets)
+    encoders = fold_seeds(encoders)
     # The featured run matches the decoders' budget (one epoch); longer runs are listed, not featured.
     same_budget = [m for m in encoders if m["epochs"] == FEATURED_EPOCHS] or encoders
     best = max(same_budget, key=lambda m: m["final"]["ALL"])
@@ -108,7 +151,8 @@ def main() -> None:
 
     out = pathlib.Path(args.out)
     out.write_text(json.dumps({"datasets": datasets, "benchmarks": benches,
-                               "encoders": encoders, "baselines": baselines}))
+                               "encoders": encoders, "baselines": baselines,
+                               "latency": latency(baselines, encoders)}))
     print(f"{len(encoders)} encoder runs (best {best['id']}, ALL {best['final']['ALL']:.3f}), "
           f"{len(baselines)} baselines, {len(datasets)} datasets -> {out}")
 

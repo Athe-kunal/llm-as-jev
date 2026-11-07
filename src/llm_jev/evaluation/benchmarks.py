@@ -168,6 +168,8 @@ def main() -> None:
     which.add_argument("--encoder", help="a train_mlm run directory "
                        "(encoder decision model; see evaluation.evaluate_mlm)")
     parser.add_argument("--adapter", help="a saved LoRA adapter (else the base)")
+    parser.add_argument("--encoder-attention", help="with --encoder: override the run's "
+                        "model.attention (e.g. varlen for packed FlashAttention-2)")
     parser.add_argument("--out", required=True)
     parser.add_argument("--tag", default="base")
     parser.add_argument("--benchmarks", nargs="+", default=list(LOADERS),
@@ -191,7 +193,7 @@ def main() -> None:
     if args.encoder:
         from llm_jev.evaluation import evaluate_mlm
 
-        scorer, tok, fmt = evaluate_mlm.load_run(args.encoder)
+        scorer, tok, fmt = evaluate_mlm.load_run(args.encoder, attention=args.encoder_attention)
         metrics, examples = evaluate_mlm.evaluate(scorer, tok, fmt, rows), []
     else:
         gen_rows = evaluate.subset(rows, args.gen_per, SEED)

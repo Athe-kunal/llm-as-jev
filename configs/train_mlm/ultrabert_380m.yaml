@@ -20,6 +20,7 @@ data:
   eval_split: eval
   max_tokens: 32768
   eval_per: 100
+  eval_seed: 20260922  # the eval rows; keep fixed across run.seed replicates
 
 optim:
   lr: 8.0e-6

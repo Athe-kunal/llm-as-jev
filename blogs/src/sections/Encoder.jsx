@@ -26,6 +26,7 @@ const [Q06, Q4] = d.baselines;
 const pct = (v, k = 1) => (v == null ? "–" : (v * 100).toFixed(k));
 const signed = (v, k = 1) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(k)}`;
 const lrText = (lr) => lr.toExponential(1).replace("e-", "e−");
+const seedText = (s) => `${pct(s.mean)} ± ${pct(s.sd)} (n=${s.n})`;
 const runText = (m) => `lr ${lrText(m.lr)}${m.epochs > 1 ? ` · ${m.epochs} epochs` : ""}`;
 
 function Delta({ v }) {
@@ -50,6 +51,7 @@ function Cards() {
           <p className="rs-big">{pct(c.m.final.ALL)}<small>held-out ALL, %</small></p>
           <dl>
             <dt>external macro</dt><dd>{pct(c.m.bench?.external_macro)}%</dd>
+            {c.m.seed_ALL && <><dt>{c.m.seed_ALL.n} seeds, ALL</dt><dd>{seedText(c.m.seed_ALL)}</dd></>}
             <dt>Banking77 / JevBench</dt><dd>{pct(c.m.bench?.banking77)} / {pct(c.m.bench?.jevbench)}</dd>
             <dt>recipe</dt><dd>{c.note}</dd>
           </dl>
@@ -108,7 +110,7 @@ function Sweep() {
         <thead>
           <tr>
             <th>Run</th><th className="rs-sub">lr</th><th className="rs-sub">epochs</th><th className="rs-sub">steps</th>
-            <th className="rs-sub">ALL before</th><th className="rs-sub">ALL after</th><th className="rs-sub">External macro</th>
+            <th className="rs-sub">ALL before</th><th className="rs-sub">ALL after</th><th className="rs-sub">External macro</th><th className="rs-sub">Seeds: ALL / external</th>
           </tr>
         </thead>
         <tbody>
@@ -117,11 +119,53 @@ function Sweep() {
               <th>{m.color ? <i className="rs-key" style={{ background: m.color }} /> : <i className="rs-key rs-key-none" />}{m.id}{m.best ? " (featured)" : ""}</th>
               <td>{lrText(m.lr)}</td><td>{m.epochs}</td><td>{m.steps ?? "–"}</td>
               <td className="rs-b">{pct(m.base?.ALL)}</td><td>{pct(m.final.ALL)}</td><td>{pct(m.bench?.external_macro)}</td>
+              <td className="rs-b">{m.seed_ALL ? `${seedText(m.seed_ALL)} / ${m.seed_external_macro ? seedText(m.seed_external_macro) : "–"}` : "1 seed"}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Milliseconds per decision on the same held-out rows, one row at a time (and batched, where a path exists). */
+function Latency() {
+  const rows = d.latency;
+  if (!rows) return null;
+  const buckets = Object.keys(rows[0].buckets);
+  const label = (k) => "ms, " + k.replace("ms_tokens_", "").replace("-inf", "+").replace("-", "–") + " tok";
+  return (
+    <>
+      <h3 className="sub-h">Time per decision</h3>
+      <p className="lede small">
+        Milliseconds to score one held-out row, one row at a time, on one A100 (the same rows for every model). The
+        decoders prefill the prompt and walk the answer trie; the encoder runs one forward pass. Batched throughput is
+        what evaluation uses; the encoder has no batched path yet (FA2 varlen packing is pending), so its column is empty.
+      </p>
+      <div className="results-wrap">
+        <table className="rs-table">
+          <thead>
+            <tr>
+              <th>Model</th><th className="rs-sub">Weights</th><th className="rs-sub">Median ms</th>
+              <th className="rs-sub">Mean ms</th><th className="rs-sub">p90 ms</th>
+              {buckets.map((k) => <th key={k} className="rs-sub">{label(k)}</th>)}
+              <th className="rs-sub">Batched rows/s</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label + r.variant}>
+                <th>{r.label}</th><td className="rs-b">{r.variant}</td>
+                <td>{r.median_ms.toFixed(0)}</td><td>{r.mean_ms.toFixed(0)}</td><td>{r.p90_ms.toFixed(0)}</td>
+                {buckets.map((k) => <td key={k}>{r.buckets[k] == null ? "–" : r.buckets[k].toFixed(0)}</td>)}
+                <td>{r.batched_rows_per_s == null ? "–" : r.batched_rows_per_s.toFixed(1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="rs-note">Measured with llm_jev.profiling.decision_latency (GPU synchronized around every row, 20 warm-up rows untimed).</p>
+    </>
   );
 }
 
@@ -160,6 +204,8 @@ export default function Encoder() {
           <p className="rs-note">The same seeded samples as section 5. External macro is the mean over the six external sets.</p>
         </>
       )}
+
+      <Latency />
 
       <h3 className="sub-h">Learning-rate sweep</h3>
       <p className="lede small">

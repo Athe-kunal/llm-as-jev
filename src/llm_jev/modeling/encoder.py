@@ -13,6 +13,8 @@ from torch import nn
 
 from llm_jev.dataloader import mlm
 
+VARLEN = "varlen"  # model.attention value for modeling.encoder_varlen
+
 
 def load(model_id: str, revision: str | None = None,
          attention: str = "sdpa", device: str = "cuda",
@@ -22,7 +24,9 @@ def load(model_id: str, revision: str | None = None,
     Args:
       model_id: Hugging Face id or local path.
       revision: Hub commit, branch or tag (None: latest).
-      attention: transformers attn_implementation ("sdpa", "eager", ...).
+      attention: transformers attn_implementation ("sdpa", "eager", ...), or
+        VARLEN for FlashAttention-2 varlen (encoder_varlen: no attention
+        masks; rows can be packed). An unpacked call is one row.
       dtype: bf16 for inference; fp32 for full fine-tuning (bf16 weights
         round away updates of ~lr = 1e-5), with bf16 autocast for speed.
     """
@@ -30,7 +34,11 @@ def load(model_id: str, revision: str | None = None,
 
     model = AutoModelForMaskedLM.from_pretrained(
         model_id, revision=revision, dtype=dtype,
-        attn_implementation=attention)
+        attn_implementation="sdpa" if attention == VARLEN else attention)
+    if attention == VARLEN:
+        from llm_jev.modeling import encoder_varlen
+
+        encoder_varlen.use(model)
     for name in ("model", "head", "decoder"):
         if not hasattr(model, name):
             raise ValueError(f"{type(model).__name__} has no .{name}; "
@@ -74,9 +82,14 @@ class Scorer(nn.Module):
         self.model = model
         self.yes, self.no = mlm.verbalizer_ids(tokenizer, fmt)
 
-    def forward(self, input_ids: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
-        """input_ids [1, N], masks [K] positions -> s [K] in fp32."""
-        hidden = self.model.model(input_ids=input_ids).last_hidden_state[0]  # [N, d]
+    def forward(self, input_ids: torch.Tensor, masks: torch.Tensor, **model_kwargs) -> torch.Tensor:
+        """input_ids [1, N], masks [K] positions -> s [K] in fp32.
+
+        model_kwargs go to the encoder's forward and on to its attention
+        function (e.g. position_ids, cu_seqlens, max_seqlen for packed rows,
+        see encoder_varlen).
+        """
+        hidden = self.model.model(input_ids=input_ids, **model_kwargs).last_hidden_state[0]  # [N, d]
         return option_scores(mask_logits(self.model, hidden[masks]), self.yes, self.no)
 
 

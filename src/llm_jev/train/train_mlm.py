@@ -105,7 +105,7 @@ def main() -> None:
     logger.info("{} of {} training rows are over {} tokens, dropped",
                 len(train) - len(rows), len(train), cfg.data.max_tokens)
     evals = evaluate.subset(storage.load_examples(cfg.data.source, cfg.data.eval_split),
-                            cfg.data.eval_per, cfg.run.seed)
+                            cfg.data.eval_per, cfg.data.eval_seed)
 
     model = encoder.load(cfg.model.id, cfg.model.revision, cfg.model.attention,
                          device=str(device), dtype=torch.float32)
