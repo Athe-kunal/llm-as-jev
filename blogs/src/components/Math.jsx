@@ -21,15 +21,16 @@ export function Part({ label, children }) {
 /** The row's sentences as running text, each tinted by value[j] (diverging
  *  around 0), dropped sentences struck through, gold sentences underlined,
  *  sentences in `marked` (a Set) outlined; scrollToMarked scrolls the box to
- *  the first outlined one. */
-export function Doc({ sentences, value = null, keep = null, selected = null, marked = null, onSelect = null, maxHeight = 520, scrollToMarked = false }) {
+ *  the first outlined one, scrollToGold to the first gold one. */
+export function Doc({ sentences, value = null, keep = null, selected = null, marked = null, onSelect = null, maxHeight = 520, scrollToMarked = false, scrollToGold = false }) {
   const max = value ? Math.max(...value.map(Math.abs), 1e-9) : 1;
   const box = useRef(null);
   useEffect(() => {
     // bring the first outlined sentence into view inside the box (not the page)
-    const el = scrollToMarked && box.current?.querySelector(".dsent.marked");
+    const el = (scrollToMarked && box.current?.querySelector(".dsent.marked"))
+      || (scrollToGold && box.current?.querySelector(".dsent.gold"));
     if (el) box.current.scrollTo({ top: Math.max(el.offsetTop - 40, 0), behavior: "smooth" });
-  }, [scrollToMarked, marked]);
+  }, [scrollToMarked, scrollToGold, marked, sentences]);
   return (
     <div className="doc" style={{ maxHeight }} ref={box}>
       {sentences.map((s, j) => {

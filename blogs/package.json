@@ -16,7 +16,7 @@
     "data:ablation": "cd .. && .venv/bin/python blogs/export_ablation.py",
     "data:encoder": "cd .. && .venv/bin/python blogs/export_encoder.py",
     "data:at2": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/export_at2.py",
-    "api": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-0} PYTHONPATH=src .venv/bin/python blogs/server.py --port 8767"
+    "api": "cd .. && CUDA_VISIBLE_DEVICES=${GPU:-2} .venv/bin/python blogs/server.py --port 8767 ${RUN:+--run $RUN} ${ATTENTION:+--attention $ATTENTION}"
   },
   "dependencies": {
     "framer-motion": "11.11.17",

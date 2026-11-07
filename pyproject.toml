@@ -29,6 +29,7 @@ dependencies = [
 spans = ["openai>=1.50"]               # llm_jev.span_generation (vLLM server, OpenAI API)
 dev = ["pytest", "hypothesis"]
 profile = ["matplotlib"]              # llm_jev.profiling (memory timeline HTML)
+blog = ["fastapi>=0.115", "uvicorn>=0.30"]  # blogs/server.py (the "Try it" section's local API)
 
 [project.scripts]
 llm-jev-train = "llm_jev.train.train:main"

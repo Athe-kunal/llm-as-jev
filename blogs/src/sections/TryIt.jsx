@@ -18,6 +18,7 @@ async function api(path) {
 }
 
 export default function TryIt() {
+  const [info, setInfo] = useState(null); // /api/info: the loaded model and whether it can cite
   const [datasets, setDatasets] = useState([]);
   const [source, setSource] = useState("contractnli");
   const [spansOnly, setSpansOnly] = useState(true);
@@ -33,8 +34,16 @@ export default function TryIt() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api("/api/datasets").then(setDatasets).catch((e) => setError(e.message));
+    api("/api/info")
+      .then((i) => {
+        setInfo(i);
+        if (!i.cite) setCite(false); // an encoder server has no ContextCite yet
+      })
+      .catch(() => setInfo({ cite: true, kind: "decoder" })) // an older server without /api/info
+      .finally(() => api("/api/datasets").then(setDatasets).catch((e) => setError(e.message)));
   }, []);
+  const canCite = info?.cite !== false;
+  const encoder = info?.kind === "encoder";
 
   const chosen = datasets.find((d) => d.id === source);
   // the evidence filter applies only where the dataset's eval rows have gold spans
@@ -47,7 +56,7 @@ export default function TryIt() {
     try {
       const { id } = await api(`/api/sample?source=${source}&spans=${withSpans ? 1 : 0}`);
       setRow(await api(`/api/row?id=${encodeURIComponent(id)}&model=${encodeURIComponent(model.trim())}`));
-      if (cite) {
+      if (cite && canCite) {
         setAttr("loading");
         setAttr(await api(query(id, ablations, removal)));
       }
@@ -56,7 +65,7 @@ export default function TryIt() {
     } finally {
       setBusy(false);
     }
-  }, [source, withSpans, ablations, removal, model, cite]);
+  }, [source, withSpans, ablations, removal, model, cite, canCite]);
 
   // re-run ContextCite on the current row with another ablation count or removal
   const rerun = useCallback(async (n, m) => {
@@ -90,13 +99,21 @@ export default function TryIt() {
   };
 
   useEffect(() => {
-    if (datasets.length) next();
-  }, [datasets.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (datasets.length && info) next();
+  }, [datasets.length, info]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <section className="trie-section" id="try">
-      <p className="eyebrow">9 · Try it</p>
+      <p className="eyebrow">10 · Try it</p>
       <h2>Random eval rows, live</h2>
+      {encoder ? (
+        <p className="lede small">
+          {info.model} ({info.run}, {info.attention} attention), running on this machine. Each row is scored in one forward
+          pass: one <code>&lt;|mask|&gt;</code> per option, the logit of “{info.format?.yes_token?.trim()}” at each mask, a softmax
+          over the options. The bars are those probabilities; amber underline in the document: the dataset’s gold evidence
+          (only some datasets have it), scrolled into view.
+        </p>
+      ) : (
       <p className="lede small">
         {row ? row.model : "The trained decision model"}, running on this machine. Each row is answered with the guided decoder, then explained by ContextCite in its
         one-pass form: the prompt is packed with many copies of the question (about two per sentence, 32 to 256), each blind to a
@@ -104,6 +121,7 @@ export default function TryIt() {
         underline: the dataset's gold evidence; outlined: the top 3 sentences, scrolled into view; green and red tint: sentences
         that raise and lower the answer's logit.
       </p>
+      )}
       <div className="try-bar">
         <label className="try-field">
           <span>Dataset</span>
@@ -115,16 +133,25 @@ export default function TryIt() {
             ))}
           </select>
         </label>
-        <label className="try-field">
-          <span>Model (HF id or path)</span>
-          <input id="try-model" type="text" value={model} spellCheck={false} placeholder={DEFAULT_MODEL}
-                 onChange={(e) => setModel(e.target.value)}
-                 onKeyDown={(e) => e.key === "Enter" && model.trim() && !busy && next()} />
-        </label>
-        <label className="try-check">
-          <input id="try-cite" type="checkbox" checked={cite} onChange={(e) => toggleCite(e.target.checked)} />
-          citations (ContextCite)
-        </label>
+        {encoder ? (
+          <label className="try-field">
+            <span>Run (restart the API with RUN=… to switch)</span>
+            <input id="try-model" type="text" value={info.run} readOnly spellCheck={false} />
+          </label>
+        ) : (
+          <label className="try-field">
+            <span>Model (HF id or path)</span>
+            <input id="try-model" type="text" value={model} spellCheck={false} placeholder={DEFAULT_MODEL}
+                   onChange={(e) => setModel(e.target.value)}
+                   onKeyDown={(e) => e.key === "Enter" && model.trim() && !busy && next()} />
+          </label>
+        )}
+        {canCite && (
+          <label className="try-check">
+            <input id="try-cite" type="checkbox" checked={cite} onChange={(e) => toggleCite(e.target.checked)} />
+            citations (ContextCite)
+          </label>
+        )}
         <label className="try-check">
           <input id="try-spans" type="checkbox" checked={withSpans} disabled={!chosen?.withSpans}
                  onChange={(e) => setSpansOnly(e.target.checked)} />
@@ -147,7 +174,9 @@ export default function TryIt() {
         {row && (
           <motion.div key={row.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
             <Answer row={row} />
-            {cite && <Explain row={row} res={attr} ablations={ablations} removal={removal} onRerun={rerun} busy={busy} />}
+            {cite && canCite
+              ? <Explain row={row} res={attr} ablations={ablations} removal={removal} onRerun={rerun} busy={busy} />
+              : <Evidence row={row} />}
           </motion.div>
         )}
       </AnimatePresence>
@@ -179,8 +208,39 @@ function Answer({ row }) {
         {row.options.length > shown.length && <span className="viz-label">+ {row.options.length - shown.length} less likely options</span>}
       </div>
       <div className={right ? "verdict ok" : "verdict bad"}>
-        {right ? "correct" : "wrong"} · answer {row.answer + 1}] · {row.seconds.toFixed(2)} s · {row.sentences.length} sentences
+        {right ? "correct" : "wrong"} · answer {row.answer + 1}] · {row.seconds < 1 ? `${(row.seconds * 1000).toFixed(0)} ms` : `${row.seconds.toFixed(2)} s`}
+        {row.tokens ? ` · ${row.tokens.toLocaleString("en-US")} tokens` : ""} · {row.sentences.length} sentence{row.sentences.length === 1 ? "" : "s"}
       </div>
+    </div>
+  );
+}
+
+/** The row's document with the dataset's gold evidence underlined (no attribution). */
+function Evidence({ row }) {
+  const gold = row.sentences.filter((s) => s.gold).length;
+  return (
+    <div className="try-panel">
+      <div className="try-head">
+        <div>
+          <h3>Document</h3>
+          <span className="viz-label">
+            {row.hasSpans
+              ? `amber: the ${gold} sentence${gold === 1 ? "" : "s"} holding the dataset's gold evidence`
+              : "no gold evidence in this dataset: the text as the model read it"}
+          </span>
+        </div>
+      </div>
+      {row.parts.map((name, p) => {
+        const sentences = row.sentences.filter((s) => s.part === p);
+        return (
+          <div key={p} className="try-part">
+            {row.parts.length > 1 && <span className="viz-label">{name}</span>}
+            {sentences.length
+              ? <Doc sentences={sentences} maxHeight={420} scrollToGold />
+              : <div className="try-plain">{row.partTexts[p]}</div>}
+          </div>
+        );
+      })}
     </div>
   );
 }
