@@ -1,0 +1,31 @@
+# Evidence head on the frozen featured UltraBERT run: marks the document tokens that
+# support an answer. Override on the command line, e.g. data.labels=gold out=runs/x
+encoder:
+  run: runs/ultrabert_380m_lr1.5e-5
+  attention: varlen
+
+data:
+  source: data/splits/reason_long_nimble
+  split: train
+  labels: gold+generated     # or gold; gold wins where both exist
+  generated_repo: Athekunal/llm-jev-reason-long
+  generated_file: spans/train.parquet
+  datasets: null             # every dataset that has labels
+  val_frac: 0.05
+  eval_split: eval
+  eval_per: 50               # the attribution_mlm rows, for direct comparison
+  eval_seed: 0
+
+head:
+  width: 512
+  dropout: 0.1
+
+train:
+  epochs: 3
+  rows_per_step: 16
+  lr: 1.0e-3
+  weight_decay: 0.01
+  pos_weight: null           # n_negative / n_positive
+  seed: 0
+
+out: runs/evidence_ultrabert_380m

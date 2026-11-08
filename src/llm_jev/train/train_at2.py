@@ -26,11 +26,11 @@ import numpy as np
 from omegaconf import OmegaConf
 import torch
 
+from llm_jev.config import at2_config
 from llm_jev.dataloader import storage
 from llm_jev.evaluation import evaluate_mlm
 from llm_jev.modeling import context_cite
 from llm_jev.modeling import encoder_at2
-from llm_jev.train import at2_config
 from llm_jev.train import losses
 
 
@@ -124,7 +124,7 @@ def fit(cfg: at2_config.Config, path: pathlib.Path, out: pathlib.Path, device: s
 def main() -> None:
     """Builds the data if missing, fits theta, writes the outputs."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--config", required=True, help="YAML (train.at2_config)")
+    parser.add_argument("--config", required=True, help="YAML (config.at2_config)")
     parser.add_argument("overrides", nargs="*", help="dotlist, e.g. data.rows=500")
     args = parser.parse_args()
     raw = at2_config.load(args.config, args.overrides)

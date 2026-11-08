@@ -30,12 +30,12 @@ import numpy as np
 from scipy.stats import spearmanr
 import torch
 
+from llm_jev.config import at2_config
 from llm_jev.dataloader import storage
 from llm_jev.evaluation import evaluate_mlm
 from llm_jev.modeling import context_cite
 from llm_jev.modeling import encoder_at2
 from llm_jev.modeling import encoder_cite
-from llm_jev.train import at2_config
 
 TOP_K = (1, 3, 5)
 METRICS = ["ap", "top1", "precision", "recall", "lds", "drop@1", "drop@3", "drop@5", "seconds"]
@@ -58,6 +58,16 @@ def methods(scorer, tok, fmt, theta: torch.Tensor, budget: int) -> dict:
         "average_attention": lambda r: encoder_at2.attribute(scorer, tok, fmt, r, uniform),
         "contextcite": lambda r: encoder_cite.attribute(scorer, tok, fmt, r, budget=budget),
     }
+
+
+def select_rows(examples: list, per: int = 50, seed: int = 0) -> list:
+    """The evaluation rows: `per` rows per dataset with gold spans and >= 2 sentences (seeded)."""
+    by = collections.defaultdict(list)
+    for r in examples:
+        if r.has_spans and len(context_cite.split_sources(r)) >= 2:
+            by[r.source].append(r)
+    rng = random.Random(seed)
+    return [r for s in sorted(by) for r in rng.sample(by[s], min(per, len(by[s])))]
 
 
 def evaluate_row(scorer, tok, fmt, row, fns: dict, lds_masks: int = 32, seed: int = 1_000_000,
@@ -138,13 +148,8 @@ def main() -> None:
     at2_dir = pathlib.Path(args.at2)
     logger.add(at2_dir / f"attribution_{args.split}.log")
     scorer, tok, fmt, theta, budget = load(at2_dir)
-    by = collections.defaultdict(list)
-    for r in storage.load_examples(args.data, args.split):
-        if r.has_spans and len(context_cite.split_sources(r)) >= 2:
-            by[r.source].append(r)
-    rng = random.Random(args.seed)
-    rows = [r for s in sorted(by) for r in rng.sample(by[s], min(args.per, len(by[s])))]
-    logger.info("{} rows: {}", len(rows), {s: min(args.per, len(v)) for s, v in sorted(by.items())})
+    rows = select_rows(storage.load_examples(args.data, args.split), args.per, args.seed)
+    logger.info("{} rows: {}", len(rows), dict(collections.Counter(r.source for r in rows)))
     fns = methods(scorer, tok, fmt, theta, budget)
     results = []
     for i, r in enumerate(rows, 1):

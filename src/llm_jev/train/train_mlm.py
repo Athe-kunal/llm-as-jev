@@ -8,7 +8,7 @@ Usage:
 The encoder counterpart of train.py: one mask per option (dataloader.mlm),
 cross-entropy over the K masks (modeling.encoder), full fine-tuning with fp32
 weights under bf16 autocast. Every setting is in the YAML config
-(train.mlm_config); dotlist arguments override it, and the resolved config
+(config.mlm_config); dotlist arguments override it, and the resolved config
 is saved as <run.out>/config.yaml. Evaluates before training, at the end and
 every run.eval_every steps.
 """
@@ -28,13 +28,13 @@ import torch
 from torch.optim.lr_scheduler import LinearLR
 from torch.optim.lr_scheduler import SequentialLR
 
+from llm_jev.config import mlm_config
 from llm_jev.dataloader import mlm
 from llm_jev.dataloader import schema
 from llm_jev.dataloader import storage
 from llm_jev.evaluation import evaluate
 from llm_jev.evaluation import evaluate_mlm
 from llm_jev.modeling import encoder
-from llm_jev.train import mlm_config
 
 
 def row_rng(seed: int, epoch: int, i: int) -> random.Random:
@@ -71,7 +71,7 @@ def run_eval(acc, scorer, tok: Any, fmt: mlm.Format, rows: list[schema.Example],
 def main() -> None:
     """Trains run.epochs epochs and evaluates before and after."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--config", required=True, help="YAML (train.mlm_config)")
+    parser.add_argument("--config", required=True, help="YAML (config.mlm_config)")
     parser.add_argument("overrides", nargs="*", help="dotlist, e.g. optim.lr=1e-5")
     args = parser.parse_args()
     raw = mlm_config.load(args.config, args.overrides)

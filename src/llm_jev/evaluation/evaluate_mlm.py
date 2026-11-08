@@ -22,13 +22,13 @@ from typing import Any
 from loguru import logger
 import torch
 
+from llm_jev.config import mlm_config
 from llm_jev.dataloader import mlm
 from llm_jev.dataloader import schema
 from llm_jev.dataloader import storage
 from llm_jev.evaluation import evaluate as decoder_eval
 from llm_jev.modeling import encoder
 from llm_jev.modeling import encoder_varlen
-from llm_jev.train import mlm_config
 
 
 def load_run(run: str | pathlib.Path, device: str = "cuda",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Doc, TokenDoc } from "../components/Math.jsx";
+import { Doc, WordDoc } from "../components/Math.jsx";
 import { Toggle } from "../components/Controls.jsx";
 
 // auto: about two per sentence, a power of two in [32, 256] (masked_cite.ablation_count); or fixed
@@ -252,11 +252,14 @@ function Answer({ row }) {
 /** AT2 and ContextCite next to each other for the row's answer, gold evidence underlined in both. */
 function SideBySide({ row, res }) {
   const loading = res === "loading" || res === undefined;
-  const [unit, setUnit] = useState("tokens"); // AT2's view: per-token scores or summed per sentence
-  const panels = [
+  // token or sentence view per method: the evidence head marks tokens; AT2's token scores are near chance
+  const [units, setUnits] = useState({ evidence: "words", at2: "sentences" });
+  const all = [
+    ["evidence", "Evidence head", (m) => "trained on gold + generated evidence spans; one forward pass"],
     ["at2", "AT2", (m) => "one forward pass: learned head weights x attention from the answer's mask"],
     ["contextcite", "ContextCite", (m) => `${m.ablations} ablations (deleted sentences) + Lasso`],
   ];
+  const panels = loading ? all : all.filter(([key]) => key in res);
   // citations explain the answer with options in release order; row.order maps shown slots to it
   const shownAnswer = row.order ? row.order[row.answer] : row.answer;
   return (
@@ -268,12 +271,12 @@ function SideBySide({ row, res }) {
             <div className="try-head">
               <div>
                 <h3>{title}</h3>
-                <span className="viz-label">{m && m.w ? sub(m) : key === "at2" ? "one forward pass" : "ablations + Lasso"}</span>
+                <span className="viz-label">{m && m.w ? sub(m) : key === "contextcite" ? "ablations + Lasso" : "one forward pass"}</span>
               </div>
               <div className="try-head-right">
-                {key === "at2" && m && m.tokens && (
-                  <Toggle id="at2-unit" label="View" value={unit} options={[["tokens", "tokens"], ["sentences", "sentences"]]}
-                          onChange={setUnit} />
+                {m && m.tokens && (
+                  <Toggle id={`${key}-unit`} label="View" value={units[key]} options={[["words", "words"], ["sentences", "sentences"]]}
+                          onChange={(u) => setUnits({ ...units, [key]: u })} />
                 )}
                 {m && m.w && <span className="try-time">{m.seconds < 1 ? `${(m.seconds * 1000).toFixed(0)} ms` : `${m.seconds.toFixed(2)} s`}</span>}
               </div>
@@ -290,21 +293,25 @@ function SideBySide({ row, res }) {
                     explains option [{m.answer + 1}] in release order (the shuffled order above picked another: a near tie)
                   </span>
                 )}
-                {key === "at2" && unit === "tokens" && m.tokens && (
+                {units[key] === "words" && m.tokens && (
                   <span className="viz-label">
-                    each document token tinted by theta . attention from the answer's mask (scaled to the 99th percentile);
-                    outlined: the 10 highest; amber: gold evidence
+                    {key === "evidence"
+                      ? `highlighted: words the head marks as evidence for this answer (probability >= ${m.threshold.toFixed(2)}, at most the top ${Math.round(100 * m.maxShare)}% of the document's words)`
+                      : "highlighted: the top 10% of words by theta . attention from the answer's mask"}
+                    ; amber underline: gold evidence
                   </span>
                 )}
                 {row.parts.map((name, p) => {
-                  if (key === "at2" && unit === "tokens" && m.tokens) {
+                  if (units[key] === "words" && m.tokens) {
                     const tokens = m.tokens.filter((t) => t.part === p);
                     if (!tokens.length) return null;
                     return (
                       <div key={p} className="try-part">
                         {row.parts.length > 1 && <span className="viz-label">{name}</span>}
-                        <TokenDoc text={row.partTexts[p]} tokens={tokens} maxHeight={460}
-                                  gold={(row.spans || []).filter((g) => g.part === p)} top={new Set(m.topTokens)} />
+                        <WordDoc text={row.partTexts[p]} tokens={tokens} maxHeight={460} agg={key === "at2" ? "sum" : "max"}
+                                 gold={(row.spans || []).filter((g) => g.part === p)}
+                                 threshold={key === "evidence" ? m.threshold : null}
+                                 maxShare={key === "evidence" ? m.maxShare : 0.1} />
                       </div>
                     );
                   }
@@ -314,8 +321,8 @@ function SideBySide({ row, res }) {
                   return (
                     <div key={p} className="try-part">
                       {row.parts.length > 1 && <span className="viz-label">{name}</span>}
-                      <Doc sentences={idx.map((j) => row.sentences[j])} value={idx.map((j) => m.w[j])} marked={local}
-                           maxHeight={460} scrollToMarked />
+                      <Doc sentences={idx.map((j) => row.sentences[j])} value={idx.map((j) => (m.top.includes(j) ? 1 : 0))}
+                           marked={local} maxHeight={460} scrollToMarked />
                     </div>
                   );
                 })}

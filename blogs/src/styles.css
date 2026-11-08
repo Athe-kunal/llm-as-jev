@@ -824,5 +824,6 @@ a.sec { text-decoration: none; }
 .rs-key-none { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
 .try-go.secondary { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .qlab .orig { margin-left: 8px; font: 500 11px var(--mono); color: var(--muted); }
-.try-sbs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-@media (max-width: 900px) { .try-sbs { grid-template-columns: 1fr; } }
+.try-sbs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 16px; }
+.tokdoc .tk.sel { background: color-mix(in srgb, var(--c6) 45%, transparent); border-radius: 3px; }
+.try-sbs .dsent.marked { outline: none; }  /* picks are shown by their highlight, not a box */
