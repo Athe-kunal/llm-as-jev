@@ -34,6 +34,7 @@ blog = ["fastapi>=0.115", "uvicorn>=0.30"]  # blogs/server.py (the "Try it" sect
 [project.scripts]
 llm-jev-train = "llm_jev.train.train:main"
 llm-jev-train-mlm = "llm_jev.train.train_mlm:main"
+llm-jev-train-at2 = "llm_jev.train.train_at2:main"
 llm-jev-evaluate = "llm_jev.evaluation.evaluate:main"
 llm-jev-benchmarks = "llm_jev.evaluation.benchmarks:main"
 llm-jev-attribution = "llm_jev.evaluation.attribution:main"

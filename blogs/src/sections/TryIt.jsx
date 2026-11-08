@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Doc } from "../components/Math.jsx";
+import { Doc, TokenDoc } from "../components/Math.jsx";
 import { Toggle } from "../components/Controls.jsx";
 
 // auto: about two per sentence, a power of two in [32, 256] (masked_cite.ablation_count); or fixed
@@ -22,6 +22,10 @@ export default function TryIt() {
   const [datasets, setDatasets] = useState([]);
   const [source, setSource] = useState("contractnli");
   const [spansOnly, setSpansOnly] = useState(true);
+  const [shuffle, setShuffle] = useState(false); // score the options in a random order (server-side)
+  const rowUrl = (id, sh = shuffle) =>
+    `/api/row?id=${encodeURIComponent(id)}&model=${encodeURIComponent(model.trim())}` +
+    (sh ? `&shuffle=1&seed=${Math.floor(Math.random() * 1e9)}` : "");
   const [row, setRow] = useState(null);
   const [attr, setAttr] = useState();
   const [ablations, setAblations] = useState("auto");
@@ -54,9 +58,14 @@ export default function TryIt() {
     setError(null);
     setAttr(undefined);
     try {
+      // re-read the server's capabilities: it may have been restarted with (or without) citations
+      const fresh = await api("/api/info").catch(() => info);
+      const citeNow = cite || (fresh?.cite && !info?.cite); // newly available: switch on; a user's untick stays
+      if (JSON.stringify(fresh) !== JSON.stringify(info)) setInfo(fresh); // a new object each call: compare content
+      if (citeNow !== cite) setCite(citeNow);
       const { id } = await api(`/api/sample?source=${source}&spans=${withSpans ? 1 : 0}`);
-      setRow(await api(`/api/row?id=${encodeURIComponent(id)}&model=${encodeURIComponent(model.trim())}`));
-      if (cite && canCite) {
+      setRow(await api(rowUrl(id)));
+      if (citeNow && fresh?.cite !== false) {
         setAttr("loading");
         setAttr(await api(query(id, ablations, removal)));
       }
@@ -65,7 +74,21 @@ export default function TryIt() {
     } finally {
       setBusy(false);
     }
-  }, [source, withSpans, ablations, removal, model, cite, canCite]);
+  }, [source, withSpans, ablations, removal, model, cite, canCite, shuffle, info]);
+
+  // the same row again: in a fresh random order (sh) or back in release order
+  const rescore = useCallback(async (sh) => {
+    if (!row) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setRow(await api(rowUrl(row.id, sh)));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [row, model]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // re-run ContextCite on the current row with another ablation count or removal
   const rerun = useCallback(async (n, m) => {
@@ -149,7 +172,7 @@ export default function TryIt() {
         {canCite && (
           <label className="try-check">
             <input id="try-cite" type="checkbox" checked={cite} onChange={(e) => toggleCite(e.target.checked)} />
-            citations (ContextCite)
+            citations ({encoder ? "AT2 + ContextCite" : "ContextCite"})
           </label>
         )}
         <label className="try-check">
@@ -157,6 +180,14 @@ export default function TryIt() {
                  onChange={(e) => setSpansOnly(e.target.checked)} />
           only rows with gold evidence
         </label>
+        <label className="try-check">
+          <input id="try-shuffle" type="checkbox" checked={shuffle} disabled={busy}
+                 onChange={(e) => { setShuffle(e.target.checked); rescore(e.target.checked); }} />
+          shuffle options
+        </label>
+        {shuffle && row && (
+          <button className="try-go secondary" onClick={() => rescore(true)} disabled={busy}>Reshuffle</button>
+        )}
         <button className="try-go" onClick={next} disabled={busy}>
           {busy ? "Running…" : "Random row"}
         </button>
@@ -174,9 +205,11 @@ export default function TryIt() {
         {row && (
           <motion.div key={row.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
             <Answer row={row} />
-            {cite && canCite
-              ? <Explain row={row} res={attr} ablations={ablations} removal={removal} onRerun={rerun} busy={busy} />
-              : <Evidence row={row} />}
+            {!(cite && canCite)
+              ? <Evidence row={row} />
+              : encoder
+                ? <SideBySide row={row} res={attr} />
+                : <Explain row={row} res={attr} ablations={ablations} removal={removal} onRerun={rerun} busy={busy} />}
           </motion.div>
         )}
       </AnimatePresence>
@@ -196,6 +229,7 @@ function Answer({ row }) {
           <div key={k} className={["qrow", k === row.answer ? "on" : "", k === row.gold ? "goldopt" : ""].join(" ")}>
             <span className="qlab">
               [{k + 1}] {row.options[k]}
+              {row.shuffled && row.order && <small className="orig">orig [{row.order[k] + 1}]</small>}
               {k === row.answer && <b className="tag">model</b>}
               {k === row.gold && <b className="tag gold">gold</b>}
             </span>
@@ -211,6 +245,85 @@ function Answer({ row }) {
         {right ? "correct" : "wrong"} · answer {row.answer + 1}] · {row.seconds < 1 ? `${(row.seconds * 1000).toFixed(0)} ms` : `${row.seconds.toFixed(2)} s`}
         {row.tokens ? ` · ${row.tokens.toLocaleString("en-US")} tokens` : ""} · {row.sentences.length} sentence{row.sentences.length === 1 ? "" : "s"}
       </div>
+    </div>
+  );
+}
+
+/** AT2 and ContextCite next to each other for the row's answer, gold evidence underlined in both. */
+function SideBySide({ row, res }) {
+  const loading = res === "loading" || res === undefined;
+  const [unit, setUnit] = useState("tokens"); // AT2's view: per-token scores or summed per sentence
+  const panels = [
+    ["at2", "AT2", (m) => "one forward pass: learned head weights x attention from the answer's mask"],
+    ["contextcite", "ContextCite", (m) => `${m.ablations} ablations (deleted sentences) + Lasso`],
+  ];
+  // citations explain the answer with options in release order; row.order maps shown slots to it
+  const shownAnswer = row.order ? row.order[row.answer] : row.answer;
+  return (
+    <div className="try-sbs">
+      {panels.map(([key, title, sub]) => {
+        const m = loading ? null : res[key];
+        return (
+          <div key={key} className="try-panel">
+            <div className="try-head">
+              <div>
+                <h3>{title}</h3>
+                <span className="viz-label">{m && m.w ? sub(m) : key === "at2" ? "one forward pass" : "ablations + Lasso"}</span>
+              </div>
+              <div className="try-head-right">
+                {key === "at2" && m && m.tokens && (
+                  <Toggle id="at2-unit" label="View" value={unit} options={[["tokens", "tokens"], ["sentences", "sentences"]]}
+                          onChange={setUnit} />
+                )}
+                {m && m.w && <span className="try-time">{m.seconds < 1 ? `${(m.seconds * 1000).toFixed(0)} ms` : `${m.seconds.toFixed(2)} s`}</span>}
+              </div>
+            </div>
+            {loading ? (
+              <div className="try-loading"><span className="spinner" /> attributing…</div>
+            ) : m.w === null ? (
+              <div className="pending">{m.reason}</div>
+            ) : (
+              <>
+                <Metrics m={m.metrics} />
+                {m.answer !== shownAnswer && (
+                  <span className="viz-label">
+                    explains option [{m.answer + 1}] in release order (the shuffled order above picked another: a near tie)
+                  </span>
+                )}
+                {key === "at2" && unit === "tokens" && m.tokens && (
+                  <span className="viz-label">
+                    each document token tinted by theta . attention from the answer's mask (scaled to the 99th percentile);
+                    outlined: the 10 highest; amber: gold evidence
+                  </span>
+                )}
+                {row.parts.map((name, p) => {
+                  if (key === "at2" && unit === "tokens" && m.tokens) {
+                    const tokens = m.tokens.filter((t) => t.part === p);
+                    if (!tokens.length) return null;
+                    return (
+                      <div key={p} className="try-part">
+                        {row.parts.length > 1 && <span className="viz-label">{name}</span>}
+                        <TokenDoc text={row.partTexts[p]} tokens={tokens} maxHeight={460}
+                                  gold={(row.spans || []).filter((g) => g.part === p)} top={new Set(m.topTokens)} />
+                      </div>
+                    );
+                  }
+                  const idx = row.sentences.flatMap((s, j) => (s.part === p ? [j] : []));
+                  if (!idx.length) return null;
+                  const local = new Set(idx.flatMap((j, i) => (m.top.includes(j) ? [i] : [])));
+                  return (
+                    <div key={p} className="try-part">
+                      {row.parts.length > 1 && <span className="viz-label">{name}</span>}
+                      <Doc sentences={idx.map((j) => row.sentences[j])} value={idx.map((j) => m.w[j])} marked={local}
+                           maxHeight={460} scrollToMarked />
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

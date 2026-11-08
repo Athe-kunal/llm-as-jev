@@ -7,17 +7,25 @@ Endpoints (the Vite dev server proxies /api here):
   GET /api/info                    the loaded run, its attention, and whether it can cite
   GET /api/datasets                the held-out datasets, their rows, and rows with gold evidence
   GET /api/sample?source=&spans=1  a random row id (spans=1: only rows with gold evidence)
-  GET /api/row?id=                 the row, q over its options, the answer, its sentences
-                                   (gold evidence marked) and the time to score it
+  GET /api/row?id=&shuffle=&seed=  the row, q over its options, the answer, its sentences
+                                   (gold evidence marked) and the time to score it; shuffle=1
+                                   scores the options in a seeded random order (as in training)
+                                   and returns them in that order, with `order` = each slot's
+                                   original option index
+
+  GET /api/attribute?id=           AT2 and ContextCite for the row's answer (options in release
+                                   order): per-sentence weights, top 3, span metrics, seconds
 
 The model is evaluation.evaluate_mlm.load_run: the run's own config and
 prompt format, fp32 weights under bf16 autocast, so the page shows the
-numbers evaluation computes. ContextCite for the encoder is not wired yet
-(/api/info says cite: false).
+numbers evaluation computes. With --at2 (an AT2 run directory) the encoder is
+that run's (config.yaml), on FA2 varlen as AT2's attention capture needs, and
+/api/info says cite: true.
 """
 
 import argparse
 import collections
+import pathlib
 import random
 import threading
 import time
@@ -33,10 +41,19 @@ from llm_jev.dataloader import storage
 from llm_jev.evaluation import evaluate_mlm
 from llm_jev.modeling import context_cite
 from llm_jev.modeling import encoder
+from llm_jev.modeling import encoder_at2
+from llm_jev.modeling import encoder_cite
+from llm_jev.train import at2_config
 
 
-def make_app(run: str, data: str, split: str, attention: str | None) -> fastapi.FastAPI:
-    """Loads the run and the rows; returns the app."""
+def make_app(run: str, data: str, split: str, attention: str | None,
+             at2: str | None = None) -> fastapi.FastAPI:
+    """Loads the run (or the AT2 run's encoder) and the rows; returns the app."""
+    theta = None
+    if at2:
+        acfg = at2_config.resolve(at2_config.load(pathlib.Path(at2) / "config.yaml"))
+        run, attention = acfg.encoder.run, acfg.encoder.attention
+        theta = torch.load(pathlib.Path(at2) / "theta.pt").cuda()
     scorer, tok, fmt = evaluate_mlm.load_run(run, attention=attention)
     cfg = evaluate_mlm.run_config(run)
     rows = {r.id: r for r in storage.load_examples(data, split)}
@@ -44,7 +61,9 @@ def make_app(run: str, data: str, split: str, attention: str | None) -> fastapi.
     for r in rows.values():
         by[r.source].append(r.id)
     info = {"run": run, "model": cfg.model.id, "kind": "encoder",
-            "attention": attention or cfg.model.attention, "format": vars(fmt), "cite": False}
+            "attention": attention or cfg.model.attention, "format": vars(fmt),
+            "cite": theta is not None, "methods": ["at2", "contextcite"] if theta is not None else [],
+            "at2": at2}
     logger.info("{} rows from {} ({}); {}", len(rows), data, split, info)
     gpu = threading.Lock()  # one model, one request at a time
     app = fastapi.FastAPI()
@@ -72,9 +91,11 @@ def make_app(run: str, data: str, split: str, attention: str | None) -> fastapi.
         return {"id": random.choice(pool)}
 
     @app.get("/api/row")
-    def row(id: str):
+    def row(id: str, shuffle: int = 0, seed: int = 0):
         r = get(id)
-        ex = mlm.encode(r, tok, fmt)  # options in release order: q[k] is option k
+        # release order, or a seeded shuffle; everything below is in the order the model saw
+        ex = mlm.encode(r, tok, fmt, random.Random(f"{id}:{seed}") if shuffle else None)
+        order = ex["order"]
         with gpu, torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
             torch.cuda.synchronize()
             t0 = time.perf_counter()
@@ -85,15 +106,47 @@ def make_app(run: str, data: str, split: str, attention: str | None) -> fastapi.
         gold = context_cite.gold_sentences(r, sources)
         return {
             "id": id, "source": r.source, "question": r.question,
-            "model": f"{cfg.model.id} ({run})", "options": list(r.options), "gold": r.gold,
+            "model": f"{cfg.model.id} ({run})", "options": [r.options[i] for i in order],
+            "order": order, "shuffled": bool(shuffle), "gold": ex["gold"],
             "answer": int(s.argmax()), "q": torch.softmax(s, 0).tolist(),
             "parts": [p.name for p in r.parts], "hasSpans": r.has_spans,
+            "spans": [{"part": sp.part, "start": sp.start, "end": sp.end} for sp in r.spans],
             "partTexts": [p.text for p in r.parts], "tokens": len(ex["input_ids"]),
             "sentences": [{"part": x["part"], "start": x["start"], "end": x["end"], "sep": x["sep"],
                            "gold": j in gold, "text": r.parts[x["part"]].text[x["start"]:x["end"]]}
                           for j, x in enumerate(sources)],
             "seconds": seconds,
         }
+
+    @app.get("/api/attribute")
+    def attribute(id: str):
+        if theta is None:
+            raise fastapi.HTTPException(400, "no AT2 run loaded (start the server with --at2)")
+        r = get(id)
+        out = {}
+        for name, fn in (("at2", lambda: encoder_at2.attribute(scorer, tok, fmt, r, theta)),
+                         ("contextcite", lambda: encoder_cite.attribute(
+                             scorer, tok, fmt, r, budget=cfg.model.pack_tokens))):
+            with gpu:
+                torch.cuda.synchronize()
+                t0 = time.perf_counter()
+                res = fn()
+                torch.cuda.synchronize()
+                seconds = time.perf_counter() - t0
+            w = [x["w"] for x in res["sources"]]
+            if len(w) < 2:
+                out[name] = {"w": None, "reason": "fewer than two sentences: nothing to attribute"}
+                continue
+            out[name] = {"w": w, "top": [j for j in sorted(range(len(w)), key=lambda j: -w[j])[:3] if w[j] > 0],
+                         "seconds": seconds, "answer": res["answer"], "ablations": res.get("ablations"),
+                         "metrics": context_cite.span_metrics(r, res) if r.has_spans else None}
+            if "tokens" in res:  # AT2: per-token scores over the document, and its 10 highest (not whitespace)
+                toks = res["tokens"]
+                text = [p.text for p in r.parts]
+                real = [t for t in toks if text[t["part"]][t["start"]:t["end"]].strip()]
+                out[name]["tokens"] = toks
+                out[name]["topTokens"] = [t["index"] for t in sorted(real, key=lambda t: -t["w"])[:10]]
+        return out
 
     @app.exception_handler(Exception)
     def failed(_, exc):
@@ -109,9 +162,14 @@ def main() -> None:
     parser.add_argument("--attention", help="override the run's model.attention (e.g. varlen, sdpa)")
     parser.add_argument("--data", default="data/splits/reason_long_nimble")
     parser.add_argument("--split", default="eval")
+    parser.add_argument("--at2", default="runs/at2_ultrabert_380m",
+                        help="AT2 run directory (train.train_at2) for citations; '' for none")
     parser.add_argument("--port", type=int, default=8767)
     args = parser.parse_args()
-    uvicorn.run(make_app(args.run, args.data, args.split, args.attention),
+    at2 = args.at2 if args.at2 and (pathlib.Path(args.at2) / "theta.pt").exists() else None
+    if args.at2 and not at2:
+        logger.warning("no {}/theta.pt: serving without citations", args.at2)
+    uvicorn.run(make_app(args.run, args.data, args.split, args.attention, at2),
                 host="127.0.0.1", port=args.port, log_level="warning")
 
 
