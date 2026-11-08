@@ -154,7 +154,7 @@ def make_app(run: str, data: str, split: str, attention: str | None,
             text = [p_.text for p_ in r.parts]
             real = [t for t in res["tokens"] if text[t["part"]][t["start"]:t["end"]].strip()]
             out["evidence"] = {
-                "w": w if len(w) >= 2 else None, "reason": "fewer than two sentences" if len(w) < 2 else None,
+                "w": w,  # words are scored whatever the sentence count; only sentence metrics need >= 2
                 "top": [j for j in sorted(range(len(w)), key=lambda j: -w[j])[:3]],
                 "seconds": seconds, "answer": res["answer"],
                 "metrics": context_cite.span_metrics(r, {"sources": [{**s_, "w": v} for s_, v in zip(sources, w)]})
@@ -174,12 +174,12 @@ def make_app(run: str, data: str, split: str, attention: str | None,
                 torch.cuda.synchronize()
                 seconds = time.perf_counter() - t0
             w = [x["w"] for x in res["sources"]]
-            if len(w) < 2:
-                out[name] = {"w": None, "reason": "fewer than two sentences: nothing to attribute"}
+            if len(w) < 2 and name == "contextcite":  # ablating one sentence can only remove everything
+                out[name] = {"w": None, "reason": "one sentence: ContextCite needs at least two to ablate"}
                 continue
             out[name] = {"w": w, "top": [j for j in sorted(range(len(w)), key=lambda j: -w[j])[:3] if w[j] > 0],
                          "seconds": seconds, "answer": res["answer"], "ablations": res.get("ablations"),
-                         "metrics": context_cite.span_metrics(r, res) if r.has_spans else None}
+                         "metrics": context_cite.span_metrics(r, res) if r.has_spans and len(w) >= 2 else None}
             if "tokens" in res:  # AT2: per-token scores over the document, and its 10 highest (not whitespace)
                 toks = res["tokens"]
                 text = [p.text for p in r.parts]
