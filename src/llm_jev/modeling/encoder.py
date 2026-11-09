@@ -99,10 +99,26 @@ def score(scorer, ex: dict[str, Any], device: str = "cuda") -> torch.Tensor:
                   torch.tensor(ex["masks"], device=device))
 
 
-def loss(scorer, ex: dict[str, Any], device: str = "cuda"
+LOSSES = ("listwise", "sigmoid_norm")
+
+
+def loss(scorer, ex: dict[str, Any], device: str = "cuda", kind: str = "listwise"
          ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Cross-entropy of the gold option over the K masks (L_tree with one
-    level), and whether the argmax is gold. Returns ([] loss, [] bool)."""
+    """The training loss of one encoded row, and whether the argmax is gold. Returns ([] loss, [] bool).
+
+    kind "listwise": cross-entropy of the gold option over the K masks (the options
+    compete; L_tree with one level). kind "sigmoid_norm" (DeepSeek-V3's gate): each
+    option's sigmoid(s_k), normalised by their sum, p_k = sigmoid(s_k) / sum_j sigmoid(s_j),
+    and -log p_gold: options get independent yes-probabilities but still compete, with one
+    loss term per row whatever K is. Prediction is unchanged (argmax s).
+    """
     s = score(scorer, ex, device)                                      # [K]
     gold = torch.tensor(ex["gold"], device=s.device)
-    return nn.functional.cross_entropy(s, gold), s.argmax() == gold
+    if kind == "listwise":
+        value = nn.functional.cross_entropy(s, gold)
+    elif kind == "sigmoid_norm":
+        log_sig = nn.functional.logsigmoid(s)                          # log sigmoid(s_k), stable
+        value = log_sig.logsumexp(0) - log_sig[gold]                   # -log(sigmoid_gold / sum sigmoid)
+    else:
+        raise ValueError(f"loss kind is one of {LOSSES}, not {kind!r}")
+    return value, s.argmax() == gold

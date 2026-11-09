@@ -76,6 +76,11 @@ def main() -> None:
     args = parser.parse_args()
     raw = mlm_config.load(args.config, args.overrides)
     cfg = mlm_config.resolve(raw)
+    if cfg.optim.loss not in encoder.LOSSES:
+        raise ValueError(f"optim.loss is one of {encoder.LOSSES}, not {cfg.optim.loss!r}")
+    if cfg.optim.loss == "sigmoid_norm" and cfg.format.no_token is None:
+        raise ValueError(f"optim.loss={cfg.optim.loss} needs format.no_token (e.g. ' no'): its sigmoid is "
+                         "on logit(yes) - logit(no), not on the raw logit(yes) (~200 in size, sigmoid = 1)")
 
     from accelerate import Accelerator
     from accelerate.utils import set_seed
@@ -161,7 +166,7 @@ def main() -> None:
             ex = mlm.encode(train[i], tok, fmt, row_rng(cfg.run.seed, epoch, i))
             last = j == len(mine) - 1
             with contextlib.nullcontext() if last else acc.no_sync(scorer):
-                loss, hit = encoder.loss(scorer, ex, device)
+                loss, hit = encoder.loss(scorer, ex, device, cfg.optim.loss)
                 acc.backward(loss / len(mine))
             sums += torch.stack([loss.detach(), hit.float()])
         sums = acc.reduce(sums, "sum") / batch

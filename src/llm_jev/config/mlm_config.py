@@ -55,6 +55,9 @@ class OptimConfig:
     warmup_ratio: float = 0.05         # share of the steps
     min_lr_ratio: float = 0.0          # final lr / peak
     max_grad_norm: float = 1.0
+    loss: str = "listwise"             # encoder.LOSSES: "listwise" (options compete) or
+                                       # "sigmoid_norm" (sigmoids normalised by their sum, as DeepSeek-V3's
+                                       # gate; needs format.no_token)
 
 
 @dataclasses.dataclass
