@@ -44,9 +44,49 @@ def subset(
     return out
 
 
+PARTS = ("dev", "test", "all")
+
+
+def select_rows(rows: list[schema.Example], part: str = "dev", per: int = 100, seed: int = SEED,
+                ids: set[str] | None = None) -> list[schema.Example]:
+    """The rows to evaluate.
+
+    part "dev": subset(rows, per, seed), the fixed sample used to choose settings
+    (learning rates) and reported before the test split existed; "test": every
+    other row, never used for a choice; "all": every row. ids, if given, keeps
+    only those rows (e.g. the rows that fit a model's context).
+    """
+    if part not in PARTS:
+        raise ValueError(f"part is one of {PARTS}, not {part!r}")
+    dev = subset(rows, per, seed)
+    chosen = {"dev": dev, "all": rows,
+              "test": [r for r in rows if r.id not in {d.id for d in dev}]}[part]
+    return chosen if ids is None else [r for r in chosen if r.id in ids]
+
+
+def add_row_args(parser) -> None:
+    """--part, --rows-file and --save-rows, shared by the evaluation scripts."""
+    parser.add_argument("--part", choices=PARTS, default="dev",
+                        help="dev: the per-dataset sample settings were chosen on; test: every other row; all")
+    parser.add_argument("--rows-file", help="a JSON list of row ids to keep (e.g. rows that fit 8K tokens)")
+    parser.add_argument("--save-rows", action="store_true",
+                        help="also write eval_<tag>_rows.json: each row's id, dataset and correctness")
+
+
+def rows_from_args(args) -> list[schema.Example]:
+    """The rows chosen by --data/--split, --part, --eval-per, --seed and --rows-file."""
+    ids = set(json.loads(pathlib.Path(args.rows_file).read_text())) if args.rows_file else None
+    return select_rows(storage.load_examples(args.data, args.split), args.part, args.eval_per, args.seed, ids)
+
+
+def save_rows(out: pathlib.Path, tag: str, per_row: list[dict]) -> None:
+    """Writes eval_<tag>_rows.json (per-row correctness, for bootstrap intervals)."""
+    (out / f"eval_{tag}_rows.json").write_text(json.dumps(per_row))
+
+
 def evaluate(model, tok, rows: list[schema.Example],
              gen_rows: list[schema.Example], device: str,
-             batch_tokens: int = 32768, batch_rows: int = 64):
+             batch_tokens: int = 32768, batch_rows: int = 64, rows_out: list | None = None):
     """Per-dataset metrics, and one example record per text-mode row.
 
     Rows are scored in length-sorted batches bounded by batch_tokens and
@@ -80,6 +120,8 @@ def evaluate(model, tok, rows: list[schema.Example],
             st = stats[r.source]
             st["rows"] += 1
             st["accuracy"] += float(s.argmax().item() == ex["gold"])
+            if rows_out is not None:
+                rows_out.append({"id": r.id, "source": r.source, "correct": bool(s.argmax().item() == ex["gold"])})
             st["log_p_gold"] += torch.log_softmax(s, 0)[ex["gold"]].item()
             st["root_legal_mass"] += mass
             if id(r) not in gen_ids:
@@ -155,19 +197,22 @@ def main() -> None:
     parser.add_argument("--eval-per", type=int, default=100)
     parser.add_argument("--gen-per", type=int, default=20)
     parser.add_argument("--seed", type=int, default=SEED)
+    add_row_args(parser)
     args = parser.parse_args()
 
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(args.model)
-    rows = subset(storage.load_examples(args.data, args.split), args.eval_per,
-                  args.seed)
+    rows = rows_from_args(args)
     gen_rows = subset(rows, args.gen_per, args.seed)
     model = modeling.load(args.model, args.adapter, merge=False)
-    metrics, examples = evaluate(model, tok, rows, gen_rows, "cuda")
+    per_row: list = []
+    metrics, examples = evaluate(model, tok, rows, gen_rows, "cuda", rows_out=per_row)
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     save(out, args.tag, metrics, examples)
+    if args.save_rows:
+        save_rows(out, args.tag, per_row)
     log_summary(args.tag, metrics)
 
 

@@ -161,6 +161,7 @@ def main() -> None:
     parser.add_argument("--tag", default="final")
     parser.add_argument("--eval-per", type=int, default=100)
     parser.add_argument("--seed", type=int, default=decoder_eval.SEED)
+    decoder_eval.add_row_args(parser)
     parser.add_argument("--dtype", choices=["float32", "bfloat16"], default="float32",
                         help="weights (scoring runs under bf16 autocast either way)")
     parser.add_argument("--label-shares", action="store_true",
@@ -172,11 +173,14 @@ def main() -> None:
 
     out = pathlib.Path(args.out or args.run)
     out.mkdir(parents=True, exist_ok=True)
-    rows = decoder_eval.subset(storage.load_examples(args.data, args.split),
-                               args.eval_per, args.seed)
+    rows = decoder_eval.rows_from_args(args)
     scorer, tok, fmt = load_run(args.run, dtype=getattr(torch, args.dtype), attention=args.attention)
-    metrics = evaluate(scorer, tok, fmt, rows, budget=run_config(args.run).model.pack_tokens)
+    recs = records(scorer, tok, fmt, rows, budget=run_config(args.run).model.pack_tokens)
+    metrics = summarize(recs)
     decoder_eval.save(out, args.tag, metrics, [])
+    if args.save_rows:
+        decoder_eval.save_rows(out, args.tag, [{"id": r.id, "source": r.source, "correct": bool(c)}
+                                               for r, (_, c, _, _) in zip(rows, recs)])
     decoder_eval.log_summary(args.tag, metrics)
     if args.label_shares:
         shares = label_shares(scorer, tok, fmt, rows, budget=run_config(args.run).model.pack_tokens)
