@@ -18,15 +18,6 @@ from llm_jev.dataloader import schema
 ANSWER_PREFIX = "Best answer: ["
 # The assistant turn up to the answer, as the Qwen3 / Qwen3.5 chat template renders it without thinking.
 _TAIL = "<|im_start|>assistant\n<think>\n\n</think>\n\n" + ANSWER_PREFIX
-# Decoders without a chat template (base models, e.g. Ettin): the user message, a newline, the prefix
-# (a single newline: in GPT-NeoX-style tokenizers a blank line merges with the next word).
-_PLAIN_TAIL = "\n" + ANSWER_PREFIX
-
-
-def _tail(tokenizer: Any) -> str:
-    """The text right before each candidate suffix: the chat template's assistant turn
-    (_TAIL), or _PLAIN_TAIL for a tokenizer without a chat template."""
-    return _TAIL if getattr(tokenizer, "chat_template", None) else _PLAIN_TAIL
 # Off-gold-path trie nodes sampled per training example (App. I).
 OFF_PATH = 3
 
@@ -72,8 +63,6 @@ def build_prompt(
       ValueError: If the chat template's assistant turn is not _TAIL.
     """
     content, where = user_message(example, order)
-    if not getattr(tokenizer, "chat_template", None):  # a base decoder: plain text, no chat turns
-        return content + _PLAIN_TAIL, where
     text = tokenizer.apply_chat_template(
         [{"role": "user", "content": content}],
         tokenize=False,
@@ -88,10 +77,10 @@ def build_prompt(
 
 def suffix_ids(tokenizer: Any, k: int) -> list[list[int]]:
     """Token ids of the suffixes "1]" .. "k]" after the answer prefix."""
-    base = tokenizer(_tail(tokenizer), add_special_tokens=False)["input_ids"]
+    base = tokenizer(_TAIL, add_special_tokens=False)["input_ids"]
     out = []
     for i in range(1, k + 1):
-        full = tokenizer(_tail(tokenizer) + f"{i}]", add_special_tokens=False)["input_ids"]
+        full = tokenizer(_TAIL + f"{i}]", add_special_tokens=False)["input_ids"]
         if full[: len(base)] != base:
             raise ValueError(f"suffix {i}] changes the prompt's tokens")
         out.append(full[len(base) :])
@@ -120,23 +109,10 @@ def candidates(tokenizer: Any, k: int):
 
 
 @functools.cache
-def lead_ids(tokenizer: Any) -> list[int]:
-    """Special tokens the tokenizer puts before any text by default (its BOS).
-
-    Empty for Qwen (no BOS). Base decoders such as Ettin ([CLS]) need it: without
-    it their attention breaks (Ettin copy accuracy 96% -> 0%)."""
-    with_special = tokenizer("x")["input_ids"]
-    bare = tokenizer("x", add_special_tokens=False)["input_ids"]
-    start = with_special.index(bare[0]) if bare and bare[0] in with_special else 0
-    return with_special[:start]
-
-
-@functools.cache
 def _prefix_len(tokenizer: Any) -> int:
-    """Number of tokens of ANSWER_PREFIX at the end of the tail (_tail)."""
-    tail = _tail(tokenizer)
-    full = tokenizer(tail, add_special_tokens=False)["input_ids"]
-    bare = tokenizer(tail[: -len(ANSWER_PREFIX)], add_special_tokens=False)
+    """Number of tokens of ANSWER_PREFIX at the end of _TAIL."""
+    full = tokenizer(_TAIL, add_special_tokens=False)["input_ids"]
+    bare = tokenizer(_TAIL[: -len(ANSWER_PREFIX)], add_special_tokens=False)
     if full[: len(bare["input_ids"])] != bare["input_ids"]:
         raise ValueError("ANSWER_PREFIX changes the tokens before it")
     return len(full) - len(bare["input_ids"])
@@ -156,7 +132,7 @@ def encode(
     if rng is not None:
         rng.shuffle(order)
     text, _ = build_prompt(example, order, tokenizer)
-    prompt = lead_ids(tokenizer) + tokenizer(text, add_special_tokens=False)["input_ids"]
+    prompt = tokenizer(text, add_special_tokens=False)["input_ids"]
     suffixes, nodes = candidates(tokenizer, len(order))
     gold = order.index(example.gold)
     s = suffixes[gold]

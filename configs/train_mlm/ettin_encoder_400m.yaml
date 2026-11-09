@@ -1,6 +1,5 @@
 # Ettin-400M encoder (jhu-clsp/ettin-encoder-400m, ModernBERT architecture, 8K context) with the
 # UltraBERT recipe's best loss: one mask per option, sigmoid_norm over logit(yes) - logit(no), full FT.
-# Its pair, jhu-clsp/ettin-decoder-400m, has the same pretraining data and recipe (train.py --finetune full).
 # Rows longer than its 7,999-token context are dropped (87 of 13,000 training rows).
 model:
   id: jhu-clsp/ettin-encoder-400m
