@@ -1,0 +1,47 @@
+\section{Introduction}
+\label{sec:intro}
+
+Software often has to make a decision among fixed options: route a support ticket, classify the intent of a message, or check a claim against evidence.
+A chat model can do this, but its answer has to be generated and parsed, which adds latency and formatting failures.
+Jev-style decision models avoid this.
+They return a probability distribution over the options without generating free-form text, so a new task needs only a prompt and a list of options \citep{li2026llmasjev}.
+LLM-as-Jev \citep{li2026llmasjev} shows that a decoder language model already works as such a decision model, with no change to its architecture, tokenizer or vocabulary.
+A frozen model handles any number of options, and fine-tuning with a listwise loss and KL anchors helps compact models and tasks with many options.
+All of its models are causal decoders.
+
+A decision is a prefill-only workload: the model reads the input once and produces a single token.
+Decoders are designed for the opposite case, long generation.
+Multi-query and grouped-query attention \citep{mqa, gqa} shrink the KV cache so that decoding can run with larger batches, and the parameters this removes are put back in the MLP layers.
+\citet{prefillonly} show what this costs when nothing is generated: the large intermediate tensors of the MLP layers cause periodic spikes in GPU memory during prefill, which limit the input length.
+An encoder has no generation step and so carries none of these trade-offs.
+
+An encoder also reads the whole input in both directions.
+Its limitation was the head: a classifier head is fixed to one label set and must be trained again for each new task.
+A masked language model has no such limit.
+It already predicts a word at a masked position, so an option can be scored by asking whether the model fills a mask next to it with ``yes'' or ``no''.
+Recent encoders such as ModernBERT \citep{modernbert} and UltraBERT \citep{ultrabert} are trained for masked language modelling and retrieval and can read long inputs, which decision tasks over documents need.
+
+Reading in both directions matters for citing evidence as well.
+A decoder usually reads the document first and the question after it, so that the document's KV cache can be reused across questions.
+The document is then encoded without knowing the question, and its representations cannot be used as they are to find the evidence for one question.
+An encoder reads the question and the document together, so every token is conditioned on the question.
+
+We build an encoder decision model on this basis.
+It takes the same prompt and option list as LLM-as-Jev, puts one mask in front of each option, and scores all options in a single forward pass.
+It needs no new head, works with any number of options, and is small enough to run on every item of a pipeline.
+Our contributions are:
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\topsep}{2pt}
+  \item \textbf{An encoder decision model.}
+    We fine-tune UltraBERT-380M \citep{ultrabert} with one mask per option and the ``yes'' versus ``no'' prediction at each mask as the option's score.
+    It reuses the model's own masked-token prediction, so no head is added, and it is trained on the same data as LLM-as-Jev.
+  \item \textbf{A sigmoid-normalised loss.}
+    Each option gets its own sigmoid score, divided by the sum over options, as in the gate of DeepSeek-V3 \citep{deepseekv3}.
+    We compare it with the plain softmax over options and study how each loss treats the position and the label of the correct option.
+  \item \textbf{A matched comparison with decoders.}
+    We train Qwen3 \citep{qwen3} on the same data, with full fine-tuning and with LoRA \citep{lora}, tune the learning rate for every model, repeat the runs over seeds and evaluate on a held-out test split that was never used for a choice.
+    We report accuracy, accuracy on external benchmarks, and time per decision.
+  \item \textbf{Evidence for the decision.}
+    A decision model that generates no text gives no reasons, so we train an evidence head on the same encoder.
+    Its labels come from human-marked evidence and from citations generated with the SelfCite necessity and sufficiency reward \citep{selfcite}.
+    We compare it with ContextCite \citep{contextcite} and AT2 \citep{at2} on agreement with human evidence, and on cost.
+\end{itemize}

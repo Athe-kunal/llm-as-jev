@@ -236,3 +236,4 @@ logs/
 # blog (React)
 node_modules/
 blogs/dist/
+.vscode

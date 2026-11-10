@@ -1,0 +1,39 @@
+% Figure: how the evidence labels are generated (best-of-N with the SelfCite reward). Settings = span_generation/best_of_n.py defaults.
+\begin{figure}[t]
+  \centering
+  \begin{tikzpicture}[x=1in, y=1in,
+      font=\sffamily\scriptsize,
+      box/.style={draw=ink2, line width=0.4pt, rounded corners=2pt, inner sep=3.5pt, align=center, fill=black!2},
+      key/.style={draw=encoder, line width=0.6pt, rounded corners=2pt, inner sep=3.5pt, align=center, fill=encoder!8},
+      arr/.style={-{Stealth[length=4pt]}, line width=0.6pt, color=ink2},
+      lane/.style={font=\sffamily\bfseries\scriptsize, text=ink2, anchor=west},
+      sq/.style={draw=ink2, line width=0.3pt, minimum size=0.085in, inner sep=0pt}]
+    % ------------- lane 1: propose -------------
+    \node[lane] at (0, 0.2) {1  Propose evidence sets};
+    \node[box, text width=1.0in] (row) at (0.55, -0.35) {\textbf{Training row}\\document, question,\\options, gold answer};
+    \node[box, text width=1.0in, right=0.2in of row] (sent) {\textbf{Sentences}\\split as for ContextCite\\and AT2};
+    \node[box, text width=1.95in, right=0.2in of sent] (ask) {\textbf{Ask the labelling model}\\Qwen3.6-27B with thinking, 10 samples\\(temperature 1.2). Prompt: numbered sentences,\\question, gold answer; ``cite the smallest set\\that supports it and without which it is not''};
+    \node[box, text width=1.2in, right=0.2in of ask] (cand) {\textbf{Candidate sets}\\merge duplicates; drop\\sets over 384 tokens\\unless a single sentence};
+    \draw[arr] (row) -- (sent); \draw[arr] (sent) -- (ask); \draw[arr] (ask) -- (cand);
+    % ------------- lane 2: score -------------
+    \node[lane] at (1.25, -1.05) {2  Score every set on the decision prompt};
+    \node[box, text width=1.75in, anchor=north west] (abl) at (0.05, -1.25) {%
+      \textbf{Ablate each set $S$}\\[2pt]
+      \begin{tabular}{@{}l@{\hspace{3pt}}l@{}}
+        \tikz[baseline=-0.5ex]{\foreach \i/\c in {1/ink2!55,2/ink2!55,3/ink2!55,4/ink2!55,5/ink2!55,6/ink2!55,7/ink2!55}{\node[sq, fill=\c] at (\i*0.1, 0) {};}} & full context \\[1pt]
+        \tikz[baseline=-0.5ex]{\foreach \i/\c in {1/ink2!55,2/white,3/ink2!55,4/ink2!55,5/white,6/ink2!55,7/ink2!55}{\node[sq, fill=\c] at (\i*0.1, 0) {};}} & without $S$ \\[1pt]
+        \tikz[baseline=-0.5ex]{\foreach \i/\c in {1/white,2/ink2!55,3/white,4/white,5/ink2!55,6/white,7/white}{\node[sq, fill=\c] at (\i*0.1, 0) {};}} & only $S$
+      \end{tabular}};
+    \node[box, text width=1.45in, right=0.2in of abl] (q) {\textbf{Probability of the gold answer}\\$q(\mathrm{gold}\mid\cdot)$: softmax over the\\log-probabilities of the options};
+    \node[key, text width=1.5in, right=0.2in of q] (rew) {\textbf{SelfCite reward}\\$\log q(\mathrm{gold}\mid\text{only }S)$\\$-\log q(\mathrm{gold}\mid\text{without }S)$\\sufficiency + necessity};
+    \node[key, text width=1.0in, right=0.2in of rew] (out) {\textbf{Evidence label}\\highest reward\\$\to$ the row's spans};
+    \draw[arr] (cand.south) -- ++(0, -0.17) -| (abl.north);
+    \draw[arr] (abl) -- (q); \draw[arr] (q) -- (rew); \draw[arr] (rew) -- (out);
+  \end{tikzpicture}
+  \caption{How evidence labels are generated for rows without human evidence. A labelling model proposes sets of
+  sentences as evidence for the \emph{gold} answer. Each set $S$ is scored on the decision prompt by removing it and by
+  keeping only it: a good set is enough to keep the answer (sufficiency) and its removal loses the answer (necessity).
+  The set with the highest reward becomes the label, which trains the evidence head. Unlike SelfCite, the answer scored is
+  the gold answer and not the model's own response.}
+  \label{fig:spans}
+\end{figure}

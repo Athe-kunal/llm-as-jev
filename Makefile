@@ -12,11 +12,14 @@ PROFILE_MODEL ?= Qwen/Qwen3-0.6B
 PROFILE_OUT ?= runs/profile/$(notdir $(PROFILE_MODEL))
 PROFILE_ARGS ?=
 
-.PHONY: help download data blog torch-profiler sglang-install sglang-merge sglang-serve sglang-stop
+.PHONY: help download data blog torch-profiler sglang-install sglang-merge sglang-serve sglang-stop paper paper-fast paper-figures
 
 help:
 	@echo "make download        fetch the pinned training sources (Reason+Long-12k + Nimble) (and the benchmarks used to decontaminate them) from the internet into the Hugging Face cache"
 	@echo "make data            build $(DATA)/{train,eval}.parquet and manifest.json (CPU, ~6 min with 8 workers)"
+	@echo "make paper           paper/generated/ (figures, tables, numbers from runs/), then paper/main.pdf (latexmk or tectonic)"
+	@echo "make paper-fast      paper/main.pdf only, one pass (~2 s); use after text edits"
+	@echo "make paper-figures   only paper/generated/"
 	@echo "make blog            serve blogs/ at http://127.0.0.1:$(BLOG_PORT)/ (Ctrl-C to stop)"
 	@echo "make torch-profiler  profile training steps of PROFILE_MODEL on GPU -> PROFILE_OUT (trace, op tables, memory snapshot; docs/profiling.md)"
 	@echo "make sglang-install  SGLang as a uv tool (its own environment)"
@@ -24,6 +27,17 @@ help:
 	@echo "make sglang-serve    serve MERGED with SGLang on GPU (http://127.0.0.1:PORT), merging first if needed"
 	@echo "make sglang-stop     stop the server on PORT"
 	@echo "training and evaluation: scripts/train.sh, scripts/evaluate.sh"
+
+paper-figures:
+	.venv/bin/python paper/figures/make_figures.py
+
+paper-fast:
+	cd paper && tectonic --only-cached --synctex --keep-intermediates --keep-logs --reruns 0 --outdir . main.tex
+
+paper: paper-figures
+	cd paper && if command -v latexmk >/dev/null; then latexmk -pdf -interaction=nonstopmode main.tex; \
+		elif command -v tectonic >/dev/null; then tectonic main.tex; \
+		else echo "no LaTeX: install TeX Live (latexmk) or tectonic"; exit 1; fi
 
 blog:
 	cd blogs && ( [ -d node_modules ] || npm install --no-fund --no-audit ) \

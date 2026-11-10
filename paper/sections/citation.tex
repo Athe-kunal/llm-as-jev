@@ -1,0 +1,51 @@
+\section{Citing the evidence}
+\label{sec:citation}
+
+A decision model writes no text, so it gives no reasons for its choice.
+We add a small evidence head that marks the sentences of the document that support the chosen option.
+Because the encoder reads the question, the options and the document together, the hidden state of every document token already depends on all of them, and a head on top of these states can score the tokens.
+The encoder stays frozen, so its decisions do not change, and one forward pass gives the decision and the evidence.
+For each document token, the head reads the token's hidden state and the hidden state at the mask of the chosen option, and outputs the probability that the token supports that option.
+The score of a sentence is the highest probability among its tokens.
+
+The head is trained on evidence labels.
+Where a dataset has human-marked evidence we use it, and for the other datasets we generate it with the SelfCite necessity and sufficiency reward \citep{selfcite}, as \cref{fig:spans} shows.
+A labelling model proposes several sets of sentences as evidence for the gold answer.
+We then score each set on the decision prompt, with the set removed and with only the set kept, and keep the set with the highest reward.
+\Cref{app:evidence} gives the details.
+
+\input{sections/span_figure}
+
+\paragraph{Comparison.}
+We compare the head with three methods that score the sentences of the document for a given decision: the average attention of the encoder, AT2 \citep{at2} and ContextCite \citep{contextcite}.
+The test rows are 200 held-out rows with gold evidence, 50 each from ContractNLI, MuSiQue, Nimble and ProofWriter.
+Each method is conditioned on the option that the model chooses.
+We report the average precision of the sentence ranking against the gold sentences, and how often the top sentence is gold.
+For the three baselines we also report the faithfulness score LDS, the rank correlation between the predicted and the actual change in the probability of the answer when random sets of sentences are removed, and for all methods the time per row.
+AT2 and ContextCite were run on the encoder trained with the softmax, so \cref{tab:citation} has a head for that encoder, as well as one for the encoder trained with the sigmoid-normalised loss.
+
+\begin{table}[t]
+  \centering\small
+  \caption{Sentence evidence on 200 held-out rows with gold evidence. Sentence AP: average precision against the gold
+  sentences. Top-1: share of rows where the top sentence is gold. LDS: faithfulness to the model, defined for the
+  three methods that explain it. The first three methods and the first head use the encoder trained with the softmax.}
+  \label{tab:citation}
+  \input{generated/table_citation}
+\end{table}
+
+\paragraph{Results.}
+On the same encoder, the head has a higher sentence AP than ContextCite and AT2 (\EvSentAPList{} against \ContextCiteSentAP{} and \AtTwoSentAP{}), and its top sentence is gold more often (\EvTopOneList{}\% against \ContextCiteTopOne{}\% and \AtTwoTopOne{}\%).
+It does so in \EvMsList{}\,ms, against \ContextCiteMs{}\,ms for ContextCite, which needs a forward pass for each of many ablations.
+AT2 is as fast, at \AtTwoMs{}\,ms, and has a lower sentence AP.
+The head on the encoder trained with the sigmoid-normalised loss is better again, with a sentence AP of \EvSentAPSig{}, \EvTopOneSig{}\% for the top sentence and \EvMsSig{}\,ms per row.
+At the token level its average precision is \EvTokAPSig{}, against \EvChanceSig{} for a random ranking, and the precision of its ten highest tokens is \EvPTenSig{}.
+The words that it marks with the tuned threshold of \EvThrSig{} have a precision of \EvWordPSig{} and a recall of \EvWordRSig{}, so the marked words are a rough guide and not an exact span.
+
+The accuracy of the evidence depends on the dataset.
+For the head on the sigmoid-normalised encoder, the sentence AP is 0.97 on Nimble and 0.68 on ProofWriter, and 0.56 on ContractNLI and 0.50 on MuSiQue, where the documents are long and the gold sentences few.
+
+\paragraph{What the head does not show.}
+ContextCite is the most faithful to the model, with an LDS of \ContextCiteLds{}, against \AtTwoLds{} for AT2.
+The head has no LDS, because it is trained to predict the evidence that an annotator would mark, and not what the model used.
+It is a pointer to the support for the answer, and it gives no proof that the model used it.
+The comparison is also not between equals: the head is trained on labels from the same datasets, while ContextCite uses no labels.

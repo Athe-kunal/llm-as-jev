@@ -1,0 +1,17 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We built a decision model on an encoder, UltraBERT-380M, with one mask in front of each option and the model's own ``yes'' versus ``no'' prediction as the score of the option.
+With the same data and full fine-tuning, it is more accurate than Qwen3-0.6B trained with LLM-as-Jev (\TestUbSig{}\% against \TestQwFull{}\% on the test set), and takes \MsUb{}\,ms per decision against \MsQwFull{}\,ms.
+The sigmoid-normalised loss adds \DiffUbSigUbList{} points over the plain softmax and reduces the bias towards frequent labels.
+An evidence head on the frozen encoder marks the supporting sentences in the same pass, and agrees better with annotated evidence than AT2 and ContextCite.
+
+The results have limits.
+They are at the scale of 0.4 to 0.6 billion parameters, and a 4B decoder is still more accurate on the reasoning datasets.
+We used one encoder and one training mixture, in English, and compared against one decoder family.
+The evidence head predicts the evidence that an annotator would mark, and does not show what the model used; ContextCite is more faithful to the model.
+We measured the memory use of decoders only through the work of \citet{prefillonly}, and not in our own runs.
+
+Two directions follow.
+The first is larger encoders, to see whether the advantage holds above one billion parameters.
+The second is to train the decision and the evidence together, so that the evidence head can also shape the encoder.

@@ -1,0 +1,62 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{How a row is presented}
+\label{sec:format}
+
+\Cref{fig:intro} shows the same row in both formats, built from the training data described in \cref{sec:data}.
+The options are shuffled each time a row is used, so the position of the correct option carries no information.
+
+\paragraph{Decoder.}
+The prompt follows LLM-as-Jev.
+The user message holds the state, the question, the options numbered $[1]$ to $[K]$, and one instruction: select one option and answer only with its number.
+The assistant turn is filled in up to ``Best answer: ['', and the model has to continue with the number of its choice and a closing bracket.
+Each option $k$ is therefore the token sequence of ``$k$]'', and the options form a trie over these sequences.
+
+\paragraph{Encoder.}
+The state and the question are the same.
+The instruction asks to mark the correct option with ``yes'' and every other option with ``no'', and the options are listed as ``$[k]$ \texttt{[M]} description'', with the tokenizer's mask token in front of each description.
+There is no chat template and nothing is generated.
+One forward pass gives a vector of logits at every mask, and the score of option $k$ comes from the logits of the tokens ``yes'' and ``no'' at mask $k$.
+
+\input{sections/intro_figure}
+
+\subsection{Loss functions}
+\label{sec:loss}
+
+\paragraph{Decoder: trie loss with KL anchors.}
+At each node of the trie the model chooses among the tokens that are legal there.
+The tree loss is the negative log-probability of the gold option, which is the product of the choices along its path, each normalised over the legal tokens only,
+\begin{equation}
+  \mathcal{L}_{\text{tree}} = -\sum_{t}\log\frac{\exp z_t(g_t)}{\sum_{v\in\mathcal{V}_t}\exp z_t(v)},
+\end{equation}
+where $z_t$ are the logits at step $t$, $g_t$ the gold token and $\mathcal{V}_t$ the legal tokens.
+Three anchor terms keep the model close to its starting version $p_0$ \citep{li2026llmasjev}: $\mathcal{L}_{\text{mass}}$ keeps the share of probability on legal tokens, $\mathcal{L}_{\text{out}}$ keeps the distribution over illegal tokens, and $\mathcal{L}_{\text{pos}}$ keeps the next-token distribution at the start of the reply and after the closing bracket.
+They are KL divergences to $p_0$, computed over its 64 most likely tokens and one bucket for the rest.
+The loss is $\mathcal{L}=\mathcal{L}_{\text{tree}}+\lambda\,(\mathcal{L}_{\text{mass}}+\mathcal{L}_{\text{out}}+\mathcal{L}_{\text{pos}})$ with $\lambda=1$.
+
+\paragraph{Encoder: scores and normalisation.}
+Let $\ell_k(v)$ be the logit of token $v$ at mask $k$.
+We use two scores.
+The first is $s_k=\ell_k(\textit{yes})$.
+The second is $s_k=\ell_k(\textit{yes})-\ell_k(\textit{no})$, which also asks the model to reject the other options.
+Both give a decision by $\arg\max_k s_k$.
+The two losses differ in how the scores of the $K$ options are turned into a distribution.
+
+\paragraph{Plain softmax.}
+The options compete through one softmax,
+\begin{equation}
+  p_k=\frac{e^{s_k}}{\sum_{j=1}^{K}e^{s_j}},\qquad \mathcal{L}_{\text{softmax}}=-\log p_{g},
+\end{equation}
+where $g$ is the gold option.
+
+\paragraph{Sigmoid-normalised loss.}
+Each option first gets its own probability of being correct, $\sigma(s_k)$, and these are normalised by their sum,
+\begin{equation}
+  p_k=\frac{\sigma(s_k)}{\sum_{j=1}^{K}\sigma(s_j)},\qquad \mathcal{L}_{\text{sig-norm}}=-\log p_{g}.
+\end{equation}
+This is the gate of the DeepSeek-V3 mixture of experts \citep{deepseekv3}, which scores every expert with a sigmoid and then normalises over the selected experts.
+Here the options play the role of the experts.
+The scores stay bounded between 0 and 1 and the options still compete through the sum.
+The gradient of every option's score contains the factor $1-\sigma(s_k)$, so an option that is already clearly rejected or clearly accepted adds little to the update.
+The loss has one term per row for any number of options $K$, and since $\sigma$ is increasing the decision is the same $\arg\max_k s_k$.

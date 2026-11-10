@@ -1,0 +1,92 @@
+\section{Implementation details}
+\label{app:impl}
+
+\Cref{tab:hparams} lists the training settings.
+Both models train for one epoch on \NTrain{} rows, which is 406 steps at a batch of 32.
+
+\begin{table}[h]
+  \centering\small
+  \caption{Training settings. Learning rates are in \cref{sec:protocol}.}
+  \label{tab:hparams}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    & UltraBERT-380M & Qwen3-0.6B (full) \\
+    \midrule
+    Optimiser & AdamW, $\beta=(0.9, 0.98)$, $\epsilon=10^{-6}$ & AdamW \\
+    Weight decay & 0.1 & 0.01 \\
+    Schedule & 5\% warmup, linear decay to 0 & 100 warmup steps, linear decay to 10\% \\
+    Gradient clipping & 1.0 & 1.0 \\
+    Precision & fp32 weights, bf16 autocast & fp32 weights, bf16 autocast \\
+    Attention & FlashAttention-2, varlen & default \\
+    Gradient checkpointing & yes & -- \\
+    Token limit & 32{,}768 & 16{,}384 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The encoder settings are those of the UltraBERT model card, and we change only the learning rate.
+No training row exceeds either token limit, because the data are cut at \MaxTokens{} tokens (\cref{sec:data}).
+
+\section{Evidence head}
+\label{app:evidence}
+
+The evidence head marks the document tokens that support an answer, and runs on top of a frozen encoder.
+We train it on a frozen UltraBERT-380M model, so the decisions of the encoder do not change and one forward pass gives both the decision and the evidence.
+We train one head on the model fine-tuned with the sigmoid-normalised loss and one on the model fine-tuned with the softmax, both at a learning rate of $1.5\cdot10^{-5}$, because AT2 and ContextCite were run on the softmax model.
+
+\paragraph{Model.}
+For document token $t$ and option $k$ the head reads $[h_t;\,h_k;\,h_t\odot h_k]$, where $h_t$ is the final hidden state of the token and $h_k$ that of option $k$'s mask.
+Both come from the one forward pass of the encoder, which reads the question and all the options together with the document, so every $h_t$ already depends on them.
+A two-layer perceptron with 512 hidden units, GELU and dropout 0.1 maps this vector to one logit, and its sigmoid is the probability that the token is evidence for option $k$.
+The score of a sentence is the highest probability among its tokens.
+
+\paragraph{Labels.}
+A token is positive if it overlaps an evidence span.
+Where a dataset has gold evidence we use it (Nimble, ContractNLI, MuSiQue, ProofWriter).
+For rows with no gold evidence we use generated spans, produced as in \cref{fig:spans}.
+Qwen3.6-27B, with thinking, is prompted with the numbered sentences of the row, the question and the gold answer, and asked for the smallest set of sentences that supports the answer and without which it is no longer supported.
+We sample ten replies at temperature 1.2 and top-$p$ 0.9, merge identical sets, and drop sets that cite more than 384 tokens unless they are a single sentence.
+Each remaining set $S$ is scored by the same model on the decision prompt: once with the full context, once without $S$ and once with only $S$, which makes $1+2m$ prompts for $m$ sets.
+The score of each option is the sum of the log-probabilities of its tokens, as in the trie of \cref{sec:loss}, and $q(\mathrm{gold}\mid\cdot)$ is the softmax over the options.
+The reward of a set is $\log q(\mathrm{gold}\mid\text{only }S)-\log q(\mathrm{gold}\mid\text{without }S)$, the sum of its sufficiency and its necessity with equal weight and no penalty for size, since the token limit already bounds it.
+The set with the highest reward is the label of the row.
+The labels cover ANLI, QuALITY, LogiQA~2.0, CosmosQA and the rows of ContractNLI, MuSiQue and ProofWriter without gold evidence.
+Unlike SelfCite, which scores the model's own response, we score the gold answer, so the reward carries information only where the labelling model believes the gold answer.
+We did not check the generated labels against human evidence on their own.
+The indirect check is the ablation below: adding them to the gold labels raises the agreement of the head with human evidence.
+Gold evidence is used when both exist.
+There are 7{,}778 labelled training rows, of which 7{,}390 are used for training and 388 for validation, and 5.2\% of the training tokens are positive.
+
+\paragraph{Training.}
+The loss is token-level binary cross-entropy, with the positive class weighted by the ratio of negative to positive tokens (18.1).
+In training the head is conditioned on the gold option, and at test time on the option the encoder chooses.
+We use AdamW with a learning rate of $10^{-3}$ and weight decay 0.01, 16 rows per step and three epochs, and keep the epoch with the best token average precision on the validation rows.
+The encoder stays frozen.
+
+\paragraph{Evaluation.}
+We use the 50 rows per dataset, from ContractNLI, MuSiQue, Nimble and ProofWriter, that have gold evidence and at least two sentences, the same rows on which AT2 and ContextCite are scored.
+A word is highlighted when its probability is at least a global threshold, the one that gave the best word F1 on 956 other held-out rows: \EvThrSig{} for the head on the sigmoid-normalised model and \EvThrList{} for the head on the softmax model.
+Adding the generated labels to the gold ones raises the sentence average precision from \EvSentAPGold{} to \EvSentAPList{} and the token average precision from \EvTokAPGold{} to \EvTokAPList{} (head on the softmax model).
+
+\section{Additional results}
+\label{app:extra}
+
+\Cref{tab:perdataset} gives the test accuracy for each dataset, averaged over seeds.
+
+\begin{table}[h]
+  \centering\small
+  \setlength{\tabcolsep}{4pt}
+  \caption{Test accuracy (\%) per dataset, averaged over seeds. UB is UltraBERT-380M. Bold: best below 1B parameters.}
+  \label{tab:perdataset}
+  \input{generated/table_perdataset}
+\end{table}
+
+\section{Examples}
+\label{app:examples}
+
+The examples show the decision of the sigmoid-normalised encoder and the token scores of its evidence head for one row of each of three datasets.
+The rows are the first of each dataset, in the evaluation order of the evidence study, that has at most 1{,}400 tokens; MuSiQue has none.
+Only the tokens that the head scores at or above its threshold of \EvThrSig{} for the chosen option are highlighted, darker for a higher probability, and tokens inside the gold evidence are underlined.
+The encoder chooses the correct option in all three rows; the rows were picked by the rule above and not by outcome.
+
+\input{generated/examples}

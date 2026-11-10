@@ -1,0 +1,55 @@
+\section{Results}
+\label{sec:results}
+
+\subsection{Encoder against decoder}
+
+\Cref{tab:headline} and \cref{fig:headline} give the main comparison.
+With the same data, the same one epoch of full fine-tuning and a learning rate chosen on dev for each model, UltraBERT-380M with the sigmoid-normalised loss reaches \TestUbSig{}\% on the test set, against \TestQwFull{}\% for Qwen3-0.6B, a difference of \DiffUbSigQwFull{} points.
+With the plain softmax the encoder reaches \TestUbList{}\%, still \DiffUbListQwFull{} points above the decoder.
+The encoder also has fewer parameters, 380M against 0.6B.
+On the six external benchmarks the order is the same: \ExtUbSig{}\% for the encoder and \ExtQwFull{}\% for the decoder.
+Every test number is below its dev number by 0.6 to 2.0 points, because the learning rates were chosen on dev, and the ranking does not change.
+The released Qwen3-4B LoRA model, at \TestQwFourLora{}\%, remains ahead of all sub-billion models, and our comparison is at the scale of 0.4 to 0.6 billion parameters.
+
+\subsection{Training regime}
+
+The released LoRA model of the same size reaches \TestQwLora{}\%.
+Compared with it, the encoder looks \DiffUbSigQwLoraText{} points better, but most of this difference comes from how the decoder was trained: updating all weights lifts Qwen3-0.6B by \DiffQwFullQwLora{} points on the test set.
+We therefore compare with the fully fine-tuned decoder.
+Fitting the mixture harder has a cost for both architectures.
+A higher learning rate or a second epoch raises held-out accuracy for the encoder and lowers its external accuracy, for example to 53.2\% with the softmax at a learning rate of $5\cdot10^{-5}$.
+The external accuracy of fully fine-tuned Qwen3-0.6B (\ExtQwFull{}\%) is not above that of its LoRA model (\ExtQwLora{}\%).
+
+\subsection{Loss}
+
+The sigmoid-normalised loss is better than the plain softmax by \DiffUbSigUbList{} points on the test set, and by 1.7 points on the external benchmarks (\ExtUbSig{}\% against \ExtUbList{}\%).
+Its results vary less between seeds.
+The two losses differ in the score as well as in the normalisation, so we separated them in a single-seed run with the softmax on the difference of the ``yes'' and ``no'' logits.
+Scoring with the difference accounts for most of the external gain, and the sigmoid-normalised loss adds most of the held-out gain, mostly on MuSiQue.
+The two losses also predict different labels.
+On MuSiQue the correct answer is ``Yes'' in 48\% of the rows.
+The sigmoid-normalised models predict ``Yes'' for 47 to 60\% of the rows over three seeds, against 64 to 69\% for the softmax.
+On ProofWriter, where ``Unknown'' is correct for a third of the rows, the softmax never predicts it and the sigmoid-normalised models predict it for 2 to 12\%.
+This class stays largely unlearned for every variant.
+
+\subsection{Cost}
+
+The encoder takes \MsUb{}\,ms per decision on one A100, one row at a time, against \MsQwFull{}\,ms for Qwen3-0.6B and \MsQwFourLora{}\,ms for Qwen3-4B.
+With batches and packed variable-length attention it processes \RpsUb{} rows per second, against \RpsQwFull{} for Qwen3-0.6B.
+
+\begin{table}[t]
+  \centering\small
+  \caption{Matched comparison: average accuracy (\%) over seeds. Test ALL is on \NTest{} held-out rows;
+  Dev ALL and External are on the dev rows and the six external benchmarks. Learning rates were chosen on
+  dev. Bold: best below 1B parameters.}
+  \label{tab:headline}
+  \input{generated/table_headline}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.62\linewidth]{fig_headline}
+  \caption{Test accuracy (ALL, the mean over 13 datasets; \NTest{} rows never used for any choice),
+  averaged over seeds; \textcolor{encoder}{encoders} filled, \textcolor{decoder}{decoders} hollow.}
+  \label{fig:headline}
+\end{figure}

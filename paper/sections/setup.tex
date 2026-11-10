@@ -1,0 +1,59 @@
+\section{Experimental setup}
+\label{sec:setup}
+
+\subsection{Training data}
+\label{sec:data}
+
+We follow LLM-as-Jev \citep{li2026llmasjev} and train on its Reason+Long mixture, with Nimble added.
+It has 13 datasets: intent routing (CLINC150, MASSIVE, Bitext), short reasoning (ReClor, LogiQA~2.0, CosmosQA, PIQA, ANLI, ProofWriter), long input (ContractNLI, MuSiQue, QuALITY) and Nimble.
+Each is turned into a state (the passages), a question and a list of options.
+We keep \NPerDataset{} training rows per dataset, \NTrain{} in total.
+Rows are filtered in this order:
+\begin{enumerate}\setlength{\itemsep}{0pt}\setlength{\topsep}{2pt}
+  \item \textbf{Duplicates.} Rows with the same input are collapsed to one, and rows with the same input but different answers are removed.
+  \item \textbf{Leakage between splits.} A training row is removed if its input, or the source document it comes from, also appears in the validation split.
+  \item \textbf{Benchmark overlap.} A training row is removed if it shares a 13-word n-gram, or an identical sentence of six or more words, with any evaluation benchmark.
+  \item \textbf{Length.} Prompts longer than \MaxTokens{} tokens are dropped, never truncated.
+\end{enumerate}
+The held-out rows are drawn from the validation split with the same duplicate and length filters, up to 500 per dataset and in whole source documents, giving \NHeldOut{} rows.
+We split them into a dev set of \NDev{} rows, used to choose learning rates, and a test set of \NTest{} rows that no choice depends on.
+
+\subsection{Models}
+\label{sec:models}
+
+\paragraph{Encoder.}
+UltraBERT-380M \citep{ultrabert} is fully fine-tuned with the format of \cref{sec:format}, once with the plain softmax and once with the sigmoid-normalised loss.
+
+\paragraph{Decoders.}
+We train Qwen3-0.6B \citep{qwen3} with the full LLM-as-Jev recipe (trie loss and the three anchors, $\lambda=1$), updating all weights.
+The anchors use a frozen copy of the starting model as $p_0$.
+We also report two LoRA models \citep{lora} that we trained earlier with the same recipe and released, Qwen3-0.6B and Qwen3-4B.
+They reach \TestQwLora{}\% and \TestQwFourLora{}\% on the test set (\cref{tab:headline}).
+Full fine-tuning of the 0.6B decoder reaches \TestQwFull{}\%, \DiffQwFullQwLora{} points above LoRA, and the encoder is fully fine-tuned, so full fine-tuning is the matched comparison and the LoRA models are references.
+They were trained on the 12K-row release of the data without ReClor, while all new runs use the 13K-row mixture with ReClor.
+
+\subsection{Protocol}
+\label{sec:protocol}
+
+Every model is trained for one epoch with a batch of 32 rows.
+We sweep the learning rate with one seed per value and choose by accuracy on the dev set:
+$\{8\cdot10^{-6}, 1.5\cdot10^{-5}, 3\cdot10^{-5}, 5\cdot10^{-5}\}$ for the encoder with the softmax, $\{8\cdot10^{-6}, 1.5\cdot10^{-5}, 2\cdot10^{-5}, 3\cdot10^{-5}\}$ with the sigmoid-normalised loss, and $\{5\cdot10^{-6}, 10^{-5}, 2\cdot10^{-5}\}$ for the decoder.
+The two best Qwen rates differ by 0.1 points on dev, and we use $10^{-5}$.
+At the chosen rate we repeat the run with different seeds, which change the order of the rows and the option shuffling, and report the average.
+The test set is not used for any of these choices.
+
+The metric is accuracy.
+ALL is the mean accuracy over the 13 datasets, so that every dataset counts equally.
+On the test set we average each row's correctness over the seeds of a model and report ALL of this average.
+The encoder is scored with fp32 weights under bf16 autocast, because bf16 weights change its long-document results.
+The Qwen checkpoints are scored with bf16 weights, as the released models are.
+
+\subsection{External benchmarks and cost}
+\label{sec:external}
+
+To see whether training on the mixture changes behaviour outside it, we score six benchmarks as decision rows: BoolQ, MMLU, MMLU-Pro, ARC-Challenge, Winogrande and SciQ, with 500, 1200, 800, 600, 500 and 400 rows.
+The sample sizes follow LLM-as-Jev, whose samples are not released, so ours are seeded uniform draws.
+External is the mean accuracy over the six.
+These benchmarks are not used for any choice.
+
+Time per decision is the mean over 1{,}300 held-out rows on one A100, with one row at a time.

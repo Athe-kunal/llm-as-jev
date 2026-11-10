@@ -1,0 +1,39 @@
+\section{Related work}
+\label{sec:related}
+
+\paragraph{Jev-style decision models.}
+Most of the community decision models compared in LLM-as-Jev \citep{li2026llmasjev} use a decoder backbone and read the logits of an option letter or label, with the backbone frozen or tuned with LoRA.
+LLM-as-Jev studies this readout and when fine-tuning helps.
+AnyJev reads a typed decision from one prefill and corrects the label prior and the effect of option order without training \citep{zhang2026anyjev}.
+The Contrastive Language Model \citep{kwok2026clm} embeds the state (the context and the question) and each candidate separately, with a frozen Qwen3-8B and two projection heads, and scores them by cosine similarity, so the candidate embeddings can be cached.
+Because the two are encoded apart, a candidate never attends to the context, and its training starts from tens of millions of pairs.
+All of these start from a decoder.
+We start from an encoder that reads the context, the question and all options together, and compare the two under the same training data.
+
+\paragraph{Encoders that score options.}
+Prompt-based classifiers use the masked-token head of an encoder with a verbalizer for a fixed set of labels \citep{schick2021pet, gao2021lmbff}.
+Two encoder decision models are listed on public Jev leaderboards: Laya \citep{laya} and Von \citep{von}, both built on ModernBERT-large with one mask per option.
+Both add a new scoring head, and they are described in model cards, not in papers.
+Laya trains its head with reinforcement learning on proper scoring rules, and Von uses a listwise softmax loss with a Brier term.
+We reuse the pretrained masked-token head and score each option by ``yes'' against ``no'', so there is no new head.
+We also compare two losses, match the decoders in data and training, report a held-out test split, and add evidence.
+
+\paragraph{Option letters, position and label bias.}
+Reading the letter of the chosen option requires a model to bind the letter to the option text \citep{robinson2023mcsb}.
+Models favour certain option labels, and their accuracy changes when the options are reordered \citep{zheng2024notrobust, pezeshkpour2024order}.
+Corrections are usually applied after training, by calibrating with a content-free input \citep{zhao2021calibrate} or by dividing out a label prior and averaging over rotations of the options \citep{zhang2026anyjev}.
+We shuffle the options during training and measure how the two losses differ in the labels they predict.
+
+\paragraph{Encoders and decoders.}
+Controlled studies pretrain encoders and decoders with the same recipe, and find that encoders do well on classification and retrieval \citep{weller2025ettin} and that masked language modelling suits tasks that need text representations \citep{gisserotboukhlef2025mlm}.
+A much larger decoder can still beat an encoder on classification \citep{zhao2024classification}.
+Decoder designs target long generation, with multi-query and grouped-query attention to shrink the KV cache \citep{mqa, gqa}, and \citet{prefillonly} show that prefill-only workloads do not benefit from this and pay for the larger MLP layers.
+Modern encoders keep long inputs and fast inference \citep{modernbert, ultrabert}.
+Our comparison is at the scale of 0.4 to 0.6 billion parameters.
+
+\paragraph{Attribution and evidence.}
+ContextCite learns a surrogate model from many ablations of the context \citep{contextcite}.
+AT2 learns to weight attention heads, and needs a decoder pass \citep{at2}.
+SelfCite fine-tunes a model to cite, using the change in the answer probability when the cited text is removed or kept alone as the reward \citep{selfcite}.
+Rationale benchmarks such as ERASER compare selected evidence with human rationales \citep{deyoung2020eraser}.
+We train an evidence head on the encoder with labels from human-marked evidence and from the SelfCite reward, which gives the evidence in one pass.
