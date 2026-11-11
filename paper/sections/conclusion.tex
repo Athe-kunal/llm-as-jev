@@ -2,7 +2,7 @@
 \label{sec:conclusion}
 
 We built a decision model on an encoder, UltraBERT-380M, with one mask in front of each option, and compared four recipes for training it.
-With the same training examples, one epoch and full fine-tuning, every recipe is more accurate than Qwen3-0.6B trained with LLM-as-Jev (\TestUbList{}\% to \TestUbSig{}\% against \TestQwFull{}\% on the test set), and the encoder takes \MsUb{}\,ms per decision, against \MsQwFull{}\,ms for the decoder with our scorer and \MsPreQwFull{}\,ms for reading its input alone.
+With the same training examples, one epoch and full fine-tuning, every recipe is more accurate than Qwen3-0.6B trained with LLM-as-Jev (\TestUbList{}\% to \TestUbSig{}\% against \TestQwFull{}\% on the test set), and the encoder takes \MsUb{}\,ms per decision against \MsQwFull{}\,ms for the decoder, with similar peak memory.
 Among the encoder recipes, scoring an option by ``yes'' minus ``no'' instead of ``yes'' alone gives the larger test gain and all of the external gain.
 The sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points and label frequencies closer to the gold ones; the square-root softplus does not, and our comparison does not show which property of the sigmoid is responsible.
 An auxiliary head on the frozen encoder predicts, in the same pass, the sentences annotated as support.

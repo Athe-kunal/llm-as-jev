@@ -41,22 +41,22 @@ The square-root softplus has the smallest largest gradient norm (\CpGradSqrt{}),
 \subsection{Time and memory}
 \label{sec:cost}
 
-One row at a time, the encoder takes \MsUb{}\,ms per decision, against \MsQwFull{}\,ms for Qwen3-0.6B and \MsQwFourLora{}\,ms for Qwen3-4B with our trie scorer.
-Most of the decoder's time goes to the trie steps after the input is read: reading the input alone takes \MsPreQwFull{}\,ms and \MsPreQwFourLora{}\,ms.
-Reading the input is a lower bound for a decoder decision, which a faster trie implementation could approach, so against Qwen3-0.6B the encoder's \MsUb{}\,ms should be compared with something between \MsPreQwFull{} and \MsQwFull{}\,ms.
-\Cref{app:impl} gives the batched throughput.
+A decoder needs the trie of option numbers to decide: from ten options on, the later digits tell the options apart.
+For a fair comparison we time the decoders with a scorer that reads the input once and then all trie nodes in one more forward pass on the shared KV cache, under a mask that lets each node see the input and its own earlier digits.
+It gives the same scores as the scorer used for evaluation (they agree to $10^{-4}$ in fp32), which copies the cache for every node and takes \MsCopyQwFull{}\,ms and up to \MemPeakCopyQwFull{}\,GiB on Qwen3-0.6B.
 
-\Cref{tab:memory} gives the GPU memory that PyTorch allocates in the same calls.
-The decoders' peaks during a decision come mostly from our trie scorer, which copies the prompt's KV cache once for each option-number node.
-Reading the input alone, Qwen3-0.6B peaks at \MemPrePeakQwFull{}\,GiB, against \MemPeakUb{}\,GiB for the encoder with fp32 weights and \MemPeakUbBf{}\,GiB with bf16 weights.
-At this scale and with inputs up to \MaxTokens{} tokens we see no prefill memory spike that sets the decoder apart.
+One row at a time, the encoder takes \MsUb{}\,ms per decision, against \MsQwFull{}\,ms for Qwen3-0.6B and \MsQwFourLora{}\,ms for Qwen3-4B (\cref{tab:memory}).
+Reading the input alone takes the decoders \MsPreQwFull{}\,ms and \MsPreQwFourLora{}\,ms, and the rest is the second pass, over the trie.
+Memory is a different story: the trie adds almost nothing, and Qwen3-0.6B peaks at \MemPeakQwFull{}\,GiB, against \MemPeakUb{}\,GiB for the encoder with fp32 weights and \MemPeakUbBf{}\,GiB with bf16 weights.
+At this scale and with inputs up to \MaxTokens{} tokens, the encoder is faster but does not use less memory.
+\Cref{app:impl} gives the batched throughput.
 
 \begin{table}[t]
   \centering\small
-  \caption{Peak GPU memory (GiB, allocated by PyTorch, weights included) when scoring the dev rows one at a time on
-  one A100. Decision: the full scoring path, for decoders the input followed by the trie of option numbers; prefill only:
-  the input read once, without the trie. Rows $>$4{,}096 tok.: mean peak over rows longer than 4{,}096 tokens; Max: the
-  largest peak over all rows. Decoders use bf16 weights.}
+  \caption{Time and peak GPU memory per decision, scoring the dev rows one at a time on one A100. The decoders
+  use bf16 weights and read the input, then the whole trie of option numbers in one more pass on the shared KV cache.
+  Memory is what PyTorch allocates, in GiB, weights included; rows $>$4{,}096 tok.: mean peak over rows longer than
+  4{,}096 tokens; max: the largest peak over all rows.}
   \label{tab:memory}
   \input{generated/table_memory}
 \end{table}

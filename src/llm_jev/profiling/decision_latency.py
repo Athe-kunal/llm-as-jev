@@ -21,6 +21,8 @@ taken per row in latency mode (max, and mean per length bucket) and over the
 whole batched pass in throughput mode. For decoders, "prefill" repeats the
 latency pass with the input read once and only the last position's logits kept
 (no trie steps, which copy the prompt's KV cache once per option-number node).
+"tree" times answers.score_tree: the same scores, with the whole trie read in
+one extra forward on the shared prompt cache under a tree mask (no copies).
 """
 
 import argparse
@@ -110,8 +112,11 @@ def time_decoder(model_id: str, rows: list, warmup: int) -> dict:
         model(input_ids=torch.tensor([p], device="cuda"), use_cache=True, logits_to_keep=1)
 
     pre_secs, pre_peaks = timed_rows([lambda p=p: prefill(p) for p in prompts])
+    tree_secs, tree_peaks = timed_rows([lambda p=p, r=r: answers.score_tree(model, p, tok, len(r.options), "cuda")
+                                        for p, r in zip(prompts, rows)])
     out = {"latency": summary(secs, tokens), "memory": memory(weights, peaks, tokens),
            "prefill": {"latency": summary(pre_secs, tokens), "memory": memory(weights, pre_peaks, tokens)},
+           "tree": {"latency": summary(tree_secs, tokens), "memory": memory(weights, tree_peaks, tokens)},
            "throughput": {"rows": len(rows), "seconds": batched, "rows_per_s": len(rows) / batched,
                           "peak_gib": PEAKS[-1]}}
     del model

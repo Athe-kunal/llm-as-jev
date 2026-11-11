@@ -29,7 +29,7 @@ No training row exceeds either token limit, because the data are cut at \MaxToke
 
 \paragraph{Batched throughput.}
 When the dev rows are scored in batches, the encoder processes \RpsUb{} rows per second, against \RpsQwFull{} for Qwen3-0.6B and \RpsQwFourLora{} for Qwen3-4B.
-The encoder uses packed variable-length FlashAttention-2 \citep{flashattention2} and the decoders use length-sorted padded batches, so part of this gap comes from the padding.
+The encoder uses packed variable-length FlashAttention-2 \citep{flashattention2} and the decoders use length-sorted padded batches with the cache-copying trie scorer, so part of this gap comes from the padding and the copies.
 
 \section{Evidence head}
 \label{app:evidence}

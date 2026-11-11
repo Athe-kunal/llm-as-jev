@@ -7,7 +7,7 @@ We compare four recipes, which differ in how each option is scored and how the s
 Against Qwen3-0.6B, fully fine-tuned on the same data with the LLM-as-Jev recipe \citep{li2026llmasjev} (\textbf{\TestQwFull{}\%} test accuracy), the encoder reaches \textbf{\TestUbList{}\%} to \textbf{\TestUbSig{}\%}.
 Among the encoder recipes, scoring an option by ``yes'' minus ``no'' instead of ``yes'' alone raises test accuracy from \TestUbList{}\% to \TestUbYesNo{}\% and external-benchmark accuracy from \ExtUbList{}\% to \textbf{\ExtUbYesNo{}\%} (\textbf{\ExtQwFull{}\%} for the decoder).
 The sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points and nothing on the external benchmarks; the square-root softplus adds nothing.
-One request at a time on an NVIDIA A100 80GB GPU, the encoder takes \textbf{\MsUb{}\,ms} per decision; Qwen3-0.6B takes \textbf{\MsQwFull{}\,ms} with our scorer, of which reading the input takes \MsPreQwFull{}\,ms.
+One request at a time on an NVIDIA A100 80GB GPU, the encoder takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms} for Qwen3-0.6B, with similar peak memory.
 We also add an auxiliary head that predicts, in the same pass, the sentences annotated as supporting the answer.
 It is trained on human-marked evidence and on labels selected with a reward adapted from SelfCite \citep{selfcite}.
 \end{abstract}

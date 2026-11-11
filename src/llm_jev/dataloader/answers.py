@@ -231,6 +231,46 @@ def score_batch(model, prompts: list[list[int]], tokenizer: Any,
     return [read_trie(lp, suffixes, nodes) for lp, (suffixes, nodes) in zip(logp, tries)]
 
 
+@functools.cache
+def _tree(tokenizer: Any, k: int) -> tuple[list[tuple[int, ...]], torch.Tensor]:
+    """The non-root trie nodes (by depth) and their tree mask [q, q]: node i sees node j
+    when j is a prefix of i, itself included."""
+    _, nodes = candidates(tokenizer, k)
+    inner = sorted((x for x in nodes if x), key=len)
+    index = {x: i for i, x in enumerate(inner)}
+    mask = torch.zeros(len(inner), len(inner), dtype=torch.bool)
+    for i, x in enumerate(inner):
+        for d in range(1, len(x) + 1):
+            mask[i, index[x[:d]]] = True
+    return inner, mask
+
+
+@torch.no_grad()
+def score_tree(model, prompt: list[int], tokenizer: Any, k: int, device: str):
+    """The output of score, with the trie read in one extra forward that shares the prompt's cache.
+
+    The prompt is read once (only its last logits kept). Every non-root trie
+    node then enters as one token at position len(prompt) + depth - 1, in a
+    single forward on the prompt's KV cache, under a tree mask: a node attends
+    to the whole prompt, its ancestors and itself. No cache is copied.
+    """
+    suffixes, nodes = candidates(tokenizer, k)
+    n = len(prompt)
+    out = model(input_ids=torch.tensor([prompt], device=device), use_cache=True, logits_to_keep=1)
+    lp = {(): torch.log_softmax(out.logits[0, -1].float(), -1)}
+    inner, tree = _tree(tokenizer, k)
+    if inner:
+        q = len(inner)
+        mask = torch.cat([torch.ones(q, n, dtype=torch.bool), tree], 1).to(device)[None, None]
+        o = model(input_ids=torch.tensor([[x[-1] for x in inner]], device=device),
+                  attention_mask=mask,
+                  position_ids=torch.tensor([[n + len(x) - 1 for x in inner]], device=device),
+                  past_key_values=out.past_key_values, use_cache=True)
+        for x, row in zip(inner, torch.log_softmax(o.logits[0].float(), -1)):
+            lp[x] = row
+    return read_trie(lp, suffixes, nodes)
+
+
 def score_examples(model, examples: list[schema.Example], tokenizer: Any, device: str,
                    budget: int = 32768, max_rows: int = 64) -> list[tuple]:
     """score_batch's (s, root legal mass, decoded) for every example (options in
