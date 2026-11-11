@@ -51,7 +51,7 @@ from llm_jev.modeling import evidence
 
 def make_app(run: str, data: str, split: str, attention: str | None,
              at2: str | None = None, evidence_dir: str | None = None,
-             max_share: float = 0.15) -> fastapi.FastAPI:
+             max_share: float = 0.15, threshold_file: str = "threshold.json") -> fastapi.FastAPI:
     """Loads the run (or the AT2 run's encoder) and the rows; returns the app."""
     theta = None
     if at2:
@@ -69,7 +69,7 @@ def make_app(run: str, data: str, split: str, attention: str | None,
         head.load_state_dict(torch.load(pathlib.Path(evidence_dir) / "head.pt"))
         head.eval()
     # highlight rule: p >= the tuned global threshold (threshold.json), capped at the top max_share of words
-    tfile = pathlib.Path(evidence_dir or "") / "threshold.json"
+    tfile = pathlib.Path(evidence_dir or "") / threshold_file
     threshold = json.loads(tfile.read_text())["threshold"] if evidence_dir and tfile.exists() else 0.5
     rows = {r.id: r for r in storage.load_examples(data, split)}
     by = collections.defaultdict(list)
@@ -209,6 +209,8 @@ def main() -> None:
     parser.add_argument("--max-share", type=float, default=0.15,
                         help="evidence words shown: at most this share of a document's words")
     parser.add_argument("--port", type=int, default=8767)
+    parser.add_argument("--threshold-file", default="threshold.json",
+                        help="word threshold file in the evidence run (threshold_test.json: tuned on dev)")
     args = parser.parse_args()
     at2 = args.at2 if args.at2 and (pathlib.Path(args.at2) / "theta.pt").exists() else None
     if args.at2 and not at2:
@@ -216,7 +218,7 @@ def main() -> None:
     ev = args.evidence if args.evidence and (pathlib.Path(args.evidence) / "head.pt").exists() else None
     if args.evidence and not ev:
         logger.warning("no {}/head.pt: serving without the evidence head", args.evidence)
-    uvicorn.run(make_app(args.run, args.data, args.split, args.attention, at2, ev, args.max_share),
+    uvicorn.run(make_app(args.run, args.data, args.split, args.attention, at2, ev, args.max_share, args.threshold_file),
                 host="127.0.0.1", port=args.port, log_level="warning")
 
 

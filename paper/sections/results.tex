@@ -4,24 +4,23 @@
 \subsection{Encoder against decoder}
 
 \Cref{tab:headline} and \cref{fig:headline} give the main comparison.
-With the same data and training budget, UltraBERT-380M with the sigmoid-normalised loss reaches \TestUbSig{}\% on the test set, against \TestQwFull{}\% for Qwen3-0.6B, a difference of \DiffUbSigQwFull{} points.
-With the plain softmax the encoder reaches \TestUbList{}\%, still \DiffUbListQwFull{} points above the decoder.
+With the same data and training budget, every encoder recipe is above Qwen3-0.6B (\TestQwFull{}\% on the test set): \TestUbList{}\% with the softmax over ``yes'', \TestUbYesNo{}\% with ``yes'' minus ``no'', and \TestUbSig{}\% with the sigmoid-normalised loss.
 The encoder also has fewer parameters, 380M against 0.6B.
-On the six external benchmarks the order is the same: \ExtUbSig{}\% for the encoder and \ExtQwFull{}\% for the decoder.
+On the six external benchmarks the encoder recipes reach \ExtUbList{}\%, \ExtUbYesNo{}\% and \ExtUbSig{}\%, against \ExtQwFull{}\% for the decoder.
 Every test number is below its dev number by 0.6 to 2.0 points, because the learning rates were chosen on dev, and the ranking does not change.
 The reproduced Qwen3-4B LoRA model, at \TestQwFourLora{}\%, remains ahead of all sub-billion models, so our claims are limited to models below one billion parameters.
 
 \subsection{Training regime}
 
 The reproduced LoRA model of the same size reaches \TestQwLora{}\%, \DiffQwFullQwLoraAbs{} points below the fully fine-tuned decoder.
-Both were trained on the same data, so this gap comes from updating all weights instead of a LoRA adapter, and accounts for about half of the \DiffUbSigQwLoraText{}-point gap between the encoder and the LoRA model.
+Both were trained on the same data, so this gap comes from updating all weights instead of a LoRA adapter, and accounts for about half of the \DiffUbSigQwLoraText{}-point gap between the best encoder recipe and the LoRA model.
 The external accuracy of fully fine-tuned Qwen3-0.6B (\ExtQwFull{}\%) is not above that of its LoRA model (\ExtQwLora{}\%); \cref{sec:analysis} shows how the learning rate and the number of epochs trade held-out against external accuracy.
 
-\subsection{Loss}
+\subsection{Recipes}
 
-The sigmoid-normalised loss is better than the plain softmax by \DiffUbSigUbList{} points on the test set, and by 1.7 points on the external benchmarks (\ExtUbSig{}\% against \ExtUbList{}\%).
-Its results vary less between seeds.
-The two losses differ in the score as well as in the normalisation; \cref{sec:analysis} separates the two and compares the labels that each loss predicts.
+Scoring by ``yes'' minus ``no'' gives most of the gain: over the ``yes'' logit alone it adds \DiffUbYesNoUbListAbs{} points on the test set and \ExtUbYesNo{}\% against \ExtUbList{}\% on the external benchmarks.
+The sigmoid normalisation adds a further \DiffUbSigUbYesNoAbs{} points on the test set and nothing on the external benchmarks, and its results vary less between seeds.
+\Cref{sec:analysis} compares the labels that each recipe predicts.
 
 \subsection{How strongly the options depend on each other}
 \label{sec:coupling}
@@ -30,8 +29,9 @@ A softmax gate couples the experts of a mixture of experts, and DeepSeek-V3 repl
 We test whether this matters for options.
 On the dev rows, we shuffle the options four times and remove one wrong option, and add a softmax model scored with ``yes'' minus ``no'' to separate the score from the normalisation (\cref{tab:coupling}).
 
-The answers become steadier from the score, not the sigmoid: ``yes'' minus ``no'' lowers the answer changes under shuffling from \CpShufYes{}\% to \CpShufYesNo{}\%, and the sigmoid adds nothing (\CpShufSig{}\%).
-The sigmoid gives a small gain in label balance (total variation \CpLabelSig{} against \CpLabelYesNo{}), calibration and dev accuracy.
+The score does most of the work: ``yes'' minus ``no'' raises external accuracy from \CpExtYes{}\% to \CpExtYesNo{}\%, lowers the answer changes when a wrong option is removed from \CpDropYes{}\% to \CpDropYesNo{}\%, and lowers the largest gradient norm from \CpGradYes{} to \CpGradYesNo{}.
+Under shuffling, the score and the sigmoid each remove about one point (\CpShufYes{}\%, \CpShufYesNo{}\%, \CpShufSig{}\%).
+On top of the score, the sigmoid raises dev accuracy from \CpAccYesNo{}\% to \CpAccSig{}\%, lowers the calibration error from \CpEceYesNo{} to \CpEceSig{}, and fixes the label balance, which the score alone makes worse (total variation \CpLabelYes{}, \CpLabelYesNo{}, \CpLabelSig{}).
 After training, the gold option's sigmoid averages only \CpSigGoldSig{}, so the model acts almost like a softmax.
 
 \subsection{Cost}

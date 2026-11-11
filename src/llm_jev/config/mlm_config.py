@@ -57,7 +57,8 @@ class OptimConfig:
     max_grad_norm: float = 1.0
     loss: str = "listwise"             # encoder.LOSSES: "listwise" (options compete) or
                                        # "sigmoid_norm" (sigmoids normalised by their sum, as DeepSeek-V3's
-                                       # gate; needs format.no_token)
+                                       # gate; needs format.no_token) or "sqrt_softplus" (sqrt(softplus)
+                                       # normalised by the sum; needs format.no_token)
 
 
 @dataclasses.dataclass

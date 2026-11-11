@@ -4,9 +4,9 @@ Needs the Try-it server (blogs/server.py, with the evidence head) running, e.g. 
 
   .venv/bin/python paper/figures/export_examples.py [--port 8767]
 
-Rule, fixed in advance: the evaluation rows of the evidence study (attribution_mlm.select_rows, seed 0,
-50 rows per dataset); for each dataset, the first row in that order whose prompt has at most MAX_TOKENS
-tokens. A dataset with no such row is left out. Writes paper/figures/examples.json.
+Rule, fixed in advance: the test rows of the evidence study (attribution_mlm.select_rows, part test,
+all rows, split order); for each dataset, the first row in that order whose prompt has at most MAX_TOKENS
+tokens. The server must use the evidence head's dev-tuned threshold (--threshold-file threshold_test.json). A dataset with no such row is left out. Writes paper/figures/examples.json.
 """
 import argparse
 import json
@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8767)
     port = parser.parse_args().port
-    rows = attribution_mlm.select_rows(storage.load_examples(source="data/splits/reason_long_nimble", split="eval"), 50, 0)
+    rows = attribution_mlm.select_rows(storage.load_examples(source="data/splits/reason_long_nimble", split="eval"), 0, 0, "test")
     chosen = {}
     for r in rows:
         if r.source in chosen:

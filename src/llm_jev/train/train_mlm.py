@@ -78,7 +78,7 @@ def main() -> None:
     cfg = mlm_config.resolve(raw)
     if cfg.optim.loss not in encoder.LOSSES:
         raise ValueError(f"optim.loss is one of {encoder.LOSSES}, not {cfg.optim.loss!r}")
-    if cfg.optim.loss == "sigmoid_norm" and cfg.format.no_token is None:
+    if cfg.optim.loss in ("sigmoid_norm", "sqrt_softplus") and cfg.format.no_token is None:
         raise ValueError(f"optim.loss={cfg.optim.loss} needs format.no_token (e.g. ' no'): its sigmoid is "
                          "on logit(yes) - logit(no), not on the raw logit(yes) (~200 in size, sigmoid = 1)")
 

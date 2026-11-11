@@ -79,8 +79,8 @@ On the softmax encoder, adding the generated labels to the gold ones raises sent
 \label{app:examples}
 
 The examples show the decision of the sigmoid-normalised encoder and the token scores of its evidence head for one row of each of three datasets.
-The rows are the first of each dataset, in the evaluation order of the evidence study, that has at most 1{,}400 tokens; MuSiQue has none.
-Only the tokens that the head scores at or above its threshold of \EvThrSig{} for the chosen option are highlighted, darker for a higher probability, and tokens inside the gold evidence are underlined.
+The rows are the first test row of each dataset in the evidence study that has at most 1{,}400 tokens; MuSiQue has none.
+Only the tokens that the head scores at or above its dev-tuned threshold of \EvThrSig{} for the chosen option are highlighted, darker for a higher probability, and tokens inside the gold evidence are underlined.
 The encoder chooses the correct option in all three rows; the rows were picked by the rule above and not by outcome.
 
 \input{generated/examples}

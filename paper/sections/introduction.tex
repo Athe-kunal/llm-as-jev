@@ -35,14 +35,14 @@ Our contributions are:
   \item \textbf{An encoder decision model.}
     We fine-tune UltraBERT-380M \citep{ultrabert} with one mask per option and the ``yes'' versus ``no'' prediction at each mask as the option's score.
     It is trained on the same data as LLM-as-Jev.
-  \item \textbf{A sigmoid-normalised loss.}
-    Each option gets its own sigmoid score, divided by the sum over options, as in the gate of DeepSeek-V3 \citep{deepseekv3}.
-    We compare it with the plain softmax over options and study how each loss treats the position and the label of the correct option.
+  \item \textbf{Training recipes for the encoder.}
+    We compare three ways to train on the mask predictions: a softmax over the ``yes'' logits, a softmax over ``yes'' minus ``no'', and a sigmoid-normalised loss as in the gate of DeepSeek-V3 \citep{deepseekv3}.
+    For each we measure accuracy, steadiness under option shuffling and removal, label balance and calibration.
   \item \textbf{A matched comparison with decoders.}
     We fully fine-tune Qwen3-0.6B \citep{qwen3} on the same data, tune the learning rate for every model, repeat the runs over seeds and evaluate on a held-out test split that was never used for a choice.
     We report accuracy, accuracy on external benchmarks, and time per decision, with two LoRA models \citep{lora} reproduced from LLM-as-Jev as references.
   \item \textbf{Evidence for the decision.}
     A decision model that generates no text gives no reasons, so we train an evidence head on the same encoder.
     Its labels come from human-marked evidence and from generated labels selected with a reward adapted from SelfCite \citep{selfcite}.
-    We compare it with ContextCite \citep{contextcite} and AT2 \citep{at2} on agreement with human evidence over 200 rows, and on cost.
+    We compare it with ContextCite \citep{contextcite} and AT2 \citep{at2} on agreement with human evidence on the test set, and on cost.
 \end{itemize}

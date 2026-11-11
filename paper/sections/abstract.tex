@@ -1,13 +1,12 @@
 \begin{abstract}
 A decision model picks one answer from a set of options in a single forward pass, without writing out its reasoning.
 It is cheap enough to run on every item in a large pipeline, for example to grade, filter or route text.
-This technical report gives a fine-tuning recipe for encoder-style decision models.
-We fine-tune UltraBERT-380M \citep{ultrabert}, an encoder pretrained with masked language modelling.
-We train it with a sigmoid-normalised loss: each option gets its own sigmoid score, which is divided by the sum over options, as in the expert gate of DeepSeek-V3 \citep{deepseekv3}.
-We compare it with sub-billion decoders.
-Qwen3-0.6B, fully fine-tuned on the same data with the LLM-as-Jev recipe \citep{li2026llmasjev}, reaches \textbf{\TestQwFull{}\%} test accuracy.
-The encoder reaches \textbf{\TestUbSig{}\%}.
-It also scores higher on external benchmarks (\textbf{\ExtUbSig{}\%} against \textbf{\ExtQwFull{}\%}), and takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms} on an NVIDIA A100 80GB GPU.
+This technical report compares recipes for fine-tuning encoder-style decision models.
+We fine-tune UltraBERT-380M \citep{ultrabert}, an encoder pretrained with masked language modelling, with one mask per option.
+We compare three recipes: a softmax over each option's ``yes'' logit, a softmax over ``yes'' minus ``no'', and a sigmoid-normalised loss, as in the expert gate of DeepSeek-V3 \citep{deepseekv3}.
+Against Qwen3-0.6B, fully fine-tuned on the same data with the LLM-as-Jev recipe \citep{li2026llmasjev} (\textbf{\TestQwFull{}\%} test accuracy), the three recipes reach \textbf{\TestUbList{}\%}, \textbf{\TestUbYesNo{}\%} and \textbf{\TestUbSig{}\%}.
+Scoring by ``yes'' minus ``no'' gives most of the gain, including all of the gain on external benchmarks (\textbf{\ExtUbYesNo{}\%} against \textbf{\ExtQwFull{}\%} for the decoder); the sigmoid normalisation adds a smaller in-distribution gain and steadier runs.
+The encoder takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms} on an NVIDIA A100 80GB GPU.
 We also add an evidence head that marks, in the same pass, the sentences an annotator would mark as support for the answer.
 It is trained on human-marked evidence and on labels selected with a reward adapted from SelfCite \citep{selfcite}.
 \end{abstract}

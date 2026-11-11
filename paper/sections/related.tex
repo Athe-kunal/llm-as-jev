@@ -16,13 +16,13 @@ Two encoder decision models are listed on public Jev leaderboards \citep{jevbenc
 Both add new layers on top of the encoder, and they are described in model cards.
 Laya trains its head with reinforcement learning on proper scoring rules, and Von uses a listwise softmax loss with a Brier term.
 We reuse the pretrained masked-token head and score each option by ``yes'' against ``no'', so there is no new head.
-We also compare two losses, match the decoders in data and training, report a held-out test split, and add evidence.
+We also compare three training recipes, match the decoders in data and training, report a held-out test split, and add evidence.
 
 \paragraph{Option letters, position and label bias.}
 Reading the letter of the chosen option requires a model to bind the letter to the option text \citep{robinson2023mcsb}.
 Models favour certain option labels, and their accuracy changes when the options are reordered \citep{zheng2024notrobust, pezeshkpour2024order}.
 Corrections are usually applied after training, by calibrating with a content-free input \citep{zhao2021calibrate} or by dividing out a label prior and averaging over rotations of the options \citep{zhang2026anyjev}.
-We shuffle the options during training and measure how the two losses differ in the labels they predict.
+We shuffle the options during training and measure how the recipes differ in the labels they predict.
 
 \paragraph{Encoders and decoders.}
 Controlled studies pretrain encoders and decoders with the same recipe, and find that encoders do well on classification and retrieval \citep{weller2025ettin} and that masked language modelling suits tasks that need text representations \citep{gisserotboukhlef2025mlm}.

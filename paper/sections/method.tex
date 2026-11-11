@@ -42,7 +42,7 @@ We use two scores.
 The first is $s_k=\ell_k(\textit{yes})$.
 The second is $s_k=\ell_k(\textit{yes})-\ell_k(\textit{no})$, which also asks the model to reject the other options.
 Both give a decision by $\arg\max_k s_k$.
-The two losses differ in how the scores of the $K$ options are turned into a distribution.
+A recipe pairs a score with one of the two normalisations below. We train three: the softmax with either score, and the sigmoid-normalised loss with the difference.
 
 \paragraph{Plain softmax.}
 The options compete through one softmax,

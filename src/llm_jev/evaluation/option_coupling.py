@@ -46,6 +46,9 @@ MAX_LABELS = 5  # a "fixed label set" dataset has one option set of at most this
 
 def probs(s: torch.Tensor, kind: str) -> torch.Tensor:
     """The run's training distribution over the K options."""
+    if kind == "sqrt_softplus":
+        from llm_jev.modeling import encoder
+        return torch.softmax(encoder.log_sqrt_softplus(s), 0)
     if kind == "sigmoid_norm":
         sig = torch.sigmoid(s)
         return sig / sig.sum()

@@ -99,7 +99,13 @@ def score(scorer, ex: dict[str, Any], device: str = "cuda") -> torch.Tensor:
                   torch.tensor(ex["masks"], device=device))
 
 
-LOSSES = ("listwise", "sigmoid_norm")
+LOSSES = ("listwise", "sigmoid_norm", "sqrt_softplus")
+
+
+def log_sqrt_softplus(s: torch.Tensor) -> torch.Tensor:
+    """log sqrt(softplus(s)) = 0.5 log softplus(s), stable: softplus(s) ~ e^s for very negative s."""
+    sp = nn.functional.softplus(s)
+    return 0.5 * torch.where(s < -20, s, sp.clamp_min(1e-30).log())
 
 
 def loss(scorer, ex: dict[str, Any], device: str = "cuda", kind: str = "listwise"
@@ -110,7 +116,9 @@ def loss(scorer, ex: dict[str, Any], device: str = "cuda", kind: str = "listwise
     compete; L_tree with one level). kind "sigmoid_norm" (DeepSeek-V3's gate): each
     option's sigmoid(s_k), normalised by their sum, p_k = sigmoid(s_k) / sum_j sigmoid(s_j),
     and -log p_gold: options get independent yes-probabilities but still compete, with one
-    loss term per row whatever K is. Prediction is unchanged (argmax s).
+    loss term per row whatever K is. kind "sqrt_softplus": the same with g(s) = sqrt(softplus(s))
+    in place of sigmoid(s) (unbounded above, so an accepted option keeps a slowly fading gradient).
+    Prediction is unchanged (argmax s).
     """
     s = score(scorer, ex, device)                                      # [K]
     gold = torch.tensor(ex["gold"], device=s.device)
@@ -119,6 +127,9 @@ def loss(scorer, ex: dict[str, Any], device: str = "cuda", kind: str = "listwise
     elif kind == "sigmoid_norm":
         log_sig = nn.functional.logsigmoid(s)                          # log sigmoid(s_k), stable
         value = log_sig.logsumexp(0) - log_sig[gold]                   # -log(sigmoid_gold / sum sigmoid)
+    elif kind == "sqrt_softplus":
+        log_g = log_sqrt_softplus(s)                                   # log g(s_k), g = sqrt(softplus)
+        value = log_g.logsumexp(0) - log_g[gold]                       # -log(g_gold / sum g)
     else:
         raise ValueError(f"loss kind is one of {LOSSES}, not {kind!r}")
     return value, s.argmax() == gold
