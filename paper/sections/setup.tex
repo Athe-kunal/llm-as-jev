@@ -33,7 +33,7 @@ The encoder is fully fine-tuned, so the fully fine-tuned decoder is the matched 
 \label{sec:Implementation details}
 
 Every model is trained for one epoch with a batch of 32 rows.
-We sweep the learning rate with one seed per value and choose by accuracy on the dev set:
+We sweep the learning rate for the decoder and for two encoder recipes, with one seed per value, and choose by accuracy on the dev set:
 $\{0.8, 1.5, 3, 5\}\times10^{-5}$ for the encoder with the softmax over ``yes'', $\{0.8, 1.5, 2, 3\}\times10^{-5}$ with the sigmoid-normalised loss, and $\{0.5, 1, 2\}\times10^{-5}$ for the decoder.
 Both encoder sweeps choose $1.5\times10^{-5}$, which we also use for the other two recipes, without a sweep.
 The two best Qwen rates differ by 0.1 points on dev, and we use $1\times10^{-5}$.
@@ -55,5 +55,8 @@ These benchmarks are not used for any choice.
 
 Time per decision is the latency of one request: we score the dev rows one at a time on one A100 and report the mean.
 This is the cost when a pipeline sends each item as it arrives; \cref{app:impl} gives the throughput when rows are batched.
+A call covers the forward pass and the scoring of the options, but not tokenisation; the first 20 rows warm up the GPU, which is synchronised around every call.
+For the decoder it includes the steps of the trie: Qwen3 writes each digit as a separate token, so the options numbered 10 and above take more than one step after the input is read.
+The dev rows average 1{,}100 to 1{,}200 tokens, depending on the tokenizer.
 The encoder is timed on the softmax checkpoint, which has the same architecture as the sigmoid-normalised one, in the scoring precision.
 The decoders are timed with the reproduced LoRA checkpoints in bf16, with the LoRA weights merged, which have the same architecture as the fully fine-tuned model.

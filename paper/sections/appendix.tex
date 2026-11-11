@@ -46,7 +46,10 @@ We use gold evidence where it exists (Nimble, ContractNLI, MuSiQue, ProofWriter)
 Qwen3.6-27B with thinking gets the numbered sentences, the question and the gold answer, and is asked for the smallest set of sentences that supports the answer and without which it is unsupported.
 We sample ten replies (temperature 1.2, top-$p$ 0.9), merge identical sets, and drop sets over 384 tokens unless they are one sentence.
 The same model scores each set $S$ on the decision prompt with the full context, without $S$ and with only $S$ ($1+2m$ prompts for $m$ sets); $q(\mathrm{gold}\mid\cdot)$ is the softmax over the options' summed token log-probabilities.
-The label is the set with the highest reward $\log q(\mathrm{gold}\mid\text{only }S)-\log q(\mathrm{gold}\mid\text{without }S)$, sufficiency plus necessity, with no size penalty since the token cap bounds the set.
+The label is the set with the highest reward $\log q(\mathrm{gold}\mid\text{only }S)-\log q(\mathrm{gold}\mid\text{without }S)$.
+This is sufficiency, $\log q(\mathrm{gold}\mid\text{only }S)-\log q(\mathrm{gold}\mid\text{full})$, plus necessity, $\log q(\mathrm{gold}\mid\text{full})-\log q(\mathrm{gold}\mid\text{without }S)$; the full-context term cancels, and we keep it only to report the two parts.
+The best set is always kept, with no minimum reward, so a row whose candidates are all poor still gets a label.
+There is no size penalty: the token cap limits the length of a set, but nothing makes it the smallest sufficient one.
 Unlike SelfCite, we score the gold answer, so the reward is informative only where the labelling model believes it.
 We did not check the generated labels against human evidence directly; the comparison at the end of this appendix is an indirect check.
 There are 7{,}778 labelled training rows (7{,}390 for training, 388 for validation), with 5.2\% positive tokens.

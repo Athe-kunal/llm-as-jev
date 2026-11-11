@@ -1,7 +1,7 @@
 \section{Method}
 \label{sec:method}
 
-\subsection{How a row is presented}
+\subsection{Input format}
 \label{sec:format}
 
 \Cref{fig:intro} shows the same row in both formats, built from the training data described in \cref{sec:data}.
@@ -41,11 +41,12 @@ Let $\ell_k(v)$ be the logit of token $v$ at mask $k$.
 A score $s_k$ says how strongly the model accepts option $k$, and the decision is the option with the highest score.
 We use two scores.
 The first is the ``yes'' logit alone, $s_k=\ell_k(\textit{yes})$.
-The second is $s_k=\ell_k(\textit{yes})-\ell_k(\textit{no})$: an option scores high only if the model prefers ``yes'' to ``no'' at its mask, so the model is also trained to say ``no'' to the wrong options.
+The second is $s_k=\ell_k(\textit{yes})-\ell_k(\textit{no})$, the preference for ``yes'' over ``no'' at mask $k$.
+Training raises the gold option's score relative to the other options; no mask gets its own yes-or-no target, so a chosen option can still prefer ``no'' (scores of $-3$ and $-8$ choose the first option).
 A normalisation turns the scores into probabilities over the options, and a recipe pairs a score with one of the three normalisations below.
 We train four recipes: the softmax with either score, and the other two normalisations with ``yes'' minus ``no'' only.
 The sigmoid does not work with the ``yes'' logit alone.
-Vocabulary logits are large, around 200 (\cref{sec:precision}), so the sigmoid of every option is close to 1, every option gets probability $1/K$ and the loss has no gradient.
+Vocabulary logits are large, around 200 (\cref{sec:precision}), so the sigmoid of every option is close to 1 and every option gets probability $1/K$; the gradient carries the factor $1-\sigma(s_k)$ (below) and is negligible. We did not train this pairing.
 ``Yes'' minus ``no'' is much smaller, so the sigmoid is not saturated.
 
 \paragraph{Plain softmax.}

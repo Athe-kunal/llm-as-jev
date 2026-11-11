@@ -10,12 +10,12 @@ The model sees the options numbered and answers with a number, which works for a
 Fine-tuning it to put its probability on the correct number, while keeping it close to the original model, helps most for small models and for tasks with many options.
 All the models it studies are decoders, which read the text from left to right.
 
-A decision is a prefill-only workload: the model reads the input once and produces a single token.
+A decision needs almost no generation: the model reads the input once and then scores the short identifiers of the options.
 Decoders are designed for the opposite case, long generation.
 Multi-query and grouped-query attention \citep{mqa, gqa} shrink the KV cache so that decoding can run with larger batches, and the parameters this removes are put back in the MLP layers.
 \citet{prefillonly} show what this costs when nothing is generated: the large intermediate tensors of the MLP layers cause periodic spikes in GPU memory during prefill, which limit the input length.
-An encoder has no generation step, so it does not keep a KV cache.
-It therefore does not need to shrink that cache and make up the parameters in larger MLP layers, which are the source of these memory spikes.
+An encoder has no generation step and keeps no KV cache, so this trade-off does not shape its design.
+We take these as reasons to try an encoder; at the scale of our models, \cref{sec:cost} finds no such memory difference.
 
 An encoder also reads the whole input in both directions.
 Its limitation was the head: a classifier head is fixed to one label set and must be trained again for each new task.
@@ -24,13 +24,13 @@ It already predicts a word at a masked position, so an option can be scored by a
 Recent encoders such as ModernBERT \citep{modernbert} and UltraBERT \citep{ultrabert} are pretrained with masked language modelling and can read long inputs, which decision tasks over documents need.
 
 Reading in both directions matters for citing evidence as well.
-A decoder usually reads the document first and the question after it, so that the document's KV cache can be reused across questions, as with prefix caching in vLLM \citep{vllm} and RadixAttention in SGLang \citep{sglang}.
-The document is then encoded without knowing the question, and its representations cannot be used as they are to find the evidence for one question.
-An encoder reads the question and the document together, so every token is conditioned on the question.
+When a decoder serves many questions about one document, the document usually comes first, so that its KV cache can be reused across questions, as with prefix caching in vLLM \citep{vllm} and RadixAttention in SGLang \citep{sglang}.
+The cached document states are then not conditioned on the question.
+Our encoder reads the question and the document together, so the evidence head works on document states that are conditioned on the question.
 
 We build an encoder decision model on this basis.
 It takes the same prompt and option list as LLM-as-Jev, puts one mask in front of each option, and scores all options in a single forward pass.
-It needs no new head, works with any number of options, and is small enough to run on every item of a pipeline.
+It needs no new head and supports a different number of options in every row.
 Our contributions are:
 \begin{itemize}\setlength{\itemsep}{2pt}\setlength{\topsep}{2pt}
   \item \textbf{An encoder decision model.}
@@ -38,12 +38,12 @@ Our contributions are:
     It is trained on the same data as LLM-as-Jev \citep{li2026llmasjev}.
   \item \textbf{Training recipes for the encoder.}
     We compare four ways to train on the mask predictions, which differ in how an option is scored and how the scores are turned into probabilities over the options; one of them follows the expert gate of DeepSeek-V3 \citep{deepseekv3}.
-    For each we measure accuracy, steadiness under option shuffling and removal, label balance and calibration.
-  \item \textbf{A matched comparison with decoders.}
-    We fully fine-tune Qwen3-0.6B \citep{qwen3} on the same data, tune the learning rate for every model, repeat the runs over seeds and evaluate on a test split that no choice was made on.
+    For each we measure accuracy, sensitivity to the order and removal of options, predicted label frequencies and calibration.
+  \item \textbf{A comparison with decoders under matched data.}
+    We fully fine-tune Qwen3-0.6B \citep{qwen3} on the same examples for the same single epoch, choose learning rates on a dev split, repeat the runs over seeds and evaluate on a test split excluded from model selection.
     We report accuracy, accuracy on external benchmarks, and time per decision, with two LoRA models \citep{lora} reproduced from LLM-as-Jev as references.
-  \item \textbf{Evidence for the decision.}
-    A decision model that generates no text gives no reasons, so we train an evidence head on the same encoder.
+  \item \textbf{Predicting supporting evidence.}
+    A decision model generates no text, so we train an auxiliary head on the same encoder to predict the annotated evidence for the chosen option; it is not evaluated as an explanation of how the model decides.
     Its labels come from human-marked evidence and from generated labels selected with a reward adapted from SelfCite \citep{selfcite}.
     We compare it with ContextCite \citep{contextcite} and AT2 \citep{at2} on agreement with human evidence on the test set, and on cost.
 \end{itemize}

@@ -5,8 +5,9 @@ This technical report compares recipes for fine-tuning encoder-style decision mo
 We fine-tune UltraBERT-380M \citep{ultrabert}, an encoder pretrained with masked language modelling, with one mask per option.
 We compare four recipes, which differ in how each option is scored and how the scores are turned into probabilities over the options; one of them follows the expert gate of DeepSeek-V3 \citep{deepseekv3}.
 Against Qwen3-0.6B, fully fine-tuned on the same data with the LLM-as-Jev recipe \citep{li2026llmasjev} (\textbf{\TestQwFull{}\%} test accuracy), the encoder reaches \textbf{\TestUbList{}\%} to \textbf{\TestUbSig{}\%}.
-Scoring by ``yes'' minus ``no'' gives most of the gain, including all of the gain on external benchmarks (\textbf{\ExtUbYesNo{}\%} against \textbf{\ExtQwFull{}\%} for the decoder); the bounded sigmoid adds a smaller in-distribution gain and steadier runs, which the unbounded square-root softplus does not.
-The encoder takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms} on an NVIDIA A100 80GB GPU.
-We also add an evidence head that marks, in the same pass, the sentences an annotator would mark as support for the answer.
+Among the encoder recipes, scoring an option by ``yes'' minus ``no'' instead of ``yes'' alone raises test accuracy from \TestUbList{}\% to \TestUbYesNo{}\% and external-benchmark accuracy from \ExtUbList{}\% to \textbf{\ExtUbYesNo{}\%} (\textbf{\ExtQwFull{}\%} for the decoder).
+The sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points and nothing on the external benchmarks; the square-root softplus adds nothing.
+One request at a time on an NVIDIA A100 80GB GPU, the encoder takes \textbf{\MsUb{}\,ms} per decision; Qwen3-0.6B takes \textbf{\MsQwFull{}\,ms} with our scorer, of which reading the input takes \MsPreQwFull{}\,ms.
+We also add an auxiliary head that predicts, in the same pass, the sentences annotated as supporting the answer.
 It is trained on human-marked evidence and on labels selected with a reward adapted from SelfCite \citep{selfcite}.
 \end{abstract}

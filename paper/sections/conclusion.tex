@@ -2,15 +2,17 @@
 \label{sec:conclusion}
 
 We built a decision model on an encoder, UltraBERT-380M, with one mask in front of each option, and compared four recipes for training it.
-With the same data and full fine-tuning, every recipe is more accurate than Qwen3-0.6B trained with LLM-as-Jev (\TestUbList{}\% to \TestUbSig{}\% against \TestQwFull{}\% on the test set), and the encoder takes \MsUb{}\,ms per decision against \MsQwFull{}\,ms.
-Scoring an option by ``yes'' minus ``no'' gives most of the gain, including all of the external gain; the bounded sigmoid adds \DiffUbSigUbYesNoAbs{} test points, steadier runs and better label balance, which an unbounded square-root softplus does not.
-An evidence head on the frozen encoder marks, in the same pass, the sentences an annotator would mark as support. On the test rows with gold evidence from four datasets, it ranks the annotated sentences higher on average than AT2 and ContextCite, which use no evidence labels, though ContextCite is better on ContractNLI.
+With the same training examples, one epoch and full fine-tuning, every recipe is more accurate than Qwen3-0.6B trained with LLM-as-Jev (\TestUbList{}\% to \TestUbSig{}\% against \TestQwFull{}\% on the test set), and the encoder takes \MsUb{}\,ms per decision, against \MsQwFull{}\,ms for the decoder with our scorer and \MsPreQwFull{}\,ms for reading its input alone.
+Among the encoder recipes, scoring an option by ``yes'' minus ``no'' instead of ``yes'' alone gives the larger test gain and all of the external gain.
+The sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points and label frequencies closer to the gold ones; the square-root softplus does not, and our comparison does not show which property of the sigmoid is responsible.
+An auxiliary head on the frozen encoder predicts, in the same pass, the sentences annotated as support.
+On the softmax encoder and the test rows with gold evidence from four datasets, it ranks the annotated sentences higher on average than AT2 and ContextCite, which use no evidence labels, though ContextCite is better on ContractNLI.
 
 The results have limits.
-They are at the scale of 0.4 to 0.6 billion parameters, and a 4B decoder is still more accurate overall, except on the intent datasets.
+They concern one encoder and one decoder at 0.4 to 0.6 billion parameters, and a 4B decoder is still more accurate overall, except on the intent datasets.
 We used one encoder and one training mixture, in English, and compared against one decoder family.
-The evidence head predicts the evidence that an annotator would mark, and does not show what the model used; ContextCite, which is fitted to the model's response to removed sentences, follows the model most closely.
-We did not measure memory; that argument rests on \citet{prefillonly}.
+The evidence head predicts annotated evidence, and we did not evaluate whether it reflects what the model used; ContextCite, which is fitted to the model's response to removed sentences, follows the model most closely.
+At 0.6B parameters and inputs up to \MaxTokens{} tokens, the decoder showed no prefill memory spike.
 
 Two directions follow.
 The first is larger encoders, to see whether the advantage holds above one billion parameters.

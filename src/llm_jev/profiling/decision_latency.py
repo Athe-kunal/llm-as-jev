@@ -14,9 +14,17 @@ split). Modes:
 Encoders are timed with fp32 weights under bf16 autocast (how they are
 evaluated) and with bf16 weights. The first --warmup rows are not timed; the
 GPU is synchronized around every timed call. Run it on an otherwise idle GPU.
+
+Memory (GiB, torch.cuda allocator): "weights" is what is allocated once the
+model is loaded; "peak" is the most allocated during a call (weights included),
+taken per row in latency mode (max, and mean per length bucket) and over the
+whole batched pass in throughput mode. For decoders, "prefill" repeats the
+latency pass with the input read once and only the last position's logits kept
+(no trie steps, which copy the prompt's KV cache once per option-number node).
 """
 
 import argparse
+import gc
 import json
 import pathlib
 import statistics
@@ -37,13 +45,37 @@ from llm_jev.modeling import modeling
 BUCKETS = ((0, 1024), (1024, 4096), (4096, 1 << 30))  # prompt tokens
 
 
+GIB = 1 << 30
+PEAKS: list[float] = []  # peak GiB of each timed() call, in order
+
+
 def timed(fn: Callable[[], object]) -> float:
-    """Seconds for fn() on the GPU."""
+    """Seconds for fn() on the GPU; its peak allocated memory goes to PEAKS."""
     torch.cuda.synchronize()
+    torch.cuda.reset_peak_memory_stats()
     t0 = time.perf_counter()
     fn()
     torch.cuda.synchronize()
-    return time.perf_counter() - t0
+    secs = time.perf_counter() - t0
+    PEAKS.append(torch.cuda.max_memory_allocated() / GIB)
+    return secs
+
+
+def timed_rows(fns: list[Callable[[], object]]) -> tuple[list[float], list[float]]:
+    """(seconds, peak GiB) per call."""
+    start = len(PEAKS)
+    secs = [timed(f) for f in fns]
+    return secs, PEAKS[start:]
+
+
+def memory(weights: float, peaks: list[float], tokens: list[int]) -> dict:
+    """Weights, max and mean peak, and mean peak per length bucket (GiB)."""
+    out = {"weights_gib": weights, "peak_max_gib": max(peaks),
+           "peak_mean_gib": statistics.fmean(peaks)}
+    for lo, hi in BUCKETS:
+        sel = [m for m, n in zip(peaks, tokens) if lo <= n < hi]
+        out[f"peak_gib_tokens_{lo}-{hi if hi < 1 << 30 else 'inf'}"] = statistics.fmean(sel) if sel else None
+    return out
 
 
 def summary(seconds: list[float], tokens: list[int]) -> dict:
@@ -65,14 +97,24 @@ def time_decoder(model_id: str, rows: list, warmup: int) -> dict:
 
     tok = AutoTokenizer.from_pretrained(model_id)
     model = modeling.load(model_id)
+    weights = torch.cuda.memory_allocated() / GIB
     prompts = [answers.prompt_ids(r, tok) for r in rows]
     for p, r in zip(prompts[:warmup], rows[:warmup]):
         answers.score(model, p, tok, len(r.options), "cuda")
-    secs = [timed(lambda p=p, r=r: answers.score(model, p, tok, len(r.options), "cuda"))
-            for p, r in zip(prompts, rows)]
+    secs, peaks = timed_rows([lambda p=p, r=r: answers.score(model, p, tok, len(r.options), "cuda")
+                              for p, r in zip(prompts, rows)])
     batched = timed(lambda: answers.score_examples(model, rows, tok, "cuda"))
-    out = {"latency": summary(secs, [len(p) for p in prompts]),
-           "throughput": {"rows": len(rows), "seconds": batched, "rows_per_s": len(rows) / batched}}
+    tokens = [len(p) for p in prompts]
+
+    def prefill(p):
+        model(input_ids=torch.tensor([p], device="cuda"), use_cache=True, logits_to_keep=1)
+
+    pre_secs, pre_peaks = timed_rows([lambda p=p: prefill(p) for p in prompts])
+    out = {"latency": summary(secs, tokens), "memory": memory(weights, peaks, tokens),
+           "prefill": {"latency": summary(pre_secs, tokens), "memory": memory(weights, pre_peaks, tokens)},
+           "throughput": {"rows": len(rows), "seconds": batched, "rows_per_s": len(rows) / batched,
+                          "peak_gib": PEAKS[-1]}}
+    del model
     return out
 
 
@@ -81,6 +123,7 @@ def time_encoder(run: str, rows: list, warmup: int, dtype: torch.dtype,
                  attention: str | None = None) -> dict:
     """Latency one row at a time; on FA2 varlen also packed throughput (evaluate_mlm.records)."""
     scorer, tok, fmt = evaluate_mlm.load_run(run, dtype=dtype, attention=attention)
+    weights = torch.cuda.memory_allocated() / GIB
     budget = evaluate_mlm.run_config(run).model.pack_tokens
     encoded = [mlm.encode(r, tok, fmt) for r in rows]
 
@@ -90,15 +133,18 @@ def time_encoder(run: str, rows: list, warmup: int, dtype: torch.dtype,
 
     for ex in encoded[:warmup]:
         one(ex)
-    secs = [timed(lambda ex=ex: one(ex)) for ex in encoded]
+    secs, peaks = timed_rows([lambda ex=ex: one(ex) for ex in encoded])
     throughput = None
     if evaluate_mlm.is_packed(scorer):
         evaluate_mlm.records(scorer, tok, fmt, rows[:warmup * 10], log_every=float("inf"),
                              budget=budget)  # warm-up
         packed = timed(lambda: evaluate_mlm.records(scorer, tok, fmt, rows, log_every=float("inf"),
                                                     budget=budget))
-        throughput = {"rows": len(rows), "seconds": packed, "rows_per_s": len(rows) / packed}
-    return {"latency": summary(secs, [len(ex["input_ids"]) for ex in encoded]),
+        throughput = {"rows": len(rows), "seconds": packed, "rows_per_s": len(rows) / packed,
+                      "peak_gib": PEAKS[-1], "budget_tokens": budget}
+    tokens = [len(ex["input_ids"]) for ex in encoded]
+    del scorer
+    return {"latency": summary(secs, tokens), "memory": memory(weights, peaks, tokens),
             "throughput": throughput}
 
 
@@ -122,7 +168,7 @@ def main() -> None:
         results["models"] = json.loads(pathlib.Path(args.out).read_text())["models"]
     for m in args.decoders:
         results["models"][m] = time_decoder(m, rows, args.warmup)
-        torch.cuda.empty_cache()  # the model went out of scope
+        gc.collect(); torch.cuda.empty_cache()  # the model went out of scope
         logger.info("{}: {}", m, json.dumps(results["models"][m]))
     for run in args.encoders:
         for name, dtype, attention in (("fp32 weights", torch.float32, "sdpa"),
@@ -130,7 +176,7 @@ def main() -> None:
                                        ("fp32 weights, FA2 varlen", torch.float32, encoder.VARLEN)):
             key = f"{run} ({name})"
             results["models"][key] = time_encoder(run, rows, args.warmup, dtype, attention)
-            torch.cuda.empty_cache()
+            gc.collect(); torch.cuda.empty_cache()
             logger.info("{}: {}", key, json.dumps(results["models"][key]))
     pathlib.Path(args.out).write_text(json.dumps(results, indent=2))
     logger.info("wrote {}", args.out)
