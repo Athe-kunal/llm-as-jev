@@ -70,7 +70,7 @@ On the softmax encoder, adding the generated labels to the gold ones raises sent
 \begin{table}[h]
   \centering\small
   \setlength{\tabcolsep}{4pt}
-  \caption{Test accuracy (\%) per dataset, averaged over seeds. UB is UltraBERT-380M. Bold: best below 1B parameters.}
+  \caption{Test accuracy (\%) per dataset, averaged over seeds. UB is UltraBERT-380M: UB yes is the softmax over each option's ``yes'' logit; UB yes$-$no is the softmax over ``yes'' minus ``no''; UB sqrt-sp and UB sig-norm normalise ``yes'' minus ``no'' with the square-root softplus and the sigmoid, each divided by the sum over options (\cref{sec:loss}). Bold: best below 1B parameters.}
   \label{tab:perdataset}
   \input{generated/table_perdataset}
 \end{table}

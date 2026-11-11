@@ -43,6 +43,7 @@ The first is $s_k=\ell_k(\textit{yes})$.
 The second is $s_k=\ell_k(\textit{yes})-\ell_k(\textit{no})$, which also asks the model to reject the other options.
 Both give a decision by $\arg\max_k s_k$.
 A recipe pairs a score with one of the three normalisations below. We train four: the softmax with either score, and the two other normalisations with the difference.
+We do not pair the sigmoid with $\ell_k(\textit{yes})$ alone: a vocabulary logit is large, so $\sigma(s_k)\approx1$ for every option, $p_k=1/K$ and the gradient vanishes; subtracting $\ell_k(\textit{no})$ brings the score into the range where the sigmoid is not saturated.
 
 \paragraph{Plain softmax.}
 The options compete through one softmax,
