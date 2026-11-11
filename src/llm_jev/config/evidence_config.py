@@ -30,8 +30,10 @@ class DataConfig:
     datasets: list[str] | None = None  # None: every dataset that has labels
     val_frac: float = 0.05             # training rows held out to pick the best epoch
     eval_split: str = "eval"
-    eval_per: int = 50                 # eval rows with gold spans per dataset (as attribution_mlm)
+    eval_per: int = 50                 # eval rows with gold spans per dataset (as attribution_mlm; 0: all)
     eval_seed: int = 0
+    eval_part: str | None = None       # "test": report on that part of the held-out split only
+    tune_part: str | None = None       # "dev": tune the word threshold there (None: eval rows not reported)
 
 
 @dataclasses.dataclass

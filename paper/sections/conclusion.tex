@@ -3,14 +3,14 @@
 
 We built a decision model on an encoder, UltraBERT-380M, with one mask in front of each option and the model's own ``yes'' versus ``no'' prediction as the score of the option.
 With the same data and full fine-tuning, it is more accurate than Qwen3-0.6B trained with LLM-as-Jev (\TestUbSig{}\% against \TestQwFull{}\% on the test set), and takes \MsUb{}\,ms per decision against \MsQwFull{}\,ms.
-The sigmoid-normalised loss adds \DiffUbSigUbList{} points over the plain softmax and reduces the bias towards frequent labels.
-An evidence head on the frozen encoder marks the supporting sentences in the same pass, and agrees better with annotated evidence than AT2 and ContextCite.
+The sigmoid-normalised loss adds \DiffUbSigUbList{} points over the plain softmax and brings the predicted label rates closer to the true rates on MuSiQue and ProofWriter.
+An evidence head on the frozen encoder marks, in the same pass, the sentences an annotator would mark as support. On 200 rows from four datasets it ranks the annotated sentences higher on average than AT2 and ContextCite, which use no evidence labels, though ContextCite is better on two of the four datasets.
 
 The results have limits.
-They are at the scale of 0.4 to 0.6 billion parameters, and a 4B decoder is still more accurate on the reasoning datasets.
+They are at the scale of 0.4 to 0.6 billion parameters, and a 4B decoder is still more accurate overall, except on the intent datasets.
 We used one encoder and one training mixture, in English, and compared against one decoder family.
-The evidence head predicts the evidence that an annotator would mark, and does not show what the model used; ContextCite is more faithful to the model.
-We measured the memory use of decoders only through the work of \citet{prefillonly}, and not in our own runs.
+The evidence head predicts the evidence that an annotator would mark, and does not show what the model used; we did not compute its LDS, and ContextCite has the highest LDS of the methods we measured.
+We did not measure memory; that argument rests on \citet{prefillonly}.
 
 Two directions follow.
 The first is larger encoders, to see whether the advantage holds above one billion parameters.

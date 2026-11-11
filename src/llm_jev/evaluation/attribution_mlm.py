@@ -60,14 +60,23 @@ def methods(scorer, tok, fmt, theta: torch.Tensor, budget: int) -> dict:
     }
 
 
-def select_rows(examples: list, per: int = 50, seed: int = 0) -> list:
-    """The evaluation rows: `per` rows per dataset with gold spans and >= 2 sentences (seeded)."""
+def select_rows(examples: list, per: int = 50, seed: int = 0, part: str | None = None) -> list:
+    """The evaluation rows: `per` rows per dataset with gold spans and >= 2 sentences (seeded).
+
+    per 0 keeps every such row. part "dev" / "test" first restricts `examples` to that part
+    of the held-out split (evaluate.select_rows: dev is the sample choices are made on, test
+    every other row); None keeps the whole split, as the first 200-row study did.
+    """
+    if part is not None:
+        from llm_jev.evaluation import evaluate
+        keep = {r.id for r in evaluate.select_rows(examples, part, 100, evaluate.SEED)}
+        examples = [r for r in examples if r.id in keep]
     by = collections.defaultdict(list)
     for r in examples:
         if r.has_spans and len(context_cite.split_sources(r)) >= 2:
             by[r.source].append(r)
     rng = random.Random(seed)
-    return [r for s in sorted(by) for r in rng.sample(by[s], min(per, len(by[s])))]
+    return [r for s in sorted(by) for r in (by[s] if per == 0 else rng.sample(by[s], min(per, len(by[s]))))]
 
 
 def evaluate_row(scorer, tok, fmt, row, fns: dict, lds_masks: int = 32, seed: int = 1_000_000,
@@ -141,14 +150,16 @@ def main() -> None:
     parser.add_argument("--at2", required=True, help="AT2 run directory (train.train_at2)")
     parser.add_argument("--data", default="data/splits/reason_long_nimble")
     parser.add_argument("--split", default="eval")
-    parser.add_argument("--per", type=int, default=50, help="rows with gold evidence per dataset")
+    parser.add_argument("--per", type=int, default=50, help="rows with gold evidence per dataset (0: all)")
+    parser.add_argument("--part", choices=["dev", "test"], help="restrict to this part of the held-out split")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     at2_dir = pathlib.Path(args.at2)
-    logger.add(at2_dir / f"attribution_{args.split}.log")
+    name = f"attribution_{args.split}" + (f"_{args.part}" if args.part else "")
+    logger.add(at2_dir / f"{name}.log")
     scorer, tok, fmt, theta, budget = load(at2_dir)
-    rows = select_rows(storage.load_examples(args.data, args.split), args.per, args.seed)
+    rows = select_rows(storage.load_examples(args.data, args.split), args.per, args.seed, args.part)
     logger.info("{} rows: {}", len(rows), dict(collections.Counter(r.source for r in rows)))
     fns = methods(scorer, tok, fmt, theta, budget)
     results = []
@@ -157,7 +168,7 @@ def main() -> None:
         if i % 25 == 0 or i == len(rows):
             logger.info("{}/{} rows", i, len(rows))
     summary = summarize(results)
-    (at2_dir / f"attribution_{args.split}.json").write_text(json.dumps({"summary": summary, "rows": results}))
+    (at2_dir / f"{name}.json").write_text(json.dumps({"summary": summary, "rows": results}))
     logger.info("\n{}", table(summary))
     logger.info("answers agree across methods on {}/{} rows", sum(r["answers_agree"] for r in results), len(results))
 

@@ -23,7 +23,7 @@
     \node[box, draw=decoder, below=0.2in of dt] (dd) {Decision: the most probable option number};
     \draw[arr] (dp) -- (dt);  \draw[arr] (dt) -- (dd);
     % ---------------- encoder (right) ----------------
-    \node[head, text=encoder] at (3.45, 0) {UltraBERT: encoder (ours)};
+    \node[head, text=encoder] at (3.45, 0) {UltraBERT: encoder (this work)};
     \node[prompt, text width=2.2in, anchor=north west] (ep) at (3.45, -0.15) {%
       State: What size does the screen need to be cut?\\
       Which solution better achieves the goal?\\
@@ -41,7 +41,7 @@
       $p_k=\dfrac{e^{s_k}}{\sum_j e^{s_j}}$\\[3pt]
       loss $=-\log p_{\text{gold}}$};
     \node[box, draw=encoder, fill=encoder!8, text width=1.28in, anchor=north west] (sg) at ($(sm.north east)+(0.14in,0)$) {%
-      \textbf{Sigmoid-norm (ours)}\\[1pt]
+      \textbf{Sigmoid-norm}\\[1pt]
       $s_k=\text{logit}(\textit{yes})-\text{logit}(\textit{no})$\\[2pt]
       $p_k=\dfrac{\sigma(s_k)}{\sum_j\sigma(s_j)}$\\[3pt]
       loss $=-\log p_{\text{gold}}$};
@@ -55,6 +55,6 @@
   loss is taken over the tokens of that number. The encoder gets a mask in front of each option and scores each
   option directly. Two ways to train it are compared: the plain softmax over the options, which scores an
   option by the ``yes'' logit alone, and the sigmoid-normalised loss, which scores it by ``yes'' minus ``no''.
-  Each option then has its own sigmoid score, and the sum in the denominator keeps the options competing.}
+  Each option's score goes through a sigmoid, and the sum in the denominator keeps the options competing.}
   \label{fig:intro}
 \end{figure}

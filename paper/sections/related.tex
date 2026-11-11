@@ -12,8 +12,8 @@ We start from an encoder that reads the context, the question and all options to
 
 \paragraph{Encoders that score options.}
 Prompt-based classifiers use the masked-token head of an encoder with a verbalizer for a fixed set of labels \citep{schick2021pet, gao2021lmbff}.
-Two encoder decision models are listed on public Jev leaderboards: Laya \citep{laya} and Von \citep{von}, both built on ModernBERT-large with one mask per option.
-Both add a new scoring head, and they are described in model cards, not in papers.
+Two encoder decision models are listed on public Jev leaderboards \citep{jevbench}: Laya \citep{laya} and Von \citep{von}, both built on ModernBERT-large with one mask per option.
+Both add new layers on top of the encoder, and they are described in model cards.
 Laya trains its head with reinforcement learning on proper scoring rules, and Von uses a listwise softmax loss with a Brier term.
 We reuse the pretrained masked-token head and score each option by ``yes'' against ``no'', so there is no new head.
 We also compare two losses, match the decoders in data and training, report a held-out test split, and add evidence.
@@ -27,9 +27,8 @@ We shuffle the options during training and measure how the two losses differ in 
 \paragraph{Encoders and decoders.}
 Controlled studies pretrain encoders and decoders with the same recipe, and find that encoders do well on classification and retrieval \citep{weller2025ettin} and that masked language modelling suits tasks that need text representations \citep{gisserotboukhlef2025mlm}.
 A much larger decoder can still beat an encoder on classification \citep{zhao2024classification}.
-Decoder designs target long generation, with multi-query and grouped-query attention to shrink the KV cache \citep{mqa, gqa}, and \citet{prefillonly} show that prefill-only workloads do not benefit from this and pay for the larger MLP layers.
+Decoder designs such as multi-query and grouped-query attention target long generation \citep{mqa, gqa}, and \citet{prefillonly} study what they cost when nothing is generated (\cref{sec:intro}).
 Modern encoders keep long inputs and fast inference \citep{modernbert, ultrabert}.
-Our comparison is at the scale of 0.4 to 0.6 billion parameters.
 
 \paragraph{Attribution and evidence.}
 ContextCite learns a surrogate model from many ablations of the context \citep{contextcite}.

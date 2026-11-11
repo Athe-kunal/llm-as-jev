@@ -156,7 +156,7 @@ def train(cfg: evidence_config.Config, scorer, tok, fmt, out: pathlib.Path) -> e
 def evaluate(cfg: evidence_config.Config, scorer, head, tok, fmt) -> dict:
     """Token and sentence metrics on attribution_mlm's rows, per dataset and ALL (dataset mean)."""
     rows = attribution_mlm.select_rows(storage.load_examples(cfg.data.source, cfg.data.eval_split),
-                                       cfg.data.eval_per, cfg.data.eval_seed)
+                                       cfg.data.eval_per, cfg.data.eval_seed, cfg.data.eval_part)
     per = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in rows:
         torch.cuda.synchronize()
@@ -233,8 +233,12 @@ def tune_threshold(cfg, scorer, head, tok, fmt) -> dict:
     """One global word threshold: best word F1 on eval rows with gold spans that are NOT
     the report rows (attribution_mlm.select_rows), then P / R / F1 at it on the report rows."""
     examples = storage.load_examples(cfg.data.source, cfg.data.eval_split)
-    report = attribution_mlm.select_rows(examples, cfg.data.eval_per, cfg.data.eval_seed)
-    held = [r for r in examples if r.has_spans and r.id not in {x.id for x in report}]
+    report = attribution_mlm.select_rows(examples, cfg.data.eval_per, cfg.data.eval_seed, cfg.data.eval_part)
+    if cfg.data.tune_part is not None:  # e.g. dev: never tune on the reported part
+        held = attribution_mlm.select_rows(examples, 0, cfg.data.eval_seed, cfg.data.tune_part)
+        assert not {r.id for r in held} & {r.id for r in report}, "tuning rows overlap the report rows"
+    else:
+        held = [r for r in examples if r.has_spans and r.id not in {x.id for x in report}]
     s, y, _ = word_scores(cfg, scorer, head, tok, fmt, held)
     grid = np.unique(np.quantile(s, np.linspace(0, 1, 401)))
     f1 = [prf(s, y, t)[2] for t in grid]
@@ -264,7 +268,8 @@ def main() -> None:
     out = pathlib.Path(cfg.out)
     out.mkdir(parents=True, exist_ok=True)
     logger.add(out / "train_evidence.log")
-    OmegaConf.save(raw, out / "config.yaml")
+    tag = f"_{cfg.data.eval_part}" if cfg.data.eval_part else ""
+    OmegaConf.save(raw, out / f"config{tag}.yaml")
     scorer, tok, fmt = evaluate_mlm.load_run(cfg.encoder.run, attention=cfg.encoder.attention)
     for p in scorer.parameters():
         p.requires_grad_(False)
@@ -276,8 +281,8 @@ def main() -> None:
     else:
         head = train(cfg, scorer, tok, fmt, out)
     metrics = evaluate(cfg, scorer, head, tok, fmt)
-    (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
-    (out / "threshold.json").write_text(json.dumps(tune_threshold(cfg, scorer, head, tok, fmt), indent=2))
+    (out / f"metrics{tag}.json").write_text(json.dumps(metrics, indent=2))
+    (out / f"threshold{tag}.json").write_text(json.dumps(tune_threshold(cfg, scorer, head, tok, fmt), indent=2))
     cols = ["gold_share", "token_ap", "token_p@10", "sentence_ap", "sentence_top1", "sentence_precision",
             "sentence_recall", "seconds", "answer_correct"]
     logger.info("\n{:12s} ".format("dataset") + " ".join(f"{c:>18s}" for c in cols) + "\n" + "\n".join(

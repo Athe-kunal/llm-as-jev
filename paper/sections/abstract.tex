@@ -1,13 +1,13 @@
 \begin{abstract}
 A decision model picks one answer from a set of options in a single forward pass, without writing out its reasoning.
 It is cheap enough to run on every item in a large pipeline, for example to grade, filter or route text.
-Small decoder models trained for this job are not very accurate, and we ask whether a small encoder is a better starting point.
-We fine-tune UltraBERT-380M \citep{ultrabert}, an encoder pretrained with masked language modelling (5\% masking) and retrieval (50\% masking).
-We train it with a sigmoid-normalised loss, where each option's sigmoid score is divided by the sum over options \citep{deepseekv3}.
-We tested extensively on sub-billion encoder and decoder models.
-Against Qwen3-0.6B trained on the same data with the LLM-as-Jev loss \citep{li2026llmasjev}, the encoder reaches
-\textbf{\TestUbSig{}\%} test accuracy against \textbf{\TestQwFull{}\%}, averaged over seeds, and takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms} on an A100.
-It also scores higher on external benchmarks (\textbf{\ExtUbSig{}\%} against \textbf{\ExtQwFull{}\%}).
-The same encoder, with an added evidence head, marks the sentences that support its answer in one pass.
-We train it on human-marked evidence and on citations generated with the SelfCite necessity and sufficiency reward \citep{selfcite}. Its sentences agree more closely with human-marked evidence than those from ContextCite or AT2.
+This technical report gives a fine-tuning recipe for encoder-style decision models.
+We fine-tune UltraBERT-380M \citep{ultrabert}, an encoder pretrained with masked language modelling.
+We train it with a sigmoid-normalised loss: each option gets its own sigmoid score, which is divided by the sum over options, as in the expert gate of DeepSeek-V3 \citep{deepseekv3}.
+We compare it with sub-billion decoders.
+Qwen3-0.6B, fully fine-tuned on the same data with the LLM-as-Jev recipe \citep{li2026llmasjev}, reaches \textbf{\TestQwFull{}\%} test accuracy.
+The encoder reaches \textbf{\TestUbSig{}\%}.
+It also scores higher on external benchmarks (\textbf{\ExtUbSig{}\%} against \textbf{\ExtQwFull{}\%}), and takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms} on an NVIDIA A100 80GB GPU.
+We also add an evidence head that marks, in the same pass, the sentences an annotator would mark as support for the answer.
+It is trained on human-marked evidence and on labels selected with a reward adapted from SelfCite \citep{selfcite}.
 \end{abstract}

@@ -11,13 +11,14 @@ The options are shuffled each time a row is used, so the position of the correct
 The prompt follows LLM-as-Jev.
 The user message holds the state, the question, the options numbered $[1]$ to $[K]$, and one instruction: select one option and answer only with its number.
 The assistant turn is filled in up to ``Best answer: ['', and the model has to continue with the number of its choice and a closing bracket.
+Qwen3's thinking mode is turned off.
 Each option $k$ is therefore the token sequence of ``$k$]'', and the options form a trie over these sequences.
 
 \paragraph{Encoder.}
 The state and the question are the same.
 The instruction asks to mark the correct option with ``yes'' and every other option with ``no'', and the options are listed as ``$[k]$ \texttt{[M]} description'', with the tokenizer's mask token in front of each description.
 There is no chat template and nothing is generated.
-One forward pass gives a vector of logits at every mask, and the score of option $k$ comes from the logits of the tokens ``yes'' and ``no'' at mask $k$.
+One forward pass gives a vector of logits at every mask, and the score of option $k$ comes from the logits of the tokens ``yes'' and ``no'' at mask $k$, each taken with a leading space, as it appears after another word.
 
 \input{sections/intro_figure}
 
@@ -51,12 +52,14 @@ The options compete through one softmax,
 where $g$ is the gold option.
 
 \paragraph{Sigmoid-normalised loss.}
-Each option first gets its own probability of being correct, $\sigma(s_k)$, and these are normalised by their sum,
+Each option's score first goes through a sigmoid, $\sigma(s_k)$, and these values are normalised by their sum,
 \begin{equation}
   p_k=\frac{\sigma(s_k)}{\sum_{j=1}^{K}\sigma(s_j)},\qquad \mathcal{L}_{\text{sig-norm}}=-\log p_{g}.
 \end{equation}
-This is the gate of the DeepSeek-V3 mixture of experts \citep{deepseekv3}, which scores every expert with a sigmoid and then normalises over the selected experts.
-Here the options play the role of the experts.
-The scores stay bounded between 0 and 1 and the options still compete through the sum.
-The gradient of every option's score contains the factor $1-\sigma(s_k)$, so an option that is already clearly rejected or clearly accepted adds little to the update.
-The loss has one term per row for any number of options $K$, and since $\sigma$ is increasing the decision is the same $\arg\max_k s_k$.
+This is the form of the gate of the DeepSeek-V3 mixture of experts \citep{deepseekv3}, which scores every expert with a sigmoid and then normalises over the selected experts.
+Here the options play the role of the experts, normalised over all $K$ options, with no selection and no balancing bias.
+Each $\sigma(s_k)$ lies between 0 and 1, and the options still compete through the sum.
+The gradient of the loss with respect to $s_k$ is $(1-\sigma(s_k))\,(p_k-\mathbf{1}[k=g])$, so an option that the model already accepts, with $\sigma(s_k)$ close to 1, adds little to the update.
+Since $\sigma$ is increasing, the decision is the same $\arg\max_k s_k$.
+The sigmoid of a score can be read as that option's own probability of being correct, but nothing in the loss requires it: only the ratios enter $p_k$.
+\Cref{sec:coupling} tests whether the trained model uses it this way.

@@ -13,19 +13,19 @@ EXT = ("boolq", "mmlu", "mmlu_pro", "arc_challenge", "winogrande", "sciq")
 
 # Each model: its runs (seeds), its family (encoder/decoder) and its parameter count.
 MODELS = {
-    "ub_sig": dict(name="UltraBERT-380M, sigmoid\\_norm", short="UltraBERT sigmoid_norm", family="encoder",
+    "ub_sig": dict(name="UltraBERT-380M, sigmoid-norm", short="UltraBERT sigmoid-norm", family="encoder",
                    params="380M", ours=True,
                    runs=["ultrabert_380m_lr1.5e-5_sigmoidnorm", "ultrabert_380m_sigmoidnorm_lr1.5e-5_seed1",
                          "ultrabert_380m_sigmoidnorm_lr1.5e-5_seed2"]),
-    "ub_list": dict(name="UltraBERT-380M, listwise", short="UltraBERT listwise", family="encoder", params="380M",
+    "ub_list": dict(name="UltraBERT-380M, softmax", short="UltraBERT softmax", family="encoder", params="380M",
                     ours=True,
                     runs=["ultrabert_380m_lr1.5e-5", "ultrabert_380m_lr1.5e-5_seed1", "ultrabert_380m_lr1.5e-5_seed2"]),
     "qw_full": dict(name="Qwen3-0.6B, full FT", short="Qwen3-0.6B full FT", family="decoder", params="0.6B",
                     ours=False,
                     runs=["qwen3_0.6b_full_lr1e-5", "qwen3_0.6b_full_lr1e-5_seed1", "qwen3_0.6b_full_lr1e-5_seed2"]),
-    "qw_lora": dict(name="Qwen3-0.6B, LoRA (released)", short="Qwen3-0.6B LoRA", family="decoder", params="0.6B",
+    "qw_lora": dict(name="Qwen3-0.6B, LoRA (reproduced)", short="Qwen3-0.6B LoRA", family="decoder", params="0.6B",
                     ours=False, runs=["qwen3_0.6b_released"]),
-    "qw4_lora": dict(name="Qwen3-4B, LoRA (released)", short="Qwen3-4B LoRA", family="decoder", params="4B",
+    "qw4_lora": dict(name="Qwen3-4B, LoRA (reproduced)", short="Qwen3-4B LoRA", family="decoder", params="4B",
                      ours=False, runs=["qwen3_4b_released"]),
 }
 # The dev-split result file of each run (Qwen full-FT checkpoints were re-scored in bf16).

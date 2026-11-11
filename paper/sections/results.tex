@@ -4,43 +4,45 @@
 \subsection{Encoder against decoder}
 
 \Cref{tab:headline} and \cref{fig:headline} give the main comparison.
-With the same data, the same one epoch of full fine-tuning and a learning rate chosen on dev for each model, UltraBERT-380M with the sigmoid-normalised loss reaches \TestUbSig{}\% on the test set, against \TestQwFull{}\% for Qwen3-0.6B, a difference of \DiffUbSigQwFull{} points.
+With the same data and training budget, UltraBERT-380M with the sigmoid-normalised loss reaches \TestUbSig{}\% on the test set, against \TestQwFull{}\% for Qwen3-0.6B, a difference of \DiffUbSigQwFull{} points.
 With the plain softmax the encoder reaches \TestUbList{}\%, still \DiffUbListQwFull{} points above the decoder.
 The encoder also has fewer parameters, 380M against 0.6B.
 On the six external benchmarks the order is the same: \ExtUbSig{}\% for the encoder and \ExtQwFull{}\% for the decoder.
 Every test number is below its dev number by 0.6 to 2.0 points, because the learning rates were chosen on dev, and the ranking does not change.
-The released Qwen3-4B LoRA model, at \TestQwFourLora{}\%, remains ahead of all sub-billion models, and our comparison is at the scale of 0.4 to 0.6 billion parameters.
+The reproduced Qwen3-4B LoRA model, at \TestQwFourLora{}\%, remains ahead of all sub-billion models, so our claims are limited to models below one billion parameters.
 
 \subsection{Training regime}
 
-The released LoRA model of the same size reaches \TestQwLora{}\%.
-Compared with it, the encoder looks \DiffUbSigQwLoraText{} points better, but most of this difference comes from how the decoder was trained: updating all weights lifts Qwen3-0.6B by \DiffQwFullQwLora{} points on the test set.
-We therefore compare with the fully fine-tuned decoder.
-Fitting the mixture harder has a cost for both architectures.
-A higher learning rate or a second epoch raises held-out accuracy for the encoder and lowers its external accuracy, for example to 53.2\% with the softmax at a learning rate of $5\cdot10^{-5}$.
-The external accuracy of fully fine-tuned Qwen3-0.6B (\ExtQwFull{}\%) is not above that of its LoRA model (\ExtQwLora{}\%).
+The reproduced LoRA model of the same size reaches \TestQwLora{}\%, \DiffQwFullQwLoraAbs{} points below the fully fine-tuned decoder.
+Both were trained on the same data, so this gap comes from updating all weights instead of a LoRA adapter, and accounts for about half of the \DiffUbSigQwLoraText{}-point gap between the encoder and the LoRA model.
+The external accuracy of fully fine-tuned Qwen3-0.6B (\ExtQwFull{}\%) is not above that of its LoRA model (\ExtQwLora{}\%); \cref{sec:analysis} shows how the learning rate and the number of epochs trade held-out against external accuracy.
 
 \subsection{Loss}
 
 The sigmoid-normalised loss is better than the plain softmax by \DiffUbSigUbList{} points on the test set, and by 1.7 points on the external benchmarks (\ExtUbSig{}\% against \ExtUbList{}\%).
 Its results vary less between seeds.
-The two losses differ in the score as well as in the normalisation, so we separated them in a single-seed run with the softmax on the difference of the ``yes'' and ``no'' logits.
-Scoring with the difference accounts for most of the external gain, and the sigmoid-normalised loss adds most of the held-out gain, mostly on MuSiQue.
-The two losses also predict different labels.
-On MuSiQue the correct answer is ``Yes'' in 48\% of the rows.
-The sigmoid-normalised models predict ``Yes'' for 47 to 60\% of the rows over three seeds, against 64 to 69\% for the softmax.
-On ProofWriter, where ``Unknown'' is correct for a third of the rows, the softmax never predicts it and the sigmoid-normalised models predict it for 2 to 12\%.
-This class stays largely unlearned for every variant.
+The two losses differ in the score as well as in the normalisation; \cref{sec:analysis} separates the two and compares the labels that each loss predicts.
+
+\subsection{How strongly the options depend on each other}
+\label{sec:coupling}
+
+A softmax gate couples the experts of a mixture of experts, and DeepSeek-V3 replaces it with a sigmoid \citep{deepseekv3}.
+We test whether this matters for options.
+On the dev rows, we shuffle the options four times and remove one wrong option, and add a softmax model scored with ``yes'' minus ``no'' to separate the score from the normalisation (\cref{tab:coupling}).
+
+The answers become steadier from the score, not the sigmoid: ``yes'' minus ``no'' lowers the answer changes under shuffling from \CpShufYes{}\% to \CpShufYesNo{}\%, and the sigmoid adds nothing (\CpShufSig{}\%).
+The sigmoid gives a small gain in label balance (total variation \CpLabelSig{} against \CpLabelYesNo{}), calibration and dev accuracy.
+After training, the gold option's sigmoid averages only \CpSigGoldSig{}, so the model acts almost like a softmax.
 
 \subsection{Cost}
 
 The encoder takes \MsUb{}\,ms per decision on one A100, one row at a time, against \MsQwFull{}\,ms for Qwen3-0.6B and \MsQwFourLora{}\,ms for Qwen3-4B.
-With batches and packed variable-length attention it processes \RpsUb{} rows per second, against \RpsQwFull{} for Qwen3-0.6B.
+\Cref{app:impl} gives the batched throughput.
 
 \begin{table}[t]
   \centering\small
-  \caption{Matched comparison: average accuracy (\%) over seeds. Test ALL is on \NTest{} held-out rows;
-  Dev ALL and External are on the dev rows and the six external benchmarks. Learning rates were chosen on
+  \caption{Matched comparison: average accuracy (\%) over seeds. Test ALL is on the test set;
+  Dev ALL and External are on the dev set and the six external benchmarks. Learning rates were chosen on
   dev. Bold: best below 1B parameters.}
   \label{tab:headline}
   \input{generated/table_headline}
@@ -49,7 +51,17 @@ With batches and packed variable-length attention it processes \RpsUb{} rows per
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.62\linewidth]{fig_headline}
-  \caption{Test accuracy (ALL, the mean over 13 datasets; \NTest{} rows never used for any choice),
+  \caption{Test accuracy (ALL, the mean over 13 datasets, on the test set, never used for any choice),
   averaged over seeds; \textcolor{encoder}{encoders} filled, \textcolor{decoder}{decoders} hollow.}
   \label{fig:headline}
 \end{figure}
+
+\begin{table}[t]
+  \centering\small
+  \caption{How strongly the options depend on each other, on the dev set (average scores). Each row is scored in four
+  random option orders and once with one wrong option removed. TV: total variation between the predicted and the gold shares,
+  over the three datasets with a fixed label set (label) and over option positions (position); lower is closer.
+  Calibration error: expected calibration error of the top option's probability. $|s_k|$: size of the raw option scores. Bold: best in each row; accuracy is better higher, the other scores lower.}
+  \label{tab:coupling}
+  \input{generated/table_coupling}
+\end{table}
