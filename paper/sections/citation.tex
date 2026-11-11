@@ -6,16 +6,18 @@ We add a small head on the frozen encoder that marks the document sentences supp
 For each document token, it reads the token's hidden state and that of the chosen option's mask, and outputs the probability that the token is evidence.
 A sentence scores the highest probability among its tokens.
 
-The head is trained on human-marked evidence where a dataset has it.
-For other rows, a labelling model proposes sets of sentences for the gold answer, and we keep the set with the best reward adapted from SelfCite \citep{selfcite} (\cref{fig:spans}, \cref{app:evidence}).
+The head is trained on human-marked evidence where it exists, in ContractNLI, MuSiQue, Nimble and ProofWriter.
+For the other rows, a labelling model proposes sets of sentences for the gold answer, and we keep the set with the best reward adapted from SelfCite \citep{selfcite} (\cref{fig:spans}, \cref{app:evidence}).
 
 \input{sections/span_figure}
 
 \paragraph{Comparison.}
-We compare with the encoder's average attention, AT2 \citep{at2} and ContextCite \citep{contextcite} on the \EvRows{} test rows with gold evidence, from ContractNLI, MuSiQue, Nimble and ProofWriter.
+We compare with the encoder's average attention, AT2 \citep{at2} and ContextCite \citep{contextcite} on the \EvRows{} test rows with gold evidence.
+Nothing is tuned on these rows: the only setting, the threshold at which a word is marked, is tuned on the \EvTuneRows{} dev rows with gold evidence.
 This is not a comparison between equals: the head is trained on evidence labels, while AT2 and ContextCite are fitted to the model's response to ablations.
 We report sentence average precision (AP) against the gold sentences, how often the top sentence is gold, and the time per row.
-For the baselines we also report LDS \citep{contextcite}, the rank correlation between predicted and actual changes in the answer's probability when sentences are removed; we did not compute it for the head.
+For the baselines we also report LDS \citep{contextcite}, the rank correlation between predicted and actual changes in the answer's probability when sentences are removed.
+We do not report it for the heads, which are trained to predict the annotated evidence, not the model's response to removed sentences.
 AT2 and ContextCite ran on the softmax encoder, so \cref{tab:citation} has a head for each encoder.
 
 \begin{table}[t]
@@ -23,7 +25,7 @@ AT2 and ContextCite ran on the softmax encoder, so \cref{tab:citation} has a hea
   \setlength{\tabcolsep}{4pt}
   \caption{Sentence evidence on the test rows with gold evidence. Sentence AP: average precision
   against the gold sentences, over all rows and per dataset (CNLI: ContractNLI, PW: ProofWriter). Top-1: share of rows
-  where the top sentence is gold. LDS: how closely the scores follow the model; not computed for the heads. The first
+  where the top sentence is gold. LDS: how closely the scores follow the model's response to removed sentences; not reported for the heads, which are trained to match annotated evidence instead. The first
   three methods and the first head use the encoder trained with the softmax. Each head is one training run. Bold: best in each column (lowest for time).}
   \label{tab:citation}
   \input{generated/table_citation}

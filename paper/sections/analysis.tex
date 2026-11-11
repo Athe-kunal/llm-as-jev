@@ -4,33 +4,14 @@
 This section describes what we saw when training UltraBERT.
 Unless noted, the numbers are from the dev set with one seed per setting.
 
-\subsection{Learning rate and training length}
+\subsection{What each part of the recipe changes}
 
-The learning rate that is best on dev, $1.5\cdot10^{-5}$ for both swept recipes, is also among the best on the external benchmarks.
-Higher rates add little on dev and lower the external accuracy, down to 53.2\% for the softmax at $5\cdot10^{-5}$.
-Qwen3-0.6B shows the same pattern more strongly: its external accuracy falls with every increase of the rate, from 57.4\% at $5\cdot10^{-6}$ to 53.9\% at $2\cdot10^{-5}$.
-A second epoch has the same effect.
-With the softmax at $3\cdot10^{-5}$ it raises dev accuracy from 70.7\% to 73.9\%, above any one-epoch encoder run, and lowers external accuracy from 56.2\% to 55.1\%.
-We report one epoch for all models, since a longer run fits the mixture at the cost of behaviour outside it.
-
-\subsection{Datasets}
-
-\Cref{tab:perdataset} in the appendix gives the test accuracy for every dataset, averaged over seeds.
-The sigmoid-normalised encoder is above the fully fine-tuned decoder on 10 of the 13 datasets.
-The gaps are largest on CosmosQA, ANLI and QuALITY, where it is ahead by 15.3, 9.9 and 9.8 points, and on MASSIVE (8.0) and MuSiQue (6.9).
-It is below the decoder on three datasets: Nimble ($-6.6$), LogiQA~2.0 ($-2.2$) and ProofWriter ($-1.7$).
-The 4B decoder is ahead of the encoder on all ten datasets outside intent routing.
-The gap is 12 to 19 points on ReClor, Nimble and LogiQA~2.0, and below one point on CosmosQA, ANLI and ContractNLI.
-On the three intent datasets, CLINC150, MASSIVE and Bitext, the encoder is level with or slightly above the 4B decoder, by 1.4 to 2.1 points.
-
-\subsection{Loss and score}
-
-\Cref{tab:ablation} separates the changes between the plain softmax and the sigmoid-normalised loss.
+\Cref{tab:ablation} changes one part of the recipe at a time, from the softmax over ``yes'' to the sigmoid-normalised loss.
 Scoring with the difference of the ``yes'' and ``no'' logits, with the softmax kept, raises the external accuracy by 2.0 points and the dev accuracy by 0.4 points; averaged over seeds, the score accounts for the whole external gain (\CpExtYes{}\%, \CpExtYesNo{}\%, \CpExtSig{}\% in \cref{tab:coupling}).
 Replacing the softmax with the sigmoid-normalised loss then raises dev accuracy by a further 1.3 points, and MuSiQue most of all, from 64\% to 76\%.
 Nimble falls from 55\% with the plain score to 43\% with the sigmoid-normalised loss in this one run, on 100 dev rows.
 On the test set, averaged over seeds, the sigmoid-normalised model is instead 3.7 points above the softmax on Nimble.
-Replacing ``yes'' with ``correct'' did not help in this run: 70.6\% against 71.1\% with the ``yes'' logit, and 70.1\% against 71.5\% for the difference with ``incorrect''.
+We also tried the words ``correct'' and ``incorrect'' in place of ``yes'' and ``no''; this did not help: 70.6\% against 71.1\% with the ``yes'' logit, and 70.1\% against 71.5\% for the difference with ``incorrect''.
 
 The recipes also predict different labels.
 On MuSiQue the correct answer is ``Yes'' in 48\% of the rows.

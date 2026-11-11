@@ -53,6 +53,7 @@ The sample sizes follow LLM-as-Jev, whose samples are not released, so ours are 
 External is the mean accuracy over the six.
 These benchmarks are not used for any choice.
 
-Time per decision is the mean over the dev set on one A100, with one row at a time, as when serving single requests.
+Time per decision is the latency of one request: we score the dev rows one at a time on one A100 and report the mean.
+This is the cost when a pipeline sends each item as it arrives; \cref{app:impl} gives the throughput when rows are batched.
 The encoder is timed on the softmax checkpoint, which has the same architecture as the sigmoid-normalised one, in the scoring precision.
 The decoders are timed with the reproduced LoRA checkpoints in bf16, with the LoRA weights merged, which have the same architecture as the fully fine-tuned model.

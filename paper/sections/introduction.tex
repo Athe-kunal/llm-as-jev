@@ -6,8 +6,9 @@ A chat model can do this, but its answer has to be generated and parsed, which a
 Jev \citep{jev} is a decision model of this kind, and models built in its style are called Jev-style decision models.
 They return a probability distribution over the options without generating free-form text, so a new task needs only a prompt and a list of options \citep{li2026llmasjev}.
 LLM-as-Jev \citep{li2026llmasjev} shows that a decoder language model already works as such a decision model, with no change to its architecture, tokenizer or vocabulary.
-A frozen model handles any number of options, and fine-tuning with a loss over the option numbers and KL anchors helps compact models and tasks with many options.
-All of its models are causal decoders.
+The model sees the options numbered and answers with a number, which works for any number of options without training.
+Fine-tuning it to put its probability on the correct number, while keeping it close to the original model, helps most for small models and for tasks with many options.
+All the models it studies are decoders, which read the text from left to right.
 
 A decision is a prefill-only workload: the model reads the input once and produces a single token.
 Decoders are designed for the opposite case, long generation.
@@ -34,12 +35,12 @@ Our contributions are:
 \begin{itemize}\setlength{\itemsep}{2pt}\setlength{\topsep}{2pt}
   \item \textbf{An encoder decision model.}
     We fine-tune UltraBERT-380M \citep{ultrabert} with one mask per option and the ``yes'' versus ``no'' prediction at each mask as the option's score.
-    It is trained on the same data as LLM-as-Jev.
+    It is trained on the same data as LLM-as-Jev \citep{li2026llmasjev}.
   \item \textbf{Training recipes for the encoder.}
-    We compare four ways to train on the mask predictions: a softmax over the ``yes'' logits, and a softmax, a sigmoid normalised by the sum as in the gate of DeepSeek-V3 \citep{deepseekv3}, and a square-root softplus normalised by the sum, each over ``yes'' minus ``no''.
+    We compare four ways to train on the mask predictions, which differ in how an option is scored and how the scores are turned into probabilities over the options; one of them follows the expert gate of DeepSeek-V3 \citep{deepseekv3}.
     For each we measure accuracy, steadiness under option shuffling and removal, label balance and calibration.
   \item \textbf{A matched comparison with decoders.}
-    We fully fine-tune Qwen3-0.6B \citep{qwen3} on the same data, tune the learning rate for every model, repeat the runs over seeds and evaluate on a held-out test split that was never used for a choice.
+    We fully fine-tune Qwen3-0.6B \citep{qwen3} on the same data, tune the learning rate for every model, repeat the runs over seeds and evaluate on a test split that no choice was made on.
     We report accuracy, accuracy on external benchmarks, and time per decision, with two LoRA models \citep{lora} reproduced from LLM-as-Jev as references.
   \item \textbf{Evidence for the decision.}
     A decision model that generates no text gives no reasons, so we train an evidence head on the same encoder.

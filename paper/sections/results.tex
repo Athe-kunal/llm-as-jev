@@ -7,35 +7,37 @@
 With the same data and training budget, every encoder recipe is above Qwen3-0.6B (\TestQwFull{}\% on the test set): \TestUbList{}\% with the softmax over ``yes'', and \TestUbYesNo{}\%, \TestUbSqrt{}\% and \TestUbSig{}\% with the softmax, the square-root softplus and the sigmoid over ``yes'' minus ``no''.
 The encoder also has fewer parameters, 380M against 0.6B.
 On the six external benchmarks the encoder recipes reach \ExtUbList{}\% to \ExtUbYesNo{}\%, against \ExtQwFull{}\% for the decoder.
-Every test number is below its dev number by 0.6 to 2.0 points, because the learning rates were chosen on dev, and the ranking does not change.
 The reproduced Qwen3-4B LoRA model, at \TestQwFourLora{}\%, remains ahead of all sub-billion models, so our claims are limited to models below one billion parameters.
 
-\subsection{Training regime}
+\subsection{Full fine-tuning against LoRA}
 
 The reproduced LoRA model of the same size reaches \TestQwLora{}\%, \DiffQwFullQwLoraAbs{} points below the fully fine-tuned decoder.
 Both were trained on the same data, so this gap comes from updating all weights instead of a LoRA adapter, and accounts for about half of the \DiffUbSigQwLoraText{}-point gap between the best encoder recipe and the LoRA model.
-The external accuracy of fully fine-tuned Qwen3-0.6B (\ExtQwFull{}\%) is not above that of its LoRA model (\ExtQwLora{}\%); \cref{sec:analysis} shows how the learning rate and the number of epochs trade held-out against external accuracy.
+The external accuracy of fully fine-tuned Qwen3-0.6B (\ExtQwFull{}\%) is not above that of its LoRA model (\ExtQwLora{}\%).
 
 \subsection{Recipes}
 
 Scoring by ``yes'' minus ``no'' gives most of the gain: over the ``yes'' logit alone it adds \DiffUbYesNoUbListAbs{} points on the test set and \ExtUbYesNo{}\% against \ExtUbList{}\% on the external benchmarks.
 The sigmoid normalisation adds a further \DiffUbSigUbYesNoAbs{} points on the test set and nothing on the external benchmarks, and its results vary less between seeds.
-The square-root softplus, which is not bounded, matches the softmax (\TestUbSqrt{}\% against \TestUbYesNo{}\%), which suggests that the bound of the sigmoid is what matters.
+The square-root softplus works like the sigmoid but has no upper bound, and it does no better than the softmax (\TestUbSqrt{}\% against \TestUbYesNo{}\%).
+This suggests that the bound of the sigmoid is what helps.
 The bound is not the only difference, though: for rejected options the square-root softplus also acts as a softmax at twice the temperature (\cref{sec:loss}).
 \Cref{sec:analysis} compares the labels that each recipe predicts.
 
 \subsection{How strongly the options depend on each other}
 \label{sec:coupling}
 
-A softmax gate couples the experts of a mixture of experts, and DeepSeek-V3 replaces it with a sigmoid \citep{deepseekv3}.
-We test whether this matters for options.
-On the dev rows, we shuffle the options four times and remove one wrong option, and add a softmax model scored with ``yes'' minus ``no'' to separate the score from the normalisation (\cref{tab:coupling}).
+In a softmax, raising one option's score lowers the probability of every other option, so the options are tied together.
+DeepSeek-V3 gates its experts with a sigmoid instead \citep{deepseekv3}.
+We test whether the normalisation changes how much the answer depends on the other options.
+On the dev rows we shuffle the options four times and remove one wrong option, and count how often the answer changes (\cref{tab:coupling}).
+Comparing the two softmax recipes shows the effect of the score; comparing the softmax and the sigmoid over ``yes'' minus ``no'' shows the effect of the normalisation.
 
 The score does most of the work: ``yes'' minus ``no'' raises external accuracy from \CpExtYes{}\% to \CpExtYesNo{}\%, lowers the answer changes when a wrong option is removed from \CpDropYes{}\% to \CpDropYesNo{}\%, and lowers the largest gradient norm from \CpGradYes{} to \CpGradYesNo{}.
-Under shuffling, the score and the sigmoid each remove about one point (\CpShufYes{}\%, \CpShufYesNo{}\%, \CpShufSig{}\%).
-On top of the score, the sigmoid raises dev accuracy from \CpAccYesNo{}\% to \CpAccSig{}\%, lowers the calibration error from \CpEceYesNo{} to \CpEceSig{}, and fixes the label balance, which the score alone makes worse (total variation \CpLabelYes{}, \CpLabelYesNo{}, \CpLabelSig{}).
-After training, the gold option's sigmoid averages only \CpSigGoldSig{}, so the model acts almost like a softmax.
-The square-root softplus has the smallest gradient spikes (\CpGradSqrt{}) but the most answer changes under shuffling (\CpShufSqrt{}\%).
+When the options are shuffled, the score and the sigmoid each lower the answer changes by about one point (\CpShufYes{}\%, \CpShufYesNo{}\%, \CpShufSig{}\%).
+On top of the score, the sigmoid raises dev accuracy from \CpAccYesNo{}\% to \CpAccSig{}\%, lowers the calibration error from \CpEceYesNo{} to \CpEceSig{}, and brings the share of each predicted label closer to its share among the gold answers, which the score alone moves further away (total variation \CpLabelYes{}, \CpLabelYesNo{}, \CpLabelSig{}).
+After training, the gold option's sigmoid averages only \CpSigGoldSig{}; far below 1, $\sigma(s)\approx e^{s}$, so the loss behaves almost like a softmax.
+The square-root softplus has the smallest gradient spikes in training (largest norm \CpGradSqrt{}), but it changes its answer most often when the options are shuffled (\CpShufSqrt{}\%).
 
 \subsection{Cost}
 
