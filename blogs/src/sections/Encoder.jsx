@@ -1,59 +1,36 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { LineChart } from "./Results.jsx";
+import { Toggle } from "../components/Controls.jsx";
+import { Tex } from "../components/Math.jsx";
 import d from "../../data/encoder.json";
 
-const NAMES = {
-  anli: "ANLI", bitext: "Bitext", clinc150: "CLINC150", contractnli: "ContractNLI", cosmosqa: "CosmosQA",
-  logiqa2: "LogiQA 2.0", massive: "MASSIVE", musique: "MuSiQue", nimble: "Nimble", piqa: "PIQA",
-  proofwriter: "ProofWriter", quality: "QuALITY", reclor: "ReClor", arc_challenge: "ARC-Challenge",
-  banking77: "Banking77", boolq: "BoolQ", jevbench: "JevBench", mmlu: "MMLU", mmlu_pro: "MMLU-Pro",
-  sciq: "SciQ", winogrande: "Winogrande", ALL: "ALL", external_macro: "External macro",
-};
-// Sweep runs: the best run takes --e1 (its color everywhere in this section), the rest follow by learning rate.
-// Only runs with the featured run's epoch count share an x-axis and are plotted (at most the four
-// validated --e colors); longer runs are listed in the sweep table without a color.
-const FEATURED = d.encoders.find((m) => m.best);
-const PLOTTED = d.encoders.filter((m) => m.epochs === FEATURED.epochs)
-  .sort((a, b) => (b.best - a.best) || (a.lr - b.lr)).slice(0, 4)
-  .map((m, i) => ({ ...m, color: `var(--e${i + 1})` }));
-const RUNS = [...PLOTTED, ...d.encoders.filter((m) => !PLOTTED.some((p) => p.id === m.id))
-  .sort((a, b) => a.epochs - b.epochs || a.lr - b.lr).map((m) => ({ ...m, color: null }))];
-const BEST = RUNS[0];
-const LONGER = RUNS.filter((m) => m.epochs > BEST.epochs);
-const [Q06, Q4] = d.baselines;
-
 const pct = (v, k = 1) => (v == null ? "–" : (v * 100).toFixed(k));
-const signed = (v, k = 1) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(k)}`;
-const lrText = (lr) => lr.toExponential(1).replace("e-", "e−");
-const seedText = (s) => `${pct(s.mean)} ± ${pct(s.sd)} (n=${s.n})`;
-const runText = (m) => `lr ${lrText(m.lr)}${m.epochs > 1 ? ` · ${m.epochs} epochs` : ""}`;
+const signed = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(1)}`;
+const Q = d.decoder;
 
 function Delta({ v }) {
-  if (v == null || Number.isNaN(v)) return <td className="rs-none">–</td>;
-  const tone = Math.min(Math.abs(v) / 0.3, 1) * 55;
-  const bg = v === 0 ? "transparent" : `color-mix(in srgb, var(${v > 0 ? "--c6" : "--c5"}) ${tone}%, transparent)`;
+  const tone = Math.min(Math.abs(v) / 0.15, 1) * 55;
+  const bg = `color-mix(in srgb, var(${v > 0 ? "--c6" : "--c5"}) ${tone}%, transparent)`;
   return <td className="rs-delta" style={{ background: bg }}>{signed(v)}</td>;
 }
 
-function Cards() {
+/** Test, dev and external accuracy of one recipe next to the decoder. */
+function Cards({ r }) {
   const cards = [
-    { id: "enc", label: "UltraBERT-380M", color: BEST.color, m: BEST, note: `full fine-tune · ${runText(BEST)} · 1 forward pass` },
-    { id: Q06.id, label: Q06.label, color: "var(--m1)", m: Q06, note: "LoRA r16 + KL anchors · trie scoring" },
-    { id: Q4.id, label: Q4.label, color: "var(--m2)", m: Q4, note: "LoRA r16 + KL anchors · trie scoring" },
+    { label: `UltraBERT-380M · ${r.label}`, color: "var(--e1)", m: r },
+    { label: Q.label, color: "var(--m1)", m: Q },
   ];
   return (
     <div className="rs-cards">
       {cards.map((c, i) => (
-        <motion.div key={c.id} className="rs-card" style={{ "--mc": c.color }}
-          initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.08 }}>
-          <h3><i />{c.label}</h3>
-          <p className="rs-big">{pct(c.m.final.ALL)}<small>held-out ALL, %</small></p>
+        <motion.div key={c.label} className="rs-card" style={{ "--mc": c.color }}
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}>
+          <h3>{c.label}</h3>
+          <p className="rs-big">{pct(c.m.test)}<small>test accuracy, %</small></p>
           <dl>
-            <dt>external macro</dt><dd>{pct(c.m.bench?.external_macro)}%</dd>
-            {c.m.seed_ALL && <><dt>{c.m.seed_ALL.n} seeds, ALL</dt><dd>{seedText(c.m.seed_ALL)}</dd></>}
-            <dt>Banking77 / JevBench</dt><dd>{pct(c.m.bench?.banking77)} / {pct(c.m.bench?.jevbench)}</dd>
-            <dt>recipe</dt><dd>{c.note}</dd>
+            <dt>dev</dt><dd>{pct(c.m.dev)}%</dd>
+            <dt>external benchmarks</dt><dd>{pct(c.m.ext)}%</dd>
           </dl>
         </motion.div>
       ))}
@@ -61,65 +38,50 @@ function Cards() {
   );
 }
 
-/** UltraBERT next to each decoder, with the signed gap (UltraBERT − decoder) per row. */
-function Compare({ rows, get, label }) {
-  const cols = [Q06, Q4];
+function PerDataset({ r }) {
   return (
     <div className="results-wrap">
       <table className="rs-table">
         <thead>
-          <tr>
-            <th rowSpan={2}>{label}</th>
-            <th className="rs-grp"><i style={{ background: BEST.color }} />UltraBERT-380M</th>
-            {cols.map((q, i) => (
-              <th key={q.id} colSpan={2} className="rs-grp"><i style={{ background: `var(--m${i + 1})` }} />{q.label}</th>
-            ))}
-          </tr>
-          <tr>
-            <th className="rs-sub">Acc</th>
-            {cols.map((q) => ["Acc", "UltraBERT −"].map((h) => <th key={q.id + h} className="rs-sub">{h}</th>))}
-          </tr>
+          <tr><th>Dataset</th><th className="rs-sub">UltraBERT</th><th className="rs-sub">Qwen3-0.6B</th><th className="rs-sub">Difference</th></tr>
         </thead>
         <tbody>
-          {rows.map((k) => {
-            const u = get(BEST, k);
-            return (
-              <tr key={k} className={k === "ALL" || k === "external_macro" ? "rs-total" : ""}>
-                <th>{NAMES[k] ?? k}</th>
-                <td>{pct(u)}</td>
-                {cols.map((q) => {
-                  const v = get(q, k);
-                  return [
-                    <td key={q.id + "a"} className="rs-b">{pct(v)}</td>,
-                    <Delta key={q.id + "d"} v={u != null && v != null ? u - v : null} />,
-                  ];
-                })}
-              </tr>
-            );
-          })}
+          {d.datasets.map(([k, name]) => (
+            <tr key={k}>
+              <th>{name}</th><td>{pct(r.per_dataset[k])}</td><td className="rs-b">{pct(Q.per_dataset[k])}</td>
+              <Delta v={r.per_dataset[k] - Q.per_dataset[k]} />
+            </tr>
+          ))}
+          <tr className="rs-total">
+            <th>ALL</th><td>{pct(r.test)}</td><td className="rs-b">{pct(Q.test)}</td><Delta v={r.test - Q.test} />
+          </tr>
         </tbody>
       </table>
     </div>
   );
 }
 
-function Sweep() {
+/** The selected recipe's option-sensitivity numbers, with the other recipes for reference. */
+function Sensitivity({ sel }) {
+  const rows = [
+    ["reorder", "Answer changes when the options are reordered", (v) => `${pct(v)}%`],
+    ["remove", "Answer changes when one wrong option is removed", (v) => `${pct(v)}%`],
+    ["label_tv", "Predicted vs. gold label frequencies (TV, lower is closer)", (v) => v.toFixed(3)],
+    ["ece", "Calibration error of the top option", (v) => v.toFixed(3)],
+  ];
   return (
     <div className="results-wrap">
       <table className="rs-table">
         <thead>
-          <tr>
-            <th>Run</th><th className="rs-sub">lr</th><th className="rs-sub">epochs</th><th className="rs-sub">steps</th>
-            <th className="rs-sub">ALL before</th><th className="rs-sub">ALL after</th><th className="rs-sub">External macro</th><th className="rs-sub">Seeds: ALL / external</th>
-          </tr>
+          <tr><th>Dev rows</th>{d.recipes.map((r) => <th key={r.key} className={`rs-sub${r.key === sel ? " on" : ""}`}>{r.label}</th>)}</tr>
         </thead>
         <tbody>
-          {RUNS.map((m) => (
-            <tr key={m.id} className={m.best ? "rs-total" : ""}>
-              <th>{m.color ? <i className="rs-key" style={{ background: m.color }} /> : <i className="rs-key rs-key-none" />}{m.id}{m.best ? " (featured)" : ""}</th>
-              <td>{lrText(m.lr)}</td><td>{m.epochs}</td><td>{m.steps ?? "–"}</td>
-              <td className="rs-b">{pct(m.base?.ALL)}</td><td>{pct(m.final.ALL)}</td><td>{pct(m.bench?.external_macro)}</td>
-              <td className="rs-b">{m.seed_ALL ? `${seedText(m.seed_ALL)} / ${m.seed_external_macro ? seedText(m.seed_external_macro) : "–"}` : "1 seed"}</td>
+          {rows.map(([k, name, fmt]) => (
+            <tr key={k}>
+              <th>{name}</th>
+              {d.recipes.map((r) => (
+                <td key={r.key} className={r.key === sel ? "rs-sel" : "rs-b"}>{fmt(r.coupling[k])}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -128,117 +90,75 @@ function Sweep() {
   );
 }
 
-/** Milliseconds per decision on the same held-out rows, one row at a time (and batched, where a path exists). */
-function Latency() {
-  const rows = d.latency;
-  if (!rows) return null;
-  const buckets = Object.keys(rows[0].buckets);
-  const label = (k) => "ms, " + k.replace("ms_tokens_", "").replace("-inf", "+").replace("-", "–") + " tok";
+function Cost() {
   return (
-    <>
-      <h3 className="sub-h">Time per decision</h3>
-      <p className="lede small">
-        Milliseconds to score one held-out row, one row at a time, on one A100 (the same rows for every model). The
-        decoders prefill the prompt and walk the answer trie; the encoder runs one forward pass. Batched throughput is
-        what evaluation uses: the decoders pad a batch, while the encoder on FlashAttention-2 varlen packs rows of up to
-        32K tokens into one sequence with no padding and no attention masks (<code>modeling/encoder_varlen.py</code>), at
-        the same accuracy as SDPA. Its throughput includes tokenizing every row. The SDPA rows run one row per forward pass,
-        so they have no batched number.
-      </p>
-      <div className="results-wrap">
-        <table className="rs-table">
-          <thead>
-            <tr>
-              <th>Model</th><th className="rs-sub">Weights</th><th className="rs-sub">Median ms</th>
-              <th className="rs-sub">Mean ms</th><th className="rs-sub">p90 ms</th>
-              {buckets.map((k) => <th key={k} className="rs-sub">{label(k)}</th>)}
-              <th className="rs-sub">Batched rows/s</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label + r.variant}>
-                <th>{r.label}</th><td className="rs-b">{r.variant}</td>
-                <td>{r.median_ms.toFixed(0)}</td><td>{r.mean_ms.toFixed(0)}</td><td>{r.p90_ms.toFixed(0)}</td>
-                {buckets.map((k) => <td key={k}>{r.buckets[k] == null ? "–" : r.buckets[k].toFixed(0)}</td>)}
-                <td>{r.batched_rows_per_s == null ? "–" : r.batched_rows_per_s.toFixed(1)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="rs-note">Measured with llm_jev.profiling.decision_latency (GPU synchronized around every row, 20 warm-up rows untimed).</p>
-    </>
+    <div className="results-wrap">
+      <table className="rs-table">
+        <thead><tr><th>Model</th><th className="rs-sub">ms per decision</th><th className="rs-sub">Peak memory, GiB</th></tr></thead>
+        <tbody>
+          {d.cost.map((c) => (
+            <tr key={c.label}><th>{c.label}</th><td>{c.ms.toFixed(0)}</td><td>{c.peak_gib.toFixed(1)}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 export default function Encoder() {
-  const [a, setA] = useState(0.9);
-  const xmax = Math.max(...PLOTTED.map((m) => m.steps ?? 1));
-  const series = (k) => PLOTTED.filter((m) => m.curves[k]).map((m) => ({
-    id: m.id, label: runText(m), color: m.color, points: m.curves[k],
-  }));
+  const [sel, setSel] = useState("ub_sig");
+  const r = d.recipes.find((x) => x.key === sel);
+  const xmax = Math.max(...r.loss.map(([s]) => s));
   return (
     <section className="trie-section" id="encoder">
       <p className="eyebrow">9 · Encoder</p>
       <h2>A 380M encoder against the decoders</h2>
       <p className="lede small">
-        UltraBERT-380M is a bidirectional encoder with a native 32K context. It reads a decision with one mask per
-        option, <code>[k] &lt;|mask|&gt; option</code>, and scores option k by the masked-LM logit of “ yes” at its mask;
-        a softmax over the K masks is the decision, so one forward pass scores every option (no trie, no generation).
-        Training is plain cross-entropy over the K options (L_tree with one level, no KL anchors), full fine-tuning with
-        fp32 weights under bf16 autocast, one epoch of the same {d.datasets.length}-dataset mix. The decoders are the
-        released checkpoints, re-scored on the same held-out rows and benchmark samples.
+        UltraBERT-380M reads the same row with a mask in front of each option, <code>[k] &lt;mask&gt; option</code>,
+        and scores every option in one forward pass, with no trie and no generation. It is fully fine-tuned for one
+        epoch on the same data as Qwen3-0.6B. The four recipes below differ only in how an option is scored and how
+        the scores become probabilities.
       </p>
-      <Cards />
 
-      <h3 className="sub-h">Held-out accuracy per dataset</h3>
-      <p className="lede small">
-        Accuracy in %. The shaded column is UltraBERT minus that decoder, in points: green where the encoder is ahead,
-        pink where it is behind. ALL is the mean over the {d.datasets.length} datasets for every model.
-      </p>
-      <Compare rows={[...d.datasets, "ALL"]} label="Dataset" get={(m, k) => m.final?.[k]} />
-      <p className="rs-note">About 100 rows per dataset, so one standard error is about 5 points on a single dataset and about 1.4 points for ALL.</p>
-
-      {d.benchmarks.length > 0 && (
-        <>
-          <h3 className="sub-h">External benchmarks</h3>
-          <Compare rows={[...d.benchmarks, "external_macro"]} label="Benchmark" get={(m, k) => m.bench?.[k]} />
-          <p className="rs-note">The same seeded samples as section 5. External macro is the mean over the six external sets.</p>
-        </>
-      )}
-
-      <Latency />
-
-      <h3 className="sub-h">Learning-rate sweep</h3>
-      <p className="lede small">
-        The encoder card recommends lower learning rates than other encoders. Each run below changes only{" "}
-        <code>optim.lr</code> or <code>run.epochs</code> in <code>configs/train_mlm/ultrabert_380m.yaml</code>. The featured run is the best
-        {" "}{BEST.epochs}-epoch run on held-out ALL (the decoders also trained for {BEST.epochs} epoch), chosen on the same
-        rows reported above, so its ALL is slightly optimistic; the benchmarks are untouched by the choice.
-        {LONGER.map((m) => (
-          <span key={m.id}>
-            {" "}Training longer ({runText(m)}) lifts held-out ALL to {pct(m.final.ALL)} but lowers the external macro to{" "}
-            {pct(m.bench?.external_macro)}: the extra epoch fits the training mix more than it generalizes. It is listed, not
-            plotted (its x-axis is {m.epochs}× longer).
-          </span>
-        ))}
-      </p>
-      <Sweep />
       <div className="rs-ctl">
-        <label htmlFor="enc-smooth">Smoothing</label>
-        <input id="enc-smooth" type="range" min="0" max="0.98" step="0.02" value={a} onChange={(e) => setA(+e.target.value)} />
-        <span>{a.toFixed(2)}</span>
-        <div className="rs-legend">
-          {PLOTTED.map((m) => <span key={m.id}><i style={{ background: m.color }} />{runText(m)}</span>)}
-        </div>
+        <Toggle id="enc-recipe" label="Recipe" value={sel} onChange={setSel}
+          options={d.recipes.map((x) => [x.key, x.label])} />
       </div>
-      <div className="rs-grid-charts two">
-        <LineChart wide title="Training loss (cross-entropy over the K options)" xmax={xmax} a={a} series={series("loss")}
+
+      <div className="enc-recipe">
+        <p className="lede small">{r.text}</p>
+        <Tex block>{r.formula}</Tex>
+        <p className="rs-note">Released at <a href={r.hf}>{r.hf.replace("https://huggingface.co/", "")}</a>.</p>
+      </div>
+
+      <Cards r={r} />
+
+      <h3 className="sub-h">Test accuracy per dataset</h3>
+      <PerDataset r={r} />
+      <p className="rs-note">
+        Averaged over training seeds. For reference, the reproduced Qwen3-4B LoRA model reaches {pct(d.decoder4b.test)}%.
+      </p>
+
+      <h3 className="sub-h">Does the answer depend on the other options?</h3>
+      <p className="lede small">
+        Each dev row is scored in four random option orders and once with a wrong option removed. The selected
+        recipe is highlighted.
+      </p>
+      <Sensitivity sel={sel} />
+
+      <h3 className="sub-h">Training loss</h3>
+      <div className="rs-grid-charts">
+        <LineChart wide title={`${r.label}, released run`} xmax={xmax} a={0.9}
+          series={[{ id: r.key, label: r.label, color: "var(--e1)", points: r.loss }]}
           format={(v) => v.toFixed(2)} />
-        <LineChart wide title="Training accuracy (batch)" xmax={xmax} a={a} series={series("accuracy")}
-          format={(v) => `${(v * 100).toFixed(1)}%`} />
       </div>
+
+      <h3 className="sub-h">Time and memory</h3>
+      <p className="lede small">
+        One row at a time on one A100. The decoders read the input, then all option numbers in one more pass on
+        the shared cache, their fastest path.
+      </p>
+      <Cost />
     </section>
   );
 }

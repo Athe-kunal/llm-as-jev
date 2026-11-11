@@ -827,3 +827,14 @@ a.sec { text-decoration: none; }
 .try-sbs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 16px; }
 .tokdoc .tk.sel { background: color-mix(in srgb, var(--c6) 45%, transparent); border-radius: 3px; }
 .try-sbs .dsent.marked { outline: none; }  /* picks are shown by their highlight, not a box */
+
+/* Encoder section: recipe toggle */
+#encoder .rs-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.enc-recipe { margin: 4px 0 18px; }
+.enc-recipe .tex.block { display: block; position: relative; margin: 8px 0; overflow-x: auto; }
+.rs-table td.rs-sel { font-weight: 600; background: color-mix(in srgb, var(--e1) 12%, transparent); }
+.rs-table th.rs-sub.on { color: var(--fg); font-weight: 600; }
+@media (max-width: 640px) { #encoder .rs-cards { grid-template-columns: 1fr; } }
+#encoder .model-toggle { flex-wrap: wrap; max-width: 100%; }
+.stepper { flex-wrap: wrap; }
+.stepper .dots { flex-wrap: wrap; min-width: 0; }
