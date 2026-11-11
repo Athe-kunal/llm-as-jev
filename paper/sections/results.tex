@@ -4,9 +4,9 @@
 \subsection{Encoder against decoder}
 
 \Cref{tab:headline} and \cref{fig:headline} give the main comparison.
-With the same data and training budget, every encoder recipe is above Qwen3-0.6B (\TestQwFull{}\% on the test set): \TestUbList{}\% with the softmax over ``yes'', \TestUbYesNo{}\% with ``yes'' minus ``no'', and \TestUbSig{}\% with the sigmoid-normalised loss.
+With the same data and training budget, every encoder recipe is above Qwen3-0.6B (\TestQwFull{}\% on the test set): \TestUbList{}\% with the softmax over ``yes'', and \TestUbYesNo{}\%, \TestUbSqrt{}\% and \TestUbSig{}\% with the softmax, the square-root softplus and the sigmoid over ``yes'' minus ``no''.
 The encoder also has fewer parameters, 380M against 0.6B.
-On the six external benchmarks the encoder recipes reach \ExtUbList{}\%, \ExtUbYesNo{}\% and \ExtUbSig{}\%, against \ExtQwFull{}\% for the decoder.
+On the six external benchmarks the encoder recipes reach \ExtUbList{}\% to \ExtUbYesNo{}\%, against \ExtQwFull{}\% for the decoder.
 Every test number is below its dev number by 0.6 to 2.0 points, because the learning rates were chosen on dev, and the ranking does not change.
 The reproduced Qwen3-4B LoRA model, at \TestQwFourLora{}\%, remains ahead of all sub-billion models, so our claims are limited to models below one billion parameters.
 
@@ -20,6 +20,8 @@ The external accuracy of fully fine-tuned Qwen3-0.6B (\ExtQwFull{}\%) is not abo
 
 Scoring by ``yes'' minus ``no'' gives most of the gain: over the ``yes'' logit alone it adds \DiffUbYesNoUbListAbs{} points on the test set and \ExtUbYesNo{}\% against \ExtUbList{}\% on the external benchmarks.
 The sigmoid normalisation adds a further \DiffUbSigUbYesNoAbs{} points on the test set and nothing on the external benchmarks, and its results vary less between seeds.
+The square-root softplus, which is not bounded, matches the softmax (\TestUbSqrt{}\% against \TestUbYesNo{}\%), which suggests that the bound of the sigmoid is what matters.
+The bound is not the only difference, though: for rejected options the square-root softplus also acts as a softmax at twice the temperature (\cref{sec:loss}).
 \Cref{sec:analysis} compares the labels that each recipe predicts.
 
 \subsection{How strongly the options depend on each other}
@@ -33,6 +35,7 @@ The score does most of the work: ``yes'' minus ``no'' raises external accuracy f
 Under shuffling, the score and the sigmoid each remove about one point (\CpShufYes{}\%, \CpShufYesNo{}\%, \CpShufSig{}\%).
 On top of the score, the sigmoid raises dev accuracy from \CpAccYesNo{}\% to \CpAccSig{}\%, lowers the calibration error from \CpEceYesNo{} to \CpEceSig{}, and fixes the label balance, which the score alone makes worse (total variation \CpLabelYes{}, \CpLabelYesNo{}, \CpLabelSig{}).
 After training, the gold option's sigmoid averages only \CpSigGoldSig{}, so the model acts almost like a softmax.
+The square-root softplus has the smallest gradient spikes (\CpGradSqrt{}) but the most answer changes under shuffling (\CpShufSqrt{}\%).
 
 \subsection{Cost}
 

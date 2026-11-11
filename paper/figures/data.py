@@ -17,6 +17,10 @@ MODELS = {
                      params="380M", ours=True,
                      runs=["ultrabert_380m_lr1.5e-5_yesno", "ultrabert_380m_lr1.5e-5_yesno_seed1",
                            "ultrabert_380m_lr1.5e-5_yesno_seed2"]),
+    "ub_sqrt": dict(name="UltraBERT-380M, sqrt-softplus, yes $-$ no", short="UltraBERT sqrt-softplus",
+                    family="encoder", params="380M", ours=True,
+                    runs=["ultrabert_380m_lr1.5e-5_sqrtsoftplus", "ultrabert_380m_sqrtsoftplus_lr1.5e-5_seed1",
+                          "ultrabert_380m_sqrtsoftplus_lr1.5e-5_seed2"]),
     "ub_sig": dict(name="UltraBERT-380M, sigmoid-norm, yes $-$ no", short="UltraBERT sigmoid-norm", family="encoder",
                    params="380M", ours=True,
                    runs=["ultrabert_380m_lr1.5e-5_sigmoidnorm", "ultrabert_380m_sigmoidnorm_lr1.5e-5_seed1",
@@ -117,7 +121,8 @@ def headline():
 
 
 PAIRS = [("ub_sig", "qw_full"), ("ub_list", "qw_full"), ("ub_yesno", "qw_full"), ("ub_sig", "ub_list"),
-         ("ub_yesno", "ub_list"), ("ub_sig", "ub_yesno"), ("qw_full", "qw_lora")]
+         ("ub_yesno", "ub_list"), ("ub_sig", "ub_yesno"), ("ub_sqrt", "ub_yesno"), ("ub_sig", "ub_sqrt"),
+         ("qw_full", "qw_lora")]
 
 
 def paired(h):

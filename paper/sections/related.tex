@@ -16,7 +16,7 @@ Two encoder decision models are listed on public Jev leaderboards \citep{jevbenc
 Both add new layers on top of the encoder, and they are described in model cards.
 Laya trains its head with reinforcement learning on proper scoring rules, and Von uses a listwise softmax loss with a Brier term.
 We reuse the pretrained masked-token head and score each option by ``yes'' against ``no'', so there is no new head.
-We also compare three training recipes, match the decoders in data and training, report a held-out test split, and add evidence.
+We also compare four training recipes, match the decoders in data and training, report a held-out test split, and add evidence.
 
 \paragraph{Option letters, position and label bias.}
 Reading the letter of the chosen option requires a model to bind the letter to the option text \citep{robinson2023mcsb}.

@@ -53,8 +53,8 @@
   \end{tikzpicture}
   \caption{One row, two ways. The decoder reads the numbered options and writes the number of its answer; the
   loss is taken over the tokens of that number. The encoder gets a mask in front of each option and scores each
-  option directly. Two of the three recipes are shown: the plain softmax over the options, which scores an
+  option directly. Two of the four recipes are shown: the plain softmax over the options, which scores an
   option by the ``yes'' logit alone, and the sigmoid-normalised loss, which scores it by ``yes'' minus ``no''.
-  Each option's score goes through a sigmoid, and the sum in the denominator keeps the options competing. The third recipe is the softmax over ``yes'' minus ``no''.}
+  Each option's score goes through a sigmoid, and the sum in the denominator keeps the options competing. The other two normalise ``yes'' minus ``no'' with a softmax and with a square-root softplus.}
   \label{fig:intro}
 \end{figure}

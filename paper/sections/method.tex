@@ -42,7 +42,7 @@ We use two scores.
 The first is $s_k=\ell_k(\textit{yes})$.
 The second is $s_k=\ell_k(\textit{yes})-\ell_k(\textit{no})$, which also asks the model to reject the other options.
 Both give a decision by $\arg\max_k s_k$.
-A recipe pairs a score with one of the two normalisations below. We train three: the softmax with either score, and the sigmoid-normalised loss with the difference.
+A recipe pairs a score with one of the three normalisations below. We train four: the softmax with either score, and the two other normalisations with the difference.
 
 \paragraph{Plain softmax.}
 The options compete through one softmax,
@@ -63,3 +63,10 @@ The gradient of the loss with respect to $s_k$ is $(1-\sigma(s_k))\,(p_k-\mathbf
 Since $\sigma$ is increasing, the decision is the same $\arg\max_k s_k$.
 The sigmoid of a score can be read as that option's own probability of being correct, but nothing in the loss requires it: only the ratios enter $p_k$.
 \Cref{sec:coupling} tests whether the trained model uses it this way.
+
+\paragraph{Square-root softplus.}
+To test whether the bound matters, we replace the sigmoid with $g(s)=\sqrt{\log(1+e^{s})}$,
+\begin{equation}
+  p_k=\frac{g(s_k)}{\sum_{j=1}^{K}g(s_j)},\qquad \mathcal{L}_{\text{sqrt-sp}}=-\log p_{g}.
+\end{equation}
+For a rejected option, $g(s)\approx e^{s/2}$, a softmax at twice the temperature; for an accepted option, $g$ keeps growing like $\sqrt{s}$, so its gradient fades slowly instead of vanishing as with the sigmoid.

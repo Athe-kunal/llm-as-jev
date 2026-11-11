@@ -3,9 +3,9 @@ A decision model picks one answer from a set of options in a single forward pass
 It is cheap enough to run on every item in a large pipeline, for example to grade, filter or route text.
 This technical report compares recipes for fine-tuning encoder-style decision models.
 We fine-tune UltraBERT-380M \citep{ultrabert}, an encoder pretrained with masked language modelling, with one mask per option.
-We compare three recipes: a softmax over each option's ``yes'' logit, a softmax over ``yes'' minus ``no'', and a sigmoid-normalised loss, as in the expert gate of DeepSeek-V3 \citep{deepseekv3}.
-Against Qwen3-0.6B, fully fine-tuned on the same data with the LLM-as-Jev recipe \citep{li2026llmasjev} (\textbf{\TestQwFull{}\%} test accuracy), the three recipes reach \textbf{\TestUbList{}\%}, \textbf{\TestUbYesNo{}\%} and \textbf{\TestUbSig{}\%}.
-Scoring by ``yes'' minus ``no'' gives most of the gain, including all of the gain on external benchmarks (\textbf{\ExtUbYesNo{}\%} against \textbf{\ExtQwFull{}\%} for the decoder); the sigmoid normalisation adds a smaller in-distribution gain and steadier runs.
+We compare four recipes: a softmax over each option's ``yes'' logit, and three normalisations of ``yes'' minus ``no'': a softmax, a sigmoid divided by the sum over options as in the expert gate of DeepSeek-V3 \citep{deepseekv3}, and a square-root softplus divided by the sum.
+Against Qwen3-0.6B, fully fine-tuned on the same data with the LLM-as-Jev recipe \citep{li2026llmasjev} (\textbf{\TestQwFull{}\%} test accuracy), the encoder reaches \textbf{\TestUbList{}\%} to \textbf{\TestUbSig{}\%}.
+Scoring by ``yes'' minus ``no'' gives most of the gain, including all of the gain on external benchmarks (\textbf{\ExtUbYesNo{}\%} against \textbf{\ExtQwFull{}\%} for the decoder); the bounded sigmoid adds a smaller in-distribution gain and steadier runs, which the unbounded square-root softplus does not.
 The encoder takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms} on an NVIDIA A100 80GB GPU.
 We also add an evidence head that marks, in the same pass, the sentences an annotator would mark as support for the answer.
 It is trained on human-marked evidence and on labels selected with a reward adapted from SelfCite \citep{selfcite}.

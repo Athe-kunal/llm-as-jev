@@ -36,7 +36,7 @@ Our contributions are:
     We fine-tune UltraBERT-380M \citep{ultrabert} with one mask per option and the ``yes'' versus ``no'' prediction at each mask as the option's score.
     It is trained on the same data as LLM-as-Jev.
   \item \textbf{Training recipes for the encoder.}
-    We compare three ways to train on the mask predictions: a softmax over the ``yes'' logits, a softmax over ``yes'' minus ``no'', and a sigmoid-normalised loss as in the gate of DeepSeek-V3 \citep{deepseekv3}.
+    We compare four ways to train on the mask predictions: a softmax over the ``yes'' logits, and a softmax, a sigmoid normalised by the sum as in the gate of DeepSeek-V3 \citep{deepseekv3}, and a square-root softplus normalised by the sum, each over ``yes'' minus ``no''.
     For each we measure accuracy, steadiness under option shuffling and removal, label balance and calibration.
   \item \textbf{A matched comparison with decoders.}
     We fully fine-tune Qwen3-0.6B \citep{qwen3} on the same data, tune the learning rate for every model, repeat the runs over seeds and evaluate on a held-out test split that was never used for a choice.

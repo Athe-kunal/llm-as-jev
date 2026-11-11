@@ -22,7 +22,7 @@ We split them into a dev set of \NDev{} rows, used to choose learning rates, and
 \label{sec:models}
 
 \paragraph{Encoder.}
-UltraBERT-380M \citep{ultrabert} is fully fine-tuned with the format of \cref{sec:format} and each of the three recipes of \cref{sec:loss}.
+UltraBERT-380M \citep{ultrabert} is fully fine-tuned with the format of \cref{sec:format} and each of the four recipes of \cref{sec:loss}.
 
 \paragraph{Decoders.}
 We fully fine-tune Qwen3-0.6B \citep{qwen3} with the loss of \cref{sec:loss}, with a frozen copy of the starting model as $p_0$.
@@ -35,7 +35,7 @@ The encoder is fully fine-tuned, so the fully fine-tuned decoder is the matched 
 Every model is trained for one epoch with a batch of 32 rows.
 We sweep the learning rate with one seed per value and choose by accuracy on the dev set:
 $\{0.8, 1.5, 3, 5\}\times10^{-5}$ for the encoder with the softmax over ``yes'', $\{0.8, 1.5, 2, 3\}\times10^{-5}$ with the sigmoid-normalised loss, and $\{0.5, 1, 2\}\times10^{-5}$ for the decoder.
-Both encoder sweeps choose $1.5\times10^{-5}$, which we also use for the softmax over ``yes'' minus ``no''.
+Both encoder sweeps choose $1.5\times10^{-5}$, which we also use for the other two recipes, without a sweep.
 The two best Qwen rates differ by 0.1 points on dev, and we use $1\times10^{-5}$.
 At the chosen rate we repeat the run with different seeds, which change the order of the rows and the option shuffling, and report the average.
 
