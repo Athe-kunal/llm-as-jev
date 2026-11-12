@@ -66,7 +66,7 @@ function Sensitivity({ sel }) {
   const rows = [
     ["reorder", "Answer changes when the options are reordered", (v) => `${pct(v)}%`],
     ["remove", "Answer changes when one wrong option is removed", (v) => `${pct(v)}%`],
-    ["label_tv", "Predicted vs. gold label frequencies (TV, lower is closer)", (v) => v.toFixed(3)],
+    ["label_tv", "Label bias (TV between predicted and gold label frequencies)", (v) => v.toFixed(3)],
     ["ece", "Calibration error of the top option", (v) => v.toFixed(3)],
   ];
   return (
@@ -145,6 +145,14 @@ export default function Encoder() {
         recipe is highlighted.
       </p>
       <Sensitivity sel={sel} />
+      <p className="rs-note">
+        Label bias: on the three datasets whose options are the same labels in every row (ContractNLI, MuSiQue,
+        ProofWriter), we compare how often the model predicts each label with how often it is correct. The total
+        variation is the share of predictions that would have to change label for the two to match, so 0 means no
+        bias. For example, “Yes” is correct on 48% of MuSiQue dev rows, but the softmax models predict it for 64–69%
+        of them; the sigmoid models for 47–60%. This measures bias, not accuracy: a model could predict each label
+        exactly as often as it is correct and still put it on the wrong rows.
+      </p>
 
       <h3 className="sub-h">Training loss</h3>
       <div className="rs-grid-charts">
