@@ -1,13 +1,10 @@
 \begin{abstract}
-A decision model picks one answer from a set of options in a single forward pass, without writing out its reasoning.
-It is cheap enough to run on every item in a large pipeline, for example to grade, filter or route text.
-This technical report compares recipes for fine-tuning encoder-style decision models.
-We fine-tune UltraBERT-380M \citep{ultrabert}, an encoder pretrained with masked language modelling, with one mask per option.
-We compare four recipes, which differ in how each option is scored and how the scores are turned into probabilities over the options; one of them follows the expert gate of DeepSeek-V3 \citep{deepseekv3}.
-Against Qwen3-0.6B, fully fine-tuned on the same data with the LLM-as-Jev recipe \citep{li2026llmasjev} (\textbf{\TestQwFull{}\%} test accuracy), the encoder reaches \textbf{\TestUbList{}\%} to \textbf{\TestUbSig{}\%}.
-Among the encoder recipes, scoring an option by ``yes'' minus ``no'' instead of ``yes'' alone raises test accuracy from \TestUbList{}\% to \TestUbYesNo{}\% and external-benchmark accuracy from \ExtUbList{}\% to \textbf{\ExtUbYesNo{}\%} (\textbf{\ExtQwFull{}\%} for the decoder).
-The sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points and nothing on the external benchmarks; the square-root softplus adds nothing.
-One request at a time on an NVIDIA A100 80GB GPU, the encoder takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms} for Qwen3-0.6B, with similar peak memory.
-We also add an auxiliary head that predicts, in the same pass, the sentences annotated as supporting the answer.
-It is trained on human-marked evidence and on labels selected with a reward adapted from SelfCite \citep{selfcite}.
+We study encoder models that pick one of several options in a single forward pass, without generating text.
+This technical report compares recipes for fine-tuning UltraBERT-380M \citep{ultrabert} with one mask per option.
+The four recipes differ in how an option is scored and how the scores become probabilities; one follows the expert gate of DeepSeek-V3 \citep{deepseekv3}.
+Trained on the same data as Qwen3-0.6B with the LLM-as-Jev recipe \citep{li2026llmasjev} (\textbf{\TestQwFull{}\%} test accuracy), the encoder reaches \textbf{\TestUbList{}\%} to \textbf{\TestUbSig{}\%}.
+Scoring an option by ``yes'' minus ``no'' instead of ``yes'' alone gives the larger gain, from \TestUbList{}\% to \TestUbYesNo{}\% on the test set and from \ExtUbList{}\% to \textbf{\ExtUbYesNo{}\%} on external benchmarks (\textbf{\ExtQwFull{}\%} for the decoder).
+Sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points; a square-root softplus adds none.
+One request at a time on an NVIDIA A100, the encoder takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms}, but uses more peak memory (\MemPeakUb{} against \MemPeakQwFull{}\,GiB).
+An auxiliary head, trained on human-marked evidence and on labels selected with a reward adapted from SelfCite \citep{selfcite}, predicts in the same pass the sentences annotated as support for the answer.
 \end{abstract}

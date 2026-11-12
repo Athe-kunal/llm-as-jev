@@ -28,6 +28,7 @@ The encoder settings are those of the UltraBERT model card, and we change only t
 No training row exceeds either token limit, because the data are cut at \MaxTokens{} tokens (\cref{sec:data}).
 
 \paragraph{Batched throughput.}
+These numbers are specific to our implementations, not a comparison of the fastest paths.
 When the dev rows are scored in batches, the encoder processes \RpsUb{} rows per second, against \RpsQwFull{} for Qwen3-0.6B and \RpsQwFourLora{} for Qwen3-4B.
 The encoder uses packed variable-length FlashAttention-2 \citep{flashattention2} and the decoders use length-sorted padded batches with the cache-copying trie scorer, so part of this gap comes from the padding and the copies.
 
@@ -38,21 +39,23 @@ We train one head on each fine-tuned encoder (sigmoid-normalised and softmax, bo
 
 \paragraph{Model.}
 For document token $t$ and option $k$, the head reads $[h_t;\,h_k;\,h_t\odot h_k]$, the final hidden states of the token and of option $k$'s mask.
-A two-layer perceptron (512 hidden units, GELU, dropout 0.1) maps it to one logit, whose sigmoid is the probability that the token is evidence for option $k$.
+A two-layer perceptron (512 hidden units, GELU, dropout 0.1) maps it to one logit, whose sigmoid is the token's evidence score for option $k$.
 
 \paragraph{Labels.}
 A token is positive if it overlaps an evidence span.
 We use gold evidence where it exists (Nimble, ContractNLI, MuSiQue, ProofWriter) and generated spans elsewhere (\cref{fig:spans}): ANLI, QuALITY, LogiQA~2.0, CosmosQA and the remaining rows of ContractNLI, MuSiQue and ProofWriter.
+There are 7{,}778 labelled training rows (7{,}390 for training, 388 for validation), with 5.2\% positive tokens.
+
+\paragraph{Generated spans.}
 Qwen3.6-27B with thinking gets the numbered sentences, the question and the gold answer, and is asked for the smallest set of sentences that supports the answer and without which it is unsupported.
 We sample ten replies (temperature 1.2, top-$p$ 0.9), merge identical sets, and drop sets over 384 tokens unless they are one sentence.
-The same model scores each set $S$ on the decision prompt with the full context, without $S$ and with only $S$ ($1+2m$ prompts for $m$ sets); $q(\mathrm{gold}\mid\cdot)$ is the softmax over the options' summed token log-probabilities.
-The label is the set with the highest reward $\log q(\mathrm{gold}\mid\text{only }S)-\log q(\mathrm{gold}\mid\text{without }S)$.
-This is sufficiency, $\log q(\mathrm{gold}\mid\text{only }S)-\log q(\mathrm{gold}\mid\text{full})$, plus necessity, $\log q(\mathrm{gold}\mid\text{full})-\log q(\mathrm{gold}\mid\text{without }S)$; the full-context term cancels, and we keep it only to report the two parts.
-The best set is always kept, with no minimum reward, so a row whose candidates are all poor still gets a label.
-There is no size penalty: the token cap limits the length of a set, but nothing makes it the smallest sufficient one.
+
+\paragraph{Reward.}
+The same model scores the decision prompt with each set $S$ removed and with only $S$ kept; $q(\mathrm{gold}\mid\cdot)$ is the softmax over the options' summed token log-probabilities.
+The label is the set with the highest reward $\log q(\mathrm{gold}\mid\text{only }S)-\log q(\mathrm{gold}\mid\text{without }S)$, which is sufficiency plus necessity, with the full-context term cancelling.
+The best set is always kept, so a row whose candidates are all poor still gets a label, and nothing beyond the token cap makes the set the smallest sufficient one.
 Unlike SelfCite, we score the gold answer, so the reward is informative only where the labelling model believes it.
-We did not check the generated labels against human evidence directly; the comparison at the end of this appendix is an indirect check.
-There are 7{,}778 labelled training rows (7{,}390 for training, 388 for validation), with 5.2\% positive tokens.
+We did not check the generated labels against human evidence directly; the last paragraph of this appendix is an indirect check.
 
 \paragraph{Training.}
 Token-level binary cross-entropy, with positives weighted by the negative-to-positive ratio (18.1), on the frozen encoder.
@@ -61,19 +64,19 @@ AdamW (learning rate $10^{-3}$, weight decay 0.01), 16 rows per step, three epoc
 
 \paragraph{Evaluation.}
 All methods are scored on the test rows with gold evidence and at least two sentences.
-A word is highlighted when its probability is at least a global threshold, tuned for word F1 on the \EvTuneRows{} dev rows with gold evidence, none of which are test rows: \EvThrSig{} for the sigmoid-normalised encoder and \EvThrList{} for the softmax encoder.
+A word is highlighted when its evidence score reaches a threshold tuned for word F1 on the \EvTuneRows{} dev rows with gold evidence: \EvThrSig{} for the sigmoid-normalised encoder and \EvThrList{} for the softmax encoder.
 On the sigmoid-normalised encoder, the head's token average precision is \EvTokAPSig{} (\EvChanceSig{} for a random ranking), and \EvPTenSig{} of its ten highest tokens are gold.
 On the softmax encoder, adding the generated labels to the gold ones raises sentence average precision from \EvSentAPGold{} to \EvSentAPList{} and token average precision from \EvTokAPGold{} to \EvTokAPList{}.
 
 \section{Additional results}
 \label{app:extra}
 
-\Cref{tab:perdataset} gives the test accuracy for each dataset, averaged over seeds.
+\Cref{tab:perdataset} gives the test accuracy for each dataset.
 
 \begin{table}[h]
   \centering\small
   \setlength{\tabcolsep}{4pt}
-  \caption{Test accuracy (\%) per dataset, averaged over seeds. UB is UltraBERT-380M: UB yes is the softmax over each option's ``yes'' logit; UB yes$-$no is the softmax over ``yes'' minus ``no''; UB sqrt-sp and UB sig-norm normalise ``yes'' minus ``no'' with the square-root softplus and the sigmoid, each divided by the sum over options (\cref{sec:loss}). Bold: best below 1B parameters.}
+  \caption{Test accuracy (\%) per dataset, averaged over training runs. UB is UltraBERT-380M: UB yes is the softmax over each option's ``yes'' logit; UB yes$-$no is the softmax over ``yes'' minus ``no''; UB sqrt-sp and UB sig-norm normalise ``yes'' minus ``no'' with the square-root softplus and the sigmoid, each divided by the sum over options (\cref{sec:loss}). Bold: best below 1B parameters.}
   \label{tab:perdataset}
   \input{generated/table_perdataset}
 \end{table}
@@ -81,9 +84,8 @@ On the softmax encoder, adding the generated labels to the gold ones raises sent
 \section{Examples}
 \label{app:examples}
 
-The examples show the decision of the sigmoid-normalised encoder and the token scores of its evidence head for one row of each of three datasets.
-The rows are the first test row of each dataset in the evidence study that has at most 1{,}400 tokens; MuSiQue has none.
-Only the tokens that the head scores at or above its dev-tuned threshold of \EvThrSig{} for the chosen option are highlighted, darker for a higher probability, and tokens inside the gold evidence are underlined.
-The encoder chooses the correct option in all three rows; the rows were picked by the rule above and not by outcome.
+Each example shows the sigmoid-normalised encoder's decision and its evidence head's token scores, on the first test row of the evidence study with at most 1{,}400 tokens in each dataset (MuSiQue has none).
+Tokens at or above the dev-tuned threshold of \EvThrSig{} are highlighted, darker for a higher score, and gold evidence is underlined.
+The encoder is correct on all three rows, which were picked by this rule, not by outcome.
 
 \input{generated/examples}

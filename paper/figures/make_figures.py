@@ -221,7 +221,7 @@ def max_grad_norm(run):
 
 PROFILE = (  # (macro suffix, profile.json key, row name, path): path "tree" for the decoders' shared-cache scorer
     ("Ub", "runs/ultrabert_380m_lr1.5e-5 (fp32 weights)", "UltraBERT-380M, fp32 weights", None),
-    ("UbBf", "runs/ultrabert_380m_lr1.5e-5 (bf16 weights)", "UltraBERT-380M, bf16 weights", None),
+    ("UbBf", "runs/ultrabert_380m_lr1.5e-5 (bf16 weights)", "UltraBERT-380M, bf16 weights (lower accuracy)", None),
     ("QwFull", "Athekunal/llm-jev-qwen3-0.6b", "Qwen3-0.6B", "tree"),
     ("QwFourLora", "Athekunal/llm-jev-qwen3-4b", "Qwen3-4B", "tree"),
 )

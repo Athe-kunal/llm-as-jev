@@ -1,19 +1,16 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-We built a decision model on an encoder, UltraBERT-380M, with one mask in front of each option, and compared four recipes for training it.
-With the same training examples, one epoch and full fine-tuning, every recipe is more accurate than Qwen3-0.6B trained with LLM-as-Jev (\TestUbList{}\% to \TestUbSig{}\% against \TestQwFull{}\% on the test set), and the encoder takes \MsUb{}\,ms per decision against \MsQwFull{}\,ms for the decoder, with similar peak memory.
-Among the encoder recipes, scoring an option by ``yes'' minus ``no'' instead of ``yes'' alone gives the larger test gain and all of the external gain.
-The sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points and label frequencies closer to the gold ones; the square-root softplus does not, and our comparison does not show which property of the sigmoid is responsible.
-An auxiliary head on the frozen encoder predicts, in the same pass, the sentences annotated as support.
-On the softmax encoder and the test rows with gold evidence from four datasets, it ranks the annotated sentences higher on average than AT2 and ContextCite, which use no evidence labels, though ContextCite is better on ContractNLI.
+We fine-tuned an encoder, UltraBERT-380M, as a decision model with one mask per option, and compared four training recipes.
+On the same training examples, every recipe is more accurate than Qwen3-0.6B trained with LLM-as-Jev (\TestUbList{}\% to \TestUbSig{}\% against \TestQwFull{}\% on the test set).
+The encoder is faster (\MsUb{} against \MsQwFull{}\,ms per decision) but uses more peak memory (\MemPeakUb{} against \MemPeakQwFull{}\,GiB).
+
+Among the recipes, scoring by ``yes'' minus ``no'' gives the larger test gain and all of the external gain.
+Sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points, mostly on MuSiQue, and brings label frequencies closer to the gold ones; the square-root softplus does not, and we cannot say which property of the sigmoid is responsible.
+An auxiliary head on the frozen encoder predicts annotated evidence in the same pass, and on the softmax encoder it ranks the annotated sentences higher than AT2 and ContextCite, except on ContractNLI.
 
 The results have limits.
-They concern one encoder and one decoder at 0.4 to 0.6 billion parameters, and a 4B decoder is still more accurate overall, except on the intent datasets.
-We used one encoder and one training mixture, in English, and compared against one decoder family.
-The evidence head predicts annotated evidence, and we did not evaluate whether it reflects what the model used; ContextCite, which is fitted to the model's response to removed sentences, follows the model most closely.
-At 0.6B parameters and inputs up to \MaxTokens{} tokens, the decoder showed no prefill memory spike.
+They cover one encoder, one decoder family and one English training mixture, below one billion parameters; a 4B decoder is still more accurate except on the intent datasets.
+We did not evaluate whether the evidence head reflects what the model used, and we measured only peak memory.
 
-Two directions follow.
-The first is larger encoders, to see whether the advantage holds above one billion parameters.
-The second is to train the decision and the evidence together, so that the evidence head can also shape the encoder.
+Two directions follow: larger encoders, to see whether the advantage holds above one billion parameters, and training the decision and the evidence together, so that the evidence head can shape the encoder.

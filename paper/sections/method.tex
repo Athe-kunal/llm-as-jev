@@ -4,21 +4,18 @@
 \subsection{Input format}
 \label{sec:format}
 
-\Cref{fig:intro} shows the same row in both formats, built from the training data described in \cref{sec:data}.
+\Cref{fig:intro} shows one row in both formats.
 The options are shuffled each time a row is used, so the position of the correct option carries no information.
 
 \paragraph{Decoder.}
-The prompt follows LLM-as-Jev.
-The user message holds the state, the question, the options numbered $[1]$ to $[K]$, and one instruction: select one option and answer only with its number.
-The assistant turn is filled in up to ``Best answer: ['', and the model has to continue with the number of its choice and a closing bracket.
-Qwen3's thinking mode is turned off.
-Each option $k$ is therefore the token sequence of ``$k$]'', and the options form a trie over these sequences.
+The prompt follows LLM-as-Jev: the state, the question, the options numbered $[1]$ to $[K]$, and an instruction to answer only with the number.
+The reply is filled in up to ``Best answer: ['', with thinking turned off, so each option $k$ is the token sequence ``$k$]'' and the options form a trie.
+The decoder chooses the option whose whole sequence has the highest log-probability.
 
 \paragraph{Encoder.}
-The state and the question are the same.
-The instruction asks to mark the correct option with ``yes'' and every other option with ``no'', and the options are listed as ``$[k]$ \texttt{[M]} description'', with the tokenizer's mask token in front of each description.
-There is no chat template and nothing is generated.
-One forward pass gives a vector of logits at every mask, and the score of option $k$ comes from the logits of the tokens ``yes'' and ``no'' at mask $k$, each taken with a leading space, as it appears after another word.
+The state and question are the same, the instruction asks to mark the correct option with ``yes'' and the others with ``no'', and each option is listed as ``$[k]$ \texttt{[M]} description'', with a mask token in front.
+There is no chat template.
+One forward pass gives the logits at every mask, and option $k$ is scored from the logits of ``yes'' and ``no'', each with a leading space, at its mask.
 
 \input{sections/intro_figure}
 
@@ -26,8 +23,7 @@ One forward pass gives a vector of logits at every mask, and the score of option
 \label{sec:loss}
 
 \paragraph{Decoder: trie loss with KL anchors.}
-At each node of the trie the model chooses among the tokens that are legal there.
-The tree loss is the negative log-probability of the gold option, which is the product of the choices along its path, each normalised over the legal tokens only,
+The tree loss is the negative log-probability of the gold option's path through the trie, each step normalised over the tokens legal there,
 \begin{equation}
   \mathcal{L}_{\text{tree}} = -\sum_{t}\log\frac{\exp z_t(g_t)}{\sum_{v\in\mathcal{V}_t}\exp z_t(v)},
 \end{equation}
@@ -66,21 +62,18 @@ We train the following four recipes:
       p_k=\frac{\sigma(s_k)}{\sum_{j=1}^{K}\sigma(s_j)},\qquad
       \mathcal{L}_{\text{sig-norm}}=-\log p_g.
     \end{equation}
-    This has the form of the DeepSeek-V3 mixture-of-experts gate \citep{deepseekv3}, but the options play the role of experts and are normalised over all $K$ options, with no selection or balancing bias.
-    Each $\sigma(s_k)$ lies between 0 and 1 and can be read as how strongly the model accepts option $k$ on its own, although only the ratios enter $p_k$.
-    The options therefore still compete, and the decision remains the option with the highest score because the sigmoid is increasing.
+    This is the form of the DeepSeek-V3 expert gate \citep{deepseekv3}, with options in place of experts, normalised over all $K$ options and with no selection or balancing bias.
+    Each $\sigma(s_k)$ lies between 0 and 1, but only the ratios enter $p_k$, so the options still compete; the decision is still the highest score.
     The gradient with respect to $s_k$ is
     \begin{equation}
       \left(1-\sigma(s_k)\right)
       \left(p_k-\mathbf{1}[k=g]\right).
     \end{equation}
-    Once an option's sigmoid is close to 1, its score hardly changes.
-    We do not pair this normalisation with the ``yes'' logit alone: vocabulary logits are around 200 (\cref{sec:precision}), so every sigmoid is close to 1, every option receives probability $1/K$, and the gradient is negligible.
-    The ``yes''-minus-``no'' score is much smaller and avoids this saturation.
-    Nothing in the loss makes $\sigma(s_k)$ a probability that holds on its own; \cref{sec:coupling} checks what the trained model does.
+    When an option's sigmoid approaches 1, the direct gradient of the loss with respect to its score becomes small.
+    We exclude the sigmoid on the ``yes'' logit alone: vocabulary logits are around 200 (\cref{sec:precision}), so every sigmoid would saturate near 1 and the gradient would be negligible.
 
   \item \textbf{Yes-minus-no square-root softplus.}
-    To test whether the sigmoid's upper bound matters, we use
+    As an unbounded alternative to the sigmoid, we use
     $h(s)=\sqrt{\log(1+e^s)}$:
     \begin{equation}
       s_k=\ell_k(\textit{yes})-\ell_k(\textit{no}),\qquad
@@ -89,5 +82,5 @@ We train the following four recipes:
     \end{equation}
     For a clearly rejected option ($s\ll0$), $h(s)\approx e^{s/2}$, so the options behave as in a softmax at twice the temperature.
     For a clearly accepted option ($s\gg0$), $h(s)\approx\sqrt{s}$ keeps growing, whereas the sigmoid stops at 1.
-    Its score therefore continues to receive a small gradient where the sigmoid would receive almost none.
+    The direct gradient with respect to its score therefore shrinks slowly, where the sigmoid's nearly vanishes.
 \end{itemize}

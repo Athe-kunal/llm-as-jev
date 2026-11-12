@@ -1,37 +1,34 @@
 \section{Analysis}
 \label{sec:analysis}
 
-This section describes what we saw when training UltraBERT.
-Unless noted, the numbers are from the dev set with one seed per setting.
+The numbers in this section are from the dev set, with one training run per setting, unless noted.
 
-\subsection{What each part of the recipe changes}
+\subsection{One change at a time}
 
-\Cref{tab:ablation} changes one part of the recipe at a time, from the softmax over ``yes'' to the sigmoid-normalised loss.
-Scoring with the difference of the ``yes'' and ``no'' logits, with the softmax kept, raises the external accuracy by 2.0 points and the dev accuracy by 0.4 points; averaged over seeds, the score gives all of the external gain among the encoder recipes (\CpExtYes{}\%, \CpExtYesNo{}\%, \CpExtSig{}\% in \cref{tab:coupling}).
-Replacing the softmax with the sigmoid-normalised loss then raises dev accuracy by a further 1.3 points, and MuSiQue most of all, from 64\% to 76\%.
-Nimble falls from 55\% with the plain score to 43\% with the sigmoid-normalised loss in this one run, on 100 dev rows.
-On the test set, averaged over seeds, the sigmoid-normalised model is instead 3.7 points above the softmax on Nimble.
-We also tried the words ``correct'' and ``incorrect'' in place of ``yes'' and ``no''; this did not help: 70.6\% against 71.1\% with the ``yes'' logit, and 70.1\% against 71.5\% for the difference with ``incorrect''.
-
-The recipes also predict different labels.
-On MuSiQue the correct answer is ``Yes'' in 48\% of the rows.
-The sigmoid-normalised models predict ``Yes'' for 47 to 60\% of the rows, against 64\% and 69\% for the two softmax variants (dev rows).
-On ProofWriter, where ``Unknown'' is correct for a third of the rows, the softmax never predicts it and the sigmoid-normalised models predict it for 2 to 12\%.
-This class stays largely unlearned for every variant.
+\Cref{tab:ablation} changes one part of the recipe at a time.
+On these single runs, ``yes'' minus ``no'' adds 0.4 dev points and 2.0 external points, and the sigmoid a further 1.3 dev points, most of them on MuSiQue (64\% to 76\%).
+Single runs on 100 rows per dataset are noisy: here Nimble falls from 55\% to 43\% with the sigmoid, while on the test set the sigmoid-normalised model is 3.7 points above the softmax over ``yes'' on Nimble.
+The words ``correct'' and ``incorrect'' in place of ``yes'' and ``no'' did not help (70.6\% against 71.1\% for the single word, 70.1\% against 71.5\% for the difference).
 
 \begin{table}[t]
   \centering\small
-  \caption{Encoder variants on the dev rows, one seed (accuracy, \%). The first row is the softmax with the ``yes'' logit,
+  \caption{Encoder variants on the dev rows, one training run each (accuracy, \%). The first row is the softmax with the ``yes'' logit,
   the setting used for the softmax results elsewhere. Bold: best in each column.}
   \label{tab:ablation}
   \input{generated/table_ablation}
 \end{table}
 
+\subsection{Predicted labels}
+\label{sec:labels}
+
+The recipes predict different labels.
+On MuSiQue, ``Yes'' is correct for 48\% of the dev rows; the sigmoid-normalised models predict it for 47 to 60\%, and the two softmax recipes for 64\% and 69\%.
+On ProofWriter, ``Unknown'' is correct for a third of the rows; the softmax never predicts it and the sigmoid-normalised models predict it for 2 to 12\%, so it stays largely unlearned.
+
 \subsection{Numerical precision}
 \label{sec:precision}
 
-Two precision choices matter for the encoder.
-First, its masked-token logits are of the order of 200, where bf16 can only step by 1 or 2, so options would tie or swap; our implementation therefore computes the masked-token head, the logits, the ``yes'' minus ``no'' difference and the normalisation in fp32.
-Second, with that head in fp32, storing the weights in bf16 still changed MuSiQue accuracy by up to 8 points, presumably through rounding in the rest of the network; we did not trace where.
-We therefore evaluate the encoder with fp32 weights under bf16 autocast throughout.
-The decoders are scored with bf16 weights, and re-scoring a Qwen checkpoint in another precision moved its dev accuracy by at most 0.8 points.
+The encoder's masked-token logits are around 200, where bf16 steps by 1 or 2 and options would tie or swap, so we compute the masked-token head, the scores and the normalisation in fp32.
+Even then, bf16 weights changed MuSiQue accuracy by up to 8 points, presumably through rounding elsewhere in the network; we did not trace where.
+We therefore keep fp32 weights under bf16 autocast.
+Re-scoring a Qwen checkpoint in another precision moved its dev accuracy by at most 0.8 points.
