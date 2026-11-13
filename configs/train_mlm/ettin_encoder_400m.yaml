@@ -1,0 +1,43 @@
+# Ettin-400M encoder (jhu-clsp/ettin-encoder-400m, ModernBERT architecture, 8K context) with the
+# UltraBERT recipe's best loss: one mask per option, sigmoid_norm over logit(yes) - logit(no), full FT.
+# Rows longer than its 7,999-token context are dropped (87 of 13,000 training rows).
+model:
+  id: jhu-clsp/ettin-encoder-400m
+  revision: null
+  attention: sdpa            # ModernBERT attention; FA2 varlen is validated for UltraBERT only
+  pack_tokens: 32768
+  gradient_checkpointing: true
+
+format:
+  template: decision_mlm
+  yes_token: " yes"
+  no_token: " no"
+  no_word: null
+
+data:
+  source: data/splits/reason_long_nimble
+  train_split: train
+  eval_split: eval
+  max_tokens: 7999           # Ettin's context
+  eval_per: 100
+  eval_seed: 20260922
+
+optim:
+  lr: 1.5e-5
+  betas: [0.9, 0.98]
+  eps: 1.0e-6
+  weight_decay: 0.1
+  batch_size: 32
+  warmup_ratio: 0.05
+  min_lr_ratio: 0.0
+  max_grad_norm: 1.0
+  loss: sigmoid_norm
+
+run:
+  out: runs/ettin_enc
+  seed: 20260922
+  epochs: 1
+  max_steps: -1
+  eval_every: 0
+  skip_base_eval: true
+  mixed_precision: bf16

@@ -23,20 +23,24 @@ OFF_PATH = 3
 
 
 def user_message(
-    example: schema.Example, order: Sequence[int]
+    example: schema.Example, order: Sequence[int], template: str = "decision",
+    **values: Any,
 ) -> tuple[str, list[tuple[int, int]]]:
     """The paper's user message (prompts/decision.j2) and each part's (start, end) range in it.
 
-    Options are numbered from 1 in the given order.
+    Options are numbered from 1 in the given order. `template` picks another
+    prompt (e.g. "decision_mlm" for the encoder); `values` are its extra
+    variables (e.g. mask).
     """
     # Render with markers in place of the texts, then substitute the texts:
     # searching for the texts could match the template's own words.
     marks = [f"\x00{i}\x00" for i in range(len(example.parts))]
     marked = prompts.render(
-        "decision",
+        template,
         parts=[schema.Part(p.name, m) for p, m in zip(example.parts, marks)],
         question=example.question,
         options=[example.options[i] for i in order],
+        **values,
     )
     pieces, where, cursor, length = [], [], 0, 0
     for part, mark in zip(example.parts, marks):
@@ -225,6 +229,46 @@ def score_batch(model, prompts: list[list[int]], tokenizer: Any,
             for (i, node), lp in zip(chunk, torch.log_softmax(o.logits[:, -1].float(), -1)):
                 logp[i][node] = lp
     return [read_trie(lp, suffixes, nodes) for lp, (suffixes, nodes) in zip(logp, tries)]
+
+
+@functools.cache
+def _tree(tokenizer: Any, k: int) -> tuple[list[tuple[int, ...]], torch.Tensor]:
+    """The non-root trie nodes (by depth) and their tree mask [q, q]: node i sees node j
+    when j is a prefix of i, itself included."""
+    _, nodes = candidates(tokenizer, k)
+    inner = sorted((x for x in nodes if x), key=len)
+    index = {x: i for i, x in enumerate(inner)}
+    mask = torch.zeros(len(inner), len(inner), dtype=torch.bool)
+    for i, x in enumerate(inner):
+        for d in range(1, len(x) + 1):
+            mask[i, index[x[:d]]] = True
+    return inner, mask
+
+
+@torch.no_grad()
+def score_tree(model, prompt: list[int], tokenizer: Any, k: int, device: str):
+    """The output of score, with the trie read in one extra forward that shares the prompt's cache.
+
+    The prompt is read once (only its last logits kept). Every non-root trie
+    node then enters as one token at position len(prompt) + depth - 1, in a
+    single forward on the prompt's KV cache, under a tree mask: a node attends
+    to the whole prompt, its ancestors and itself. No cache is copied.
+    """
+    suffixes, nodes = candidates(tokenizer, k)
+    n = len(prompt)
+    out = model(input_ids=torch.tensor([prompt], device=device), use_cache=True, logits_to_keep=1)
+    lp = {(): torch.log_softmax(out.logits[0, -1].float(), -1)}
+    inner, tree = _tree(tokenizer, k)
+    if inner:
+        q = len(inner)
+        mask = torch.cat([torch.ones(q, n, dtype=torch.bool), tree], 1).to(device)[None, None]
+        o = model(input_ids=torch.tensor([[x[-1] for x in inner]], device=device),
+                  attention_mask=mask,
+                  position_ids=torch.tensor([[n + len(x) - 1 for x in inner]], device=device),
+                  past_key_values=out.past_key_values, use_cache=True)
+        for x, row in zip(inner, torch.log_softmax(o.logits[0].float(), -1)):
+            lp[x] = row
+    return read_trie(lp, suffixes, nodes)
 
 
 def score_examples(model, examples: list[schema.Example], tokenizer: Any, device: str,

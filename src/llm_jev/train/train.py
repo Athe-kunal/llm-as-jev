@@ -44,6 +44,21 @@ def fitting_rows(acc, train: list, tok, args) -> list[int]:
     return [i for i in range(len(train)) if lengths[i] <= args.max_tokens]
 
 
+def save(acc, model, tok, finetune: str, path: pathlib.Path) -> None:
+    """The LoRA adapter (save_adapter) or, for full fine-tuning, the whole model and its
+    tokenizer (bf16, loadable with modeling.load / --model path); every process must call it."""
+    if finetune == "lora":
+        save_adapter(acc, model, path)
+        return
+    acc.wait_for_everyone()
+    if acc.is_main_process:
+        net = acc.unwrap_model(model)
+        # a bf16 copy of the weights: casting the model itself would round its fp32 master weights
+        state = {k: v.detach().to(torch.bfloat16) for k, v in net.state_dict().items()}
+        net.save_pretrained(path, state_dict=state)
+        tok.save_pretrained(path)
+
+
 def save_adapter(acc, model, path: pathlib.Path) -> None:
     """Saves the LoRA weights; every process must call it."""
     from torch.distributed.tensor import DTensor
@@ -77,6 +92,9 @@ def main() -> None:
                         help="anchor terms added to L_tree (comma-separated "
                              "subset of mass,out,pos, or 'none'); all four "
                              "terms are logged either way")
+    parser.add_argument("--finetune", choices=["lora", "full"], default="lora",
+                        help="lora: a LoRA adapter, p0 = the adapter disabled (the paper); full: every "
+                             "weight in fp32 under bf16 autocast, p0 = a frozen bf16 copy of the base model")
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument("--max-tokens", type=int, default=16384)
     parser.add_argument("--eval-per", type=int, default=100,
@@ -129,16 +147,25 @@ def main() -> None:
                             args.eval_per, args.seed)
     gen_rows = evaluate.subset(evals, args.gen_per, args.seed)
 
-    model = modeling.load_base(args.model)
+    reference = None  # p0 for the anchors; None: the LoRA model with its adapter disabled
+    if args.finetune == "full":
+        model = modeling.load_base(args.model, dtype=torch.float32)  # bf16 weights round away the updates
+        reference = modeling.load_base(args.model).to(device).eval()
+        reference.config.use_cache = False
+        for prm in reference.parameters():
+            prm.requires_grad_(False)
+    else:
+        model = modeling.load_base(args.model)
     model.config.use_cache = False
-    model = modeling.add_lora(model, args.lora_rank)
-    model.enable_input_require_grads()
+    if args.finetune == "lora":
+        model = modeling.add_lora(model, args.lora_rank)
+        model.enable_input_require_grads()
     model.gradient_checkpointing_enable(
         gradient_checkpointing_kwargs={"use_reentrant": False})
-    lora = [p for p in model.parameters() if p.requires_grad]
-    logger.info("trainable parameters: {:,} ({})",
-                sum(p.numel() for p in lora), lora[0].dtype)
-    opt = torch.optim.AdamW(lora, lr=args.lr, weight_decay=args.weight_decay)
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    logger.info("{} fine-tuning, trainable parameters: {:,} ({})", args.finetune,
+                sum(p.numel() for p in trainable), trainable[0].dtype)
+    opt = torch.optim.AdamW(trainable, lr=args.lr, weight_decay=args.weight_decay)
     total = len(rows) // args.batch_size
     if args.max_steps > 0:
         total = min(total, args.max_steps)
@@ -153,7 +180,9 @@ def main() -> None:
 
     def run_eval(step: int, tag: str) -> None:
         t0 = time.time()
-        metrics, examples = evaluate.evaluate(acc.unwrap_model(model), tok,
+        with (torch.autocast(device.type, dtype=torch.bfloat16) if args.finetune == "full"
+              else contextlib.nullcontext()):
+            metrics, examples = evaluate.evaluate(acc.unwrap_model(model), tok,
                                               evals, gen_rows, device)
         if acc.is_main_process:
             evaluate.save(out, tag, metrics, examples)
@@ -178,7 +207,7 @@ def main() -> None:
                 train[i], tok, random.Random(f"{args.seed}:{i}"))
             last = j == len(mine) - 1
             with contextlib.nullcontext() if last else acc.no_sync(model):
-                L = losses.compute(model, ex, device, pad)
+                L = losses.compute(model, ex, device, pad, reference)
                 loss = L["tree"] + args.lam * sum(L[k] for k in anchors)
                 acc.backward(loss / len(mine))
             sums += torch.stack([L[k] for k in TERMS]).detach()
@@ -208,10 +237,10 @@ def main() -> None:
                 f" eta {el / (step + 1) * (total - step - 1) / 60:.0f}m")
         if args.eval_every and (step + 1) % args.eval_every == 0 \
                 and step + 1 < total:
-            save_adapter(acc, model,
+            save(acc, model, tok, args.finetune,
                          out / "checkpoints" / f"step-{step + 1:04d}")
             run_eval(step + 1, f"step{step + 1:04d}")
-    save_adapter(acc, model, out / "adapter")
+    save(acc, model, tok, args.finetune, out / ("adapter" if args.finetune == "lora" else "model"))
     run_eval(total, "final")
     logger.info("done")
     acc.end_training()

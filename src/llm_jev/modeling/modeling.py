@@ -4,15 +4,17 @@ import torch
 from torch import nn
 
 
-def load_base(model_id: str):
-    """The base LLM in bf16 on the CPU (Qwen3.5 uses its multimodal class)."""
+def load_base(model_id: str, dtype: torch.dtype = torch.bfloat16):
+    """The base LLM on the CPU, in bf16 by default (Qwen3.5 uses its multimodal class).
+
+    fp32 for full fine-tuning: bf16 weights round away AdamW updates of lr ~ 1e-5.
+    """
     from transformers import AutoModelForCausalLM
     from transformers import Qwen3_5ForConditionalGeneration
 
     cls = (Qwen3_5ForConditionalGeneration if "Qwen3.5" in model_id
            else AutoModelForCausalLM)
-    return cls.from_pretrained(model_id, dtype=torch.bfloat16,
-                               attn_implementation="sdpa")
+    return cls.from_pretrained(model_id, dtype=dtype, attn_implementation="sdpa")
 
 
 def add_lora(model, rank: int = 16):

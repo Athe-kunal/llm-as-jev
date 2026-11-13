@@ -7,6 +7,7 @@ Shape legend: V vocabulary, T gold-path nodes, O off-path nodes, N = T + O
 trie nodes, S sequences, K anchored top tokens.
 """
 
+import contextlib
 import math
 
 import torch
@@ -162,10 +163,12 @@ def _loss_terms(
 loss_terms = torch.compile(_loss_terms, dynamic=True)
 
 
-def compute(model, ex: dict, device, pad: int) -> TensorDict:
+def compute(model, ex: dict, device, pad: int, reference=None) -> TensorDict:
     """L_tree and the anchors L_mass, L_out, L_pos (Eqs. 2-3) for one example.
 
-    p0 is the same model with the adapter disabled, run without gradients.
+    p0 is `reference` (a frozen copy of the starting model, for full fine-tuning)
+    or, when None, the same model with its LoRA adapter disabled; either way it
+    runs without gradients.
     Weights: gold-path nodes and off-path nodes share 0.5 each; the reply start
     and the position after "]" get 0.5 each in L_pos. Returns a TensorDict []
     of four scalars.
@@ -179,8 +182,9 @@ def compute(model, ex: dict, device, pad: int) -> TensorDict:
     # llm_jev.profiling.profile_step); outside a profiler it does nothing.
     with record_function("p_theta_forward"):
         cur = _logits(model, ex, seqs, device, pad)                     # p_theta
-    with record_function("p0_forward"), torch.no_grad(), peft.disable_adapter():
-        ref = _logits(peft, ex, seqs, device, pad)                      # p0
+    p0 = (contextlib.nullcontext() if reference is not None else peft.disable_adapter())
+    with record_function("p0_forward"), torch.no_grad(), p0:
+        ref = _logits(reference if reference is not None else peft, ex, seqs, device, pad)  # p0
     T, O = len(ex["path"]), len(ex["off_path"])
     legal = legal_mask([l for _, l, _ in ex["path"]] + [l for _, l in ex["off_path"]],
                        cur["path"].shape[-1], device)                   # [N, V]
@@ -192,3 +196,17 @@ def compute(model, ex: dict, device, pad: int) -> TensorDict:
             cur["path"], cur["last"], cur["reply"],
             ref["path"], ref["last"], ref["reply"], legal, gold, weight)
     return TensorDict(tree=tree, mass=mass, out=out, pos=pos, batch_size=[])
+
+
+def pearson_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """AT2's loss: the negative Pearson correlation between surrogate
+    predictions and ablation targets, per row, averaged over rows (the
+    reference's PearsonCorrelationLoss). pred, target [B, M] -> [].
+
+    Invariant to a per-row affine map of pred, so the surrogate needs no
+    intercept or scale.
+    """
+    p = pred - pred.mean(1, keepdim=True)                                       # [B, M]
+    t = target - target.mean(1, keepdim=True)                                   # [B, M]
+    corr = (p * t).mean(1) / ((p ** 2).mean(1).sqrt() * (t ** 2).mean(1).sqrt() + 1e-8)  # [B]
+    return -corr.mean()

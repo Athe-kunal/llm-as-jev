@@ -1,0 +1,86 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Input format}
+\label{sec:format}
+
+\Cref{fig:intro} shows one row in both formats.
+The options are shuffled each time a row is used, so the position of the correct option carries no information.
+
+\paragraph{Decoder.}
+The prompt follows LLM-as-Jev: the state, the question, the options numbered $[1]$ to $[K]$, and an instruction to answer only with the number.
+The reply is filled in up to ``Best answer: ['', with thinking turned off, so each option $k$ is the token sequence ``$k$]'' and the options form a trie.
+The decoder chooses the option whose whole sequence has the highest log-probability.
+
+\paragraph{Encoder.}
+The state and question are the same, the instruction asks to mark the correct option with ``yes'' and the others with ``no'', and each option is listed as ``$[k]$ \texttt{[M]} description'', with a mask token in front.
+There is no chat template.
+One forward pass gives the logits at every mask, and option $k$ is scored from the logits of ``yes'' and ``no'', each with a leading space, at its mask.
+
+\input{sections/intro_figure}
+
+\subsection{Loss functions}
+\label{sec:loss}
+
+\paragraph{Decoder: trie loss with KL anchors.}
+The tree loss is the negative log-probability of the gold option's path through the trie, each step normalised over the tokens legal there,
+\begin{equation}
+  \mathcal{L}_{\text{tree}} = -\sum_{t}\log\frac{\exp z_t(g_t)}{\sum_{v\in\mathcal{V}_t}\exp z_t(v)},
+\end{equation}
+where $z_t$ are the logits at step $t$, $g_t$ the gold token and $\mathcal{V}_t$ the legal tokens.
+Three anchor terms keep the model close to its starting version $p_0$ \citep{li2026llmasjev}: $\mathcal{L}_{\text{mass}}$ keeps the total probability on the legal tokens, $\mathcal{L}_{\text{out}}$ keeps how the remaining probability is spread over the rest of the vocabulary, and $\mathcal{L}_{\text{pos}}$ keeps the next-token distribution at the start of the reply and after the closing bracket.
+They are KL divergences to $p_0$, computed over its 64 most likely tokens and one bucket for the rest.
+The loss is $\mathcal{L}=\mathcal{L}_{\text{tree}}+\lambda\,(\mathcal{L}_{\text{mass}}+\mathcal{L}_{\text{out}}+\mathcal{L}_{\text{pos}})$ with $\lambda=1$.
+
+\paragraph{Encoder recipes.}
+Let $\ell_k(v)$ be the logit of token $v$ at mask $k$, and let $g$ be the gold option.
+A score $s_k$ says how strongly the model accepts option $k$; the decision is the option with the highest score.
+Training raises the gold option's score relative to the other options, but no mask gets its own yes-or-no target.
+Thus, a chosen option can still prefer ``no'': for example, scores of $-3$ and $-8$ select the first option.
+We train the following four recipes:
+\begin{itemize}
+  \item \textbf{Yes-logit softmax.}
+    The score is the ``yes'' logit alone, and the options compete through one softmax:
+    \begin{equation}
+      s_k=\ell_k(\textit{yes}),\qquad
+      p_k=\frac{e^{s_k}}{\sum_{j=1}^{K}e^{s_j}},\qquad
+      \mathcal{L}_{\text{softmax}}=-\log p_g.
+    \end{equation}
+
+  \item \textbf{Yes-minus-no softmax.}
+    The score measures the preference for ``yes'' over ``no'', followed by the same softmax:
+    \begin{equation}
+      s_k=\ell_k(\textit{yes})-\ell_k(\textit{no}),\qquad
+      p_k=\frac{e^{s_k}}{\sum_{j=1}^{K}e^{s_j}},\qquad
+      \mathcal{L}_{\text{softmax}}=-\log p_g.
+    \end{equation}
+
+  \item \textbf{Yes-minus-no sigmoid normalisation.}
+    Each score first goes through a sigmoid, and the resulting values are normalised by their sum:
+    \begin{equation}
+      s_k=\ell_k(\textit{yes})-\ell_k(\textit{no}),\qquad
+      p_k=\frac{\sigma(s_k)}{\sum_{j=1}^{K}\sigma(s_j)},\qquad
+      \mathcal{L}_{\text{sig-norm}}=-\log p_g.
+    \end{equation}
+    This is the form of the DeepSeek-V3 expert gate \citep{deepseekv3}, with options in place of experts, normalised over all $K$ options and with no selection or balancing bias.
+    Each $\sigma(s_k)$ lies between 0 and 1, but only the ratios enter $p_k$, so the options still compete; the decision is still the highest score.
+    The gradient with respect to $s_k$ is
+    \begin{equation}
+      \left(1-\sigma(s_k)\right)
+      \left(p_k-\mathbf{1}[k=g]\right).
+    \end{equation}
+    When an option's sigmoid approaches 1, the direct gradient of the loss with respect to its score becomes small.
+    We exclude the sigmoid on the ``yes'' logit alone: vocabulary logits are around 200 (\cref{sec:precision}), so every sigmoid would saturate near 1 and the gradient would be negligible.
+
+  \item \textbf{Yes-minus-no square-root softplus.}
+    As an unbounded alternative to the sigmoid, we use
+    $h(s)=\sqrt{\log(1+e^s)}$:
+    \begin{equation}
+      s_k=\ell_k(\textit{yes})-\ell_k(\textit{no}),\qquad
+      p_k=\frac{h(s_k)}{\sum_{j=1}^{K}h(s_j)},\qquad
+      \mathcal{L}_{\text{sqrt-sp}}=-\log p_g.
+    \end{equation}
+    For a clearly rejected option ($s\ll0$), $h(s)\approx e^{s/2}$, so the options behave as in a softmax at twice the temperature.
+    For a clearly accepted option ($s\gg0$), $h(s)\approx\sqrt{s}$ keeps growing, whereas the sigmoid stops at 1.
+    The direct gradient with respect to its score therefore shrinks slowly, where the sigmoid's nearly vanishes.
+\end{itemize}

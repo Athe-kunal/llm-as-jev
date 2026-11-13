@@ -1,0 +1,10 @@
+\begin{abstract}
+We study encoder models that pick one of several options in a single forward pass, without generating text.
+This technical report compares recipes for fine-tuning UltraBERT-380M \citep{ultrabert} with one mask per option.
+The four recipes differ in how an option is scored and how the scores become probabilities; one follows the expert gate of DeepSeek-V3 \citep{deepseekv3}.
+Trained on the same data as Qwen3-0.6B with the LLM-as-Jev recipe \citep{li2026llmasjev} (\textbf{\TestQwFull{}\%} test accuracy), the encoder reaches \textbf{\TestUbList{}\%} to \textbf{\TestUbSig{}\%}.
+Scoring an option by ``yes'' minus ``no'' instead of ``yes'' alone gives the larger gain, from \TestUbList{}\% to \TestUbYesNo{}\% on the test set and from \ExtUbList{}\% to \textbf{\ExtUbYesNo{}\%} on external benchmarks (\textbf{\ExtQwFull{}\%} for the decoder).
+Sigmoid normalisation adds \DiffUbSigUbYesNoAbs{} test points; a square-root softplus adds none.
+One request at a time on an NVIDIA A100, the encoder takes \textbf{\MsUb{}\,ms} per decision against \textbf{\MsQwFull{}\,ms}, but uses more peak memory (\MemPeakUb{} against \MemPeakQwFull{}\,GiB).
+An auxiliary head, trained on human-marked evidence and on labels selected with a reward adapted from SelfCite \citep{selfcite}, predicts in the same pass the sentences annotated as support for the answer.
+\end{abstract}

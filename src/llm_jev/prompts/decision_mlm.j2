@@ -1,0 +1,10 @@
+State: {% for part in parts %}
+{{ part.text }}
+
+{% endfor %}
+{{ question }}
+Mark the correct option with {{ yes_word }} and every other option with {{ no_word }}.
+Options:
+{% for desc in options %}
+[{{ loop.index }}] {{ mask }} {{ desc }}
+{% endfor %}

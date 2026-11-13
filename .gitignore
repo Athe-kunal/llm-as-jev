@@ -236,3 +236,5 @@ logs/
 # blog (React)
 node_modules/
 blogs/dist/
+.vscodepaper/arxiv/
+paper/arxiv.tar.gz

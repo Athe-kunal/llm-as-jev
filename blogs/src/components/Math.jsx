@@ -21,15 +21,16 @@ export function Part({ label, children }) {
 /** The row's sentences as running text, each tinted by value[j] (diverging
  *  around 0), dropped sentences struck through, gold sentences underlined,
  *  sentences in `marked` (a Set) outlined; scrollToMarked scrolls the box to
- *  the first outlined one. */
-export function Doc({ sentences, value = null, keep = null, selected = null, marked = null, onSelect = null, maxHeight = 520, scrollToMarked = false }) {
+ *  the first outlined one, scrollToGold to the first gold one. */
+export function Doc({ sentences, value = null, keep = null, selected = null, marked = null, onSelect = null, maxHeight = 520, scrollToMarked = false, scrollToGold = false }) {
   const max = value ? Math.max(...value.map(Math.abs), 1e-9) : 1;
   const box = useRef(null);
   useEffect(() => {
     // bring the first outlined sentence into view inside the box (not the page)
-    const el = scrollToMarked && box.current?.querySelector(".dsent.marked");
+    const el = (scrollToMarked && box.current?.querySelector(".dsent.marked"))
+      || (scrollToGold && box.current?.querySelector(".dsent.gold"));
     if (el) box.current.scrollTo({ top: Math.max(el.offsetTop - 40, 0), behavior: "smooth" });
-  }, [scrollToMarked, marked]);
+  }, [scrollToMarked, scrollToGold, marked, sentences]);
   return (
     <div className="doc" style={{ maxHeight }} ref={box}>
       {sentences.map((s, j) => {
@@ -77,6 +78,61 @@ export function TokenDoc({ text, tokens, gold = [], top = new Set(), maxHeight =
       </span>,
     );
     cur = Math.max(cur, t.end);
+  });
+  if (cur < text.length) out.push(text.slice(cur));
+  return (
+    <div className="doc tokdoc" style={{ maxHeight }} ref={box}>
+      {out}
+    </div>
+  );
+}
+
+/** Words (runs of non-space characters, punctuation attached, as GLiNER shows spans)
+ *  scored from the tokens inside them: agg "max" (a word is evidence if any piece is) or
+ *  "sum" (attention mass). Tinted by score (scaled to the 99th percentile), the `topK`
+ *  highest outlined, words overlapping a gold range underlined; scrolls to the best word. */
+export function WordDoc({ text, tokens, gold = [], agg = "max", topK = 10, maxHeight = 380, threshold = null, maxShare = null }) {
+  const box = useRef(null);
+  const sorted = [...tokens].sort((a, b) => a.start - b.start);
+  const words = [];
+  let ti = 0;
+  for (const m of text.matchAll(/\S+/g)) {
+    const start = m.index, end = m.index + m[0].length;
+    while (ti < sorted.length && sorted[ti].end <= start) ti++;
+    const inside = [];
+    for (let j = ti; j < sorted.length && sorted[j].start < end; j++) inside.push(sorted[j].w);
+    if (!inside.length) continue; // text the model did not score (outside the document tokens)
+    const w = agg === "sum" ? inside.reduce((a, b) => a + b, 0) : Math.max(...inside);
+    words.push({ start, end, w, gold: gold.some((g) => start < g.end && end > g.start) });
+  }
+  const abs = words.map((x) => Math.abs(x.w)).sort((a, b) => a - b);
+  const scale = abs[Math.floor(0.99 * (abs.length - 1))] || 1e-12;
+  const ranked = [...words.keys()].sort((a, b) => words[b].w - words[a].w);
+  // binary mode (threshold and/or maxShare given): a word is shown or not, no gradient, no outlines
+  const binary = threshold !== null || maxShare !== null;
+  const cap = maxShare === null ? words.length : Math.max(1, Math.round(maxShare * words.length));
+  const shown = new Set(ranked.slice(0, cap).filter((i) => threshold === null || words[i].w >= threshold));
+  const top = binary ? new Set() : new Set(ranked.slice(0, topK));
+  useEffect(() => {
+    const el = box.current?.querySelector(".tk.best");
+    if (el) box.current.scrollTo({ top: Math.max(el.offsetTop - 40, 0), behavior: "smooth" });
+  }, [tokens]);
+  const best = words.length ? [...words.keys()].reduce((a, b) => (words[b].w > words[a].w ? b : a)) : -1;
+  const out = [];
+  let cur = 0;
+  words.forEach((x, i) => {
+    if (x.start > cur) out.push(text.slice(cur, x.start));
+    const v = Math.max(-1, Math.min(1, x.w / scale));
+    const style = binary ? undefined
+      : { background: `color-mix(in srgb, ${v >= 0 ? "var(--c6)" : "var(--c5)"} ${Math.round(Math.abs(v) * 75)}%, transparent)` };
+    out.push(
+      <span key={i} className={["tk", x.gold ? "gold" : "", top.has(i) ? "marked" : "", shown.has(i) && binary ? "sel" : "",
+                                i === best ? "best" : ""].join(" ")}
+            title={x.w.toFixed(3)} style={style}>
+        {text.slice(x.start, x.end)}
+      </span>,
+    );
+    cur = x.end;
   });
   if (cur < text.length) out.push(text.slice(cur));
   return (
