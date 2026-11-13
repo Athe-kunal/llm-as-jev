@@ -1,0 +1,92 @@
+\section{Results}
+\label{sec:results}
+
+\subsection{Encoder against decoder}
+
+\Cref{tab:headline} gives the main comparison.
+Every encoder recipe is above fully fine-tuned Qwen3-0.6B, both on the test set (\TestUbList{}\% to \TestUbSig{}\% against \TestQwFull{}\%) and on the external benchmarks (\ExtUbList{}\% to \ExtUbYesNo{}\% against \ExtQwFull{}\%), with fewer parameters (380M against 0.6B).
+These results concern these two models under our setup; the reproduced Qwen3-4B LoRA model, at \TestQwFourLora{}\%, remains more accurate.
+
+\begin{table}[t]
+  \centering\small
+  \caption{Matched comparison: average accuracy (\%) over training runs. Test ALL is on the test set;
+  Dev ALL and External are on the dev set and the six external benchmarks. Learning rates were chosen on
+  dev. Bold: best below 1B parameters.}
+  \label{tab:headline}
+  \input{generated/table_headline}
+\end{table}
+
+\subsection{Full fine-tuning against LoRA}
+
+The reproduced Qwen3-0.6B LoRA model reaches \TestQwLora{}\% on the test set, \DiffQwFullQwLoraAbs{} points below full fine-tuning, so full fine-tuning is the stronger baseline.
+Its external accuracy (\ExtQwLora{}\%) is not below that of the full fine-tune (\ExtQwFull{}\%).
+
+\subsection{Recipes}
+
+Changing the score from ``yes'' to ``yes'' minus ``no'', both with the softmax, adds \DiffUbYesNoUbListAbs{} test points and raises external accuracy from \ExtUbList{}\% to \ExtUbYesNo{}\%.
+Sigmoid normalisation adds a further \DiffUbSigUbYesNoAbs{} test points (95\% interval \DiffUbSigUbYesNoCI{}, \cref{sec:Implementation details}) and nothing on the external benchmarks.
+
+This gain is concentrated in MuSiQue (69.8\% against 63.0\%), which contributes about 0.5 of the \DiffUbSigUbYesNoAbs{} points.
+On the other twelve datasets it averages 0.3 points and goes both ways, from $+3.0$ on Nimble to $-2.4$ on PIQA (\cref{tab:perdataset}).
+
+The square-root softplus, which has no upper bound, does not reproduce the gain (\TestUbSqrt{}\% against \TestUbYesNo{}\% for the softmax).
+The comparison does not show why: the two functions also differ in their gradients, and for rejected options the square-root softplus acts as a softmax at twice the temperature.
+
+\subsection{Sensitivity to option order and removal}
+\label{sec:coupling}
+
+On the dev rows we score each row in four random option orders and once with one wrong option removed, and count how often the answer changes (\cref{tab:coupling}).
+With the raw scores fixed, no normalisation could change the winner, so a change means the encoder recomputed its scores after reading the new list: the test measures the trained model.
+The two softmax recipes isolate the score; the softmax and the sigmoid over ``yes'' minus ``no'' isolate the normalisation used in training.
+
+The score does most of the work.
+``Yes'' minus ``no'' raises external accuracy from \CpExtYes{}\% to \CpExtYesNo{}\%, lowers the answer changes on removal from \CpDropYes{}\% to \CpDropYesNo{}\%, and lowers the largest gradient norm from \CpGradYes{} to \CpGradYesNo{}.
+Under reordering, the score and the sigmoid each remove about one point of answer changes (\CpShufYes{}\%, \CpShufYesNo{}\%, \CpShufSig{}\%).
+
+On top of the score, the sigmoid raises dev accuracy from \CpAccYesNo{}\% to \CpAccSig{}\% and lowers the calibration error from \CpEceYesNo{} to \CpEceSig{}.
+It also reduces label bias.
+On the three datasets whose options are the same labels in every row (ContractNLI, MuSiQue and ProofWriter), we compare how often the model predicts each label with how often that label is correct.
+The total variation (TV) between the two is the share of predictions that would have to change label for them to match, so 0 means no bias towards any label.
+It is \CpLabelYes{} for the softmax over ``yes'', \CpLabelYesNo{} for the softmax over ``yes'' minus ``no'' and \CpLabelSig{} for the sigmoid; for example, on MuSiQue the softmax models predict ``Yes'' far more often than it is correct (\cref{sec:labels}).
+TV measures bias, not accuracy: a model could predict each label exactly as often as it is correct and still assign it to the wrong rows.
+The gold option's sigmoid averages \CpSigGoldSig{}; for small sigmoid values $\sigma(s)\approx e^{s}$, so the normalised sigmoid then approximates a softmax.
+
+The square-root softplus has the lowest maximum gradient norm (\CpGradSqrt{}) but changes its answer most often under reordering (\CpShufSqrt{}\%).
+
+\begin{table}[t]
+  \centering\small
+  \caption{Sensitivity to option order and removal, on the dev set. Each row is scored in four random option orders; an
+  answer change under reordering means the chosen option is not the same in all four. One wrong option, never the
+  chosen one, is removed at random from rows with at least three options, and the answer is compared over the remaining
+  options. Dev accuracy is on the first random order, so it differs slightly from \cref{tab:headline}, which keeps
+  the original order. TV: total variation between the predicted and the gold frequencies, over the three datasets with
+  a fixed label set (label) and over option positions (position). Calibration error: expected calibration error of the
+  top option's probability. $|s_k|$: size of the raw option scores. Each metric is averaged over datasets, then over
+  training runs. Bold: best in the row, higher for accuracy and lower for answer changes, TV and calibration error; the
+  gradient norm, the largest over all training steps and so a single batch's value, and $|s_k|$ are not ranked.}
+  \label{tab:coupling}
+  \input{generated/table_coupling}
+\end{table}
+
+\subsection{Time and memory}
+\label{sec:cost}
+
+A decoder must read the whole trie: every option's score includes the closing bracket and, from ten options on, the later digits.
+For a fair comparison we time the decoders with a faster scorer that reads the input once and then all trie nodes in one more forward pass on the shared KV cache, under a mask that lets each node see the input and its own earlier tokens.
+In fp32 its scores match those of the evaluation scorer within $10^{-4}$ (40 dev rows with ten or more options); in bf16, as timed, both choose the same option on 1{,}297 of the 1{,}300 dev rows.
+The evaluation scorer copies the cache for each node and takes \MsCopyQwFull{}\,ms and up to \MemPeakCopyQwFull{}\,GiB on Qwen3-0.6B.
+
+One row at a time, the encoder takes \MsUb{}\,ms per decision, against \MsQwFull{}\,ms for Qwen3-0.6B and \MsQwFourLora{}\,ms for Qwen3-4B (\cref{tab:memory}); reading the input alone takes the decoders \MsPreQwFull{} and \MsPreQwFourLora{}\,ms.
+Peak memory tells a different story.
+Qwen3-0.6B peaks at \MemPeakQwFull{}\,GiB, against \MemPeakUb{}\,GiB for the encoder with the fp32 weights it needs for its accuracy, or \MemPeakUbBf{}\,GiB with bf16 weights, which lose accuracy (\cref{sec:precision}).
+At this scale the encoder is faster but has no peak-memory advantage; we measured peaks, not memory over time.
+
+\begin{table}[t]
+  \centering\small
+  \caption{Time and peak GPU memory per decision, scoring the dev rows one at a time on one A100. The decoders
+  use bf16 weights and read the input, then the whole trie of option numbers in one more pass on the shared KV cache.
+  Memory is what PyTorch allocates, in GiB, weights included; rows $>$4{,}096 tok.: mean peak over rows longer than
+  4{,}096 tokens; max: the largest peak over all rows.}
+  \label{tab:memory}
+  \input{generated/table_memory}
+\end{table}

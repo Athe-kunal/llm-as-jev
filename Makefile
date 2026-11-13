@@ -12,7 +12,7 @@ PROFILE_MODEL ?= Qwen/Qwen3-0.6B
 PROFILE_OUT ?= runs/profile/$(notdir $(PROFILE_MODEL))
 PROFILE_ARGS ?=
 
-.PHONY: help download data blog torch-profiler sglang-install sglang-merge sglang-serve sglang-stop paper paper-fast paper-figures
+.PHONY: help download data blog torch-profiler sglang-install sglang-merge sglang-serve sglang-stop paper paper-fast paper-figures arxiv
 
 help:
 	@echo "make download        fetch the pinned training sources (Reason+Long-12k + Nimble) (and the benchmarks used to decontaminate them) from the internet into the Hugging Face cache"
@@ -30,6 +30,16 @@ help:
 
 paper-figures:
 	.venv/bin/python paper/figures/make_figures.py
+
+arxiv: paper-figures
+	cd paper && tectonic --keep-intermediates --outdir . main.tex
+	rm -rf paper/arxiv paper/arxiv.tar.gz && mkdir -p paper/arxiv/sections paper/arxiv/generated
+	grep -v '% TODO' paper/main.tex > paper/arxiv/main.tex
+	cp paper/main.bbl paper/arxiv/
+	cp paper/sections/*.tex paper/arxiv/sections/
+	cp paper/generated/*.tex paper/arxiv/generated/
+	cd paper/arxiv && tar czf ../arxiv.tar.gz *
+	@echo "wrote paper/arxiv.tar.gz (upload this to arXiv; it compiles with pdfLaTeX)"
 
 paper-fast:
 	cd paper && tectonic --only-cached --synctex --keep-intermediates --keep-logs --reruns 0 --outdir . main.tex

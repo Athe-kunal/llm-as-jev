@@ -7,9 +7,9 @@
 \usepackage{iftex, amsmath}
 \ifPDFTeX                                     % arXiv (pdfLaTeX): Type 1 fonts
   \usepackage[T1]{fontenc}
-  \usepackage{libertinus}                     % text + maths; sans for headings
+  \usepackage{libertinus}                     % text; sans for headings
+  \usepackage{libertinust1math}               % maths in Libertinus, as in the local build
   \usepackage[scaled=0.9]{zi4}                % Inconsolata mono, sized to the text
-  \usepackage{amssymb}
 \else                                         % local build (tectonic = XeTeX): the same fonts as OpenType
   \usepackage{libertinus}                     % loads unicode-math, which already has amssymb's symbols
 \fi

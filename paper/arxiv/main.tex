@@ -1,0 +1,72 @@
+% arXiv preprint. Build: `make paper` (figures, then LaTeX). arXiv compiles with pdfLaTeX, so the
+% preamble uses pdfLaTeX packages only. Numbers come from generated/numbers.tex, never typed by hand.
+\documentclass[10pt]{article}
+
+% ---- Page and type -------------------------------------------------------------------------------
+\usepackage[letterpaper, margin=1in]{geometry}
+\usepackage{iftex, amsmath}
+\ifPDFTeX                                     % arXiv (pdfLaTeX): Type 1 fonts
+  \usepackage[T1]{fontenc}
+  \usepackage{libertinus}                     % text; sans for headings
+  \usepackage{libertinust1math}               % maths in Libertinus, as in the local build
+  \usepackage[scaled=0.9]{zi4}                % Inconsolata mono, sized to the text
+\else                                         % local build (tectonic = XeTeX): the same fonts as OpenType
+  \usepackage{libertinus}                     % loads unicode-math, which already has amssymb's symbols
+\fi
+\usepackage[final]{microtype}
+\linespread{1.06}
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{0pt}
+
+% ---- Colour, links, references -------------------------------------------------------------------
+\usepackage{xcolor}
+\definecolor{encoder}{HTML}{2A78D6}           % = figures/style.py ENCODER
+\definecolor{decoder}{HTML}{EB6834}           % = figures/style.py DECODER
+\definecolor{ink2}{HTML}{52514E}
+\usepackage[colorlinks, linkcolor=encoder, citecolor=encoder, urlcolor=encoder]{hyperref}
+\usepackage[capitalise, noabbrev]{cleveref}
+\usepackage[numbers, sort&compress]{natbib}
+
+% ---- Headings and captions: sans, quiet ---------------------------------------------------------
+\usepackage[sf, bf, small, compact]{titlesec}
+\titlespacing*{\section}{0pt}{1.4em}{0.5em}
+\titlespacing*{\subsection}{0pt}{1em}{0.3em}
+\usepackage[font=small, labelfont={sf, bf}, labelsep=period, skip=5pt]{caption}
+
+% ---- Tables, figures, maths ----------------------------------------------------------------------
+\usepackage{booktabs, graphicx}
+\usepackage[section]{placeins}   % floats stay in their section
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta, fit, calc}
+\graphicspath{{generated/}}
+\input{generated/numbers}
+\input{generated/numbers_coupling}
+
+% ---- Title block ---------------------------------------------------------------------------------
+\title{\sffamily\bfseries\Large
+  UltraBERT-JEV: Encoder models for System One Applications}
+\author{\sffamily
+  Astarag Mohapatra\\[0.2em]
+  {\small\color{ink2} Independent Researcher}\\[0.2em]
+  {\small\color{ink2} \href{mailto:astarag2843@gmail.com}{astarag2843@gmail.com}}}
+\date{\small\sffamily\color{ink2}\today}
+
+\begin{document}
+\maketitle
+
+\input{sections/abstract}
+\input{sections/introduction}
+\input{sections/method}
+\input{sections/setup}
+\input{sections/results}
+\input{sections/analysis}
+\input{sections/citation}
+\input{sections/related}
+\input{sections/conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\input{sections/appendix}
+\end{document}

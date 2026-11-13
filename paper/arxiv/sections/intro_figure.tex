@@ -1,0 +1,60 @@
+% Figure 1: the same row as a decoder (LLM-as-Jev) and as an encoder (ours). Colours: encoder / decoder / ink2.
+\begin{figure}[t]
+  \centering
+  \begin{tikzpicture}[x=1in, y=1in,
+      font=\sffamily\scriptsize,
+      prompt/.style={draw=ink2, line width=0.4pt, rounded corners=2pt, fill=black!3, inner sep=4pt,
+                     align=left, font=\ttfamily\scriptsize},
+      box/.style={draw, rounded corners=2pt, inner sep=4pt, align=center, text width=2.85in},
+      arr/.style={-{Stealth[length=4pt]}, line width=0.6pt, color=ink2},
+      head/.style={font=\sffamily\bfseries\small, anchor=west}]
+    % ---------------- decoder (left) ----------------
+    \node[head, text=decoder] at (0, 0) {LLM-as-Jev: decoder};
+    \node[prompt, text width=2.85in, anchor=north west] (dp) at (0, -0.15) {%
+      State: What size does the screen need to be cut?\\
+      Which solution better achieves the goal?\\
+      Options:\\
+      \relax[1] Cut to the size of the jar opening.\\
+      \relax[2] Long enough to cover the whole jar.\\
+      Select one option. Answer only with its number.\\
+      \textbf{Best answer:} \relax[\,\textcolor{decoder}{\textbf{1\,]}}};
+    \node[box, draw=decoder, below=0.22in of dp] (dt) {Loss on the \textbf{digits of the option number}\\
+      (a trie), plus KL anchors to the base model};
+    \node[box, draw=decoder, below=0.2in of dt] (dd) {Decision: the most probable option number};
+    \draw[arr] (dp) -- (dt);  \draw[arr] (dt) -- (dd);
+    % ---------------- encoder (right) ----------------
+    \node[head, text=encoder] at (3.45, 0) {UltraBERT: encoder (this work)};
+    \node[prompt, text width=2.2in, anchor=north west] (ep) at (3.45, -0.15) {%
+      State: What size does the screen need to be cut?\\
+      Which solution better achieves the goal?\\
+      Mark the correct option with yes\\and every other option with no.\\
+      Options:\\
+      \relax[1] \colorbox{encoder!18}{[M]} Cut to the size of the jar opening.\\
+      \relax[2] \colorbox{encoder!18}{[M]} Long enough to cover the whole jar.};
+    \node[align=left, text=encoder] (s1) at ($(ep.south east)+(0.42in, 0.31in)$) {$s_1$};
+    \node[align=left, text=encoder] (s2) at ($(ep.south east)+(0.42in, 0.14in)$) {$s_2$};
+    \draw[arr, color=encoder] ($(ep.south east)+(0, 0.31in)$) -- (s1);
+    \draw[arr, color=encoder] ($(ep.south east)+(0, 0.14in)$) -- (s2);
+    \node[box, draw=encoder, text width=1.28in, anchor=north west] (sm) at ($(ep.south west)+(0,-0.22in)$) {%
+      \textbf{Plain softmax}\\[1pt]
+      $s_k=\text{logit}(\textit{yes})$\\[2pt]
+      $p_k=\dfrac{e^{s_k}}{\sum_j e^{s_j}}$\\[3pt]
+      loss $=-\log p_{\text{gold}}$};
+    \node[box, draw=encoder, fill=encoder!8, text width=1.28in, anchor=north west] (sg) at ($(sm.north east)+(0.14in,0)$) {%
+      \textbf{Sigmoid-norm}\\[1pt]
+      $s_k=\text{logit}(\textit{yes})-\text{logit}(\textit{no})$\\[2pt]
+      $p_k=\dfrac{\sigma(s_k)}{\sum_j\sigma(s_j)}$\\[3pt]
+      loss $=-\log p_{\text{gold}}$};
+    \node[box, draw=encoder, text width=2.7in, anchor=north west] (ed) at ($(sm.south west)+(0,-0.2in)$) {Decision: $\arg\max_k s_k$\\one forward pass, no generation};
+    \draw[arr] ($(sm.north)+(0,0.22in)$) -- (sm.north);
+    \draw[arr] ($(sg.north)+(0,0.22in)$) -- (sg.north);
+    \draw[arr] (sm.south) -- (sm.south |- ed.north);
+    \draw[arr] (sg.south) -- (sg.south |- ed.north);
+  \end{tikzpicture}
+  \caption{One row, two ways. The decoder reads the numbered options and writes the number of its answer; the
+  loss is taken over the tokens of that number. The encoder gets a mask in front of each option and scores each
+  option directly. Two of the four recipes are shown: the plain softmax over the options, which scores an
+  option by the ``yes'' logit alone, and the sigmoid-normalised loss, which scores it by ``yes'' minus ``no''.
+  Each option's score goes through a sigmoid, and the sum in the denominator keeps the options competing. The other two normalise ``yes'' minus ``no'' with a softmax and with a square-root softplus.}
+  \label{fig:intro}
+\end{figure}
