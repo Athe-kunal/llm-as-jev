@@ -24,13 +24,15 @@ Our encoder reads the question and the document together.
 Our contributions are:
 \begin{itemize}\setlength{\itemsep}{2pt}\setlength{\topsep}{2pt}
   \item \textbf{An encoder decision model.}
-    UltraBERT-380M, fine-tuned with one mask per option on the LLM-as-Jev training mixture with Nimble added (\cref{sec:data}).
-    It needs no new head and handles any number of options in one forward pass.
+    UltraBERT-380M with \emph{one mask per option}, scoring \emph{every option in one forward pass} with \emph{no new head}, for any number of options.
+    It is fine-tuned on the LLM-as-Jev training mixture with Nimble added (\cref{sec:data}).
   \item \textbf{Training recipes.}
-    Four ways to score and normalise the mask predictions, one following the DeepSeek-V3 expert gate \citep{deepseekv3}, compared on accuracy, sensitivity to option order and removal, label frequencies and calibration.
+    \emph{Four ways to score and normalise} the mask predictions, one following the DeepSeek-V3 expert gate \citep{deepseekv3}.
+    \emph{Scoring by ``yes'' minus ``no''} gives the larger gain; \emph{sigmoid normalisation} adds \DiffUbSigUbYesNoAbs{} test points, mostly on MuSiQue.
   \item \textbf{A comparison with decoders under matched data.}
-    Qwen3-0.6B \citep{qwen3}, fully fine-tuned on the same examples, with learning rates chosen on dev and results on a held-out test split, and two reproduced LoRA models \citep{lora} as references.
-    We report accuracy, external accuracy, time and memory.
+    Against Qwen3-0.6B \citep{qwen3} fully fine-tuned on the same examples, \emph{every encoder recipe is more accurate} (\TestUbList{}\% to \TestUbSig{}\% against \TestQwFull{}\% on a held-out test split) and \emph{faster} (\MsUb{} against \MsQwFull{}\,ms per decision), but \emph{not lighter} in peak memory.
+    Two reproduced LoRA models \citep{lora} serve as references.
   \item \textbf{Predicting supporting evidence.}
-    An auxiliary head that predicts the annotated evidence for the chosen option, trained on human-marked labels and on labels selected with a reward adapted from SelfCite \citep{selfcite}, and compared with ContextCite \citep{contextcite} and AT2 \citep{at2}.
+    An \emph{auxiliary evidence head} in the same forward pass, trained on human-marked labels and labels selected with a reward adapted from SelfCite \citep{selfcite}.
+    On the softmax encoder it \emph{ranks annotated sentences higher than ContextCite and AT2} \citep{contextcite, at2}.
 \end{itemize}
