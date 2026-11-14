@@ -1,0 +1,23 @@
+# AT2 on the softmax UltraBERT run: one weight per (layer, head) so that
+# attention from the answer's mask predicts the effect of removing sentences.
+encoder:
+  run: runs/ultrabert_380m_lr1.5e-5
+  attention: varlen       # attention capture needs FA2 varlen
+data:
+  source: data/splits/reason_long_nimble
+  split: train            # never eval: the eval split is for evaluation
+  # The document datasets plus Nimble (it has gold evidence); intent datasets
+  # (one-sentence messages) and PIQA are left out.
+  datasets: [anli, contractnli, cosmosqa, logiqa2, musique, nimble, proofwriter, quality, reclor]
+  rows: 2000
+  min_sources: 2
+  masks: 32
+  seed: 0
+train:
+  steps: 1000
+  batch_size: 512
+  lr: 1.0e-3
+  max_grad_norm: 1.0
+  val_frac: 0.1
+  seed: 0
+out: runs/at2_ultrabert_380m

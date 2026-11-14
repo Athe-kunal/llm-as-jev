@@ -1,0 +1,12 @@
+# Option dependence of the four encoder recipes on the dev rows.
+runs:
+  - runs/ultrabert_380m_lr1.5e-5
+  - runs/ultrabert_380m_lr1.5e-5_yesno
+  - runs/ultrabert_380m_lr1.5e-5_sigmoidnorm
+  - runs/ultrabert_380m_lr1.5e-5_sqrtsoftplus
+source: data/splits/reason_long_nimble
+split: eval
+part: dev
+eval_per: 100
+shuffles: 3
+tag: coupling_dev

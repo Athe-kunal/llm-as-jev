@@ -1,0 +1,11 @@
+# The training mix: Reason+Long-12k (LLM-as-Jev, arXiv 2610.02076v3) + Nimble.
+# 1,000 training rows and up to 500 held-out rows per dataset; prompts over
+# 10,240 tokens (Qwen3.5 tokenizer) are dropped, never truncated.
+out: data/splits/reason_long_nimble
+eval_rows: 500
+max_tokens: 10240
+per_dataset: 1000
+num_proc: 8
+length_tokenizer: Qwen/Qwen3.5-4B
+datasets: null            # null: clinc150 massive bitext reclor logiqa2 cosmosqa
+                          # piqa anli proofwriter contractnli musique quality nimble

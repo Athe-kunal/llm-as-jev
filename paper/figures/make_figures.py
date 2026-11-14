@@ -259,7 +259,7 @@ def memory_macros(lat):
 
 
 def table_coupling():
-    """Option-dependence test (llm_jev.evaluation.option_coupling): table_coupling.tex and numbers_coupling.tex."""
+    """Option-dependence test (llm_jev.analysis.coupling): table_coupling.tex and numbers_coupling.tex."""
     def m(d, *path):
         for k in path:
             d = d[k]

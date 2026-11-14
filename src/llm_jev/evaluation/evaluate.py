@@ -1,219 +1,184 @@
-"""Evaluation of a decision model on the eval split.
+"""Evaluates any decision model on a held-out split.
 
-Usage (a trained run, or the base model without --adapter):
-  CUDA_VISIBLE_DEVICES=0 .venv/bin/python -m llm_jev.evaluation.evaluate \
-      --model Qwen/Qwen3-0.6B --adapter runs/qwen3_0.6b/adapter \
-      --out runs/qwen3_0.6b --tag final
-Metrics per dataset and their mean ("ALL"): accuracy of argmax s_k, mean
-log P(gold), the root's legal mass, and on a subset, the validity and accuracy
-of unguided greedy text. Writes eval_<tag>.json and eval_<tag>_examples.jsonl.
-External benchmarks are in benchmarks.py.
+Usage:
+  llm-jev-evaluate --config configs/evaluate/encoder.yaml \
+      model.path=runs/ultrabert_380m out=runs/ultrabert_380m tag=final
+
+Metrics per dataset and their mean over datasets ("ALL"): accuracy of
+argmax s and mean log q(gold), q = softmax(s). Writes eval_<tag>.json, and
+with save_rows eval_<tag>_rows.json (per-row correctness, for bootstrap
+intervals).
 """
 
-import argparse
 import collections
+from collections.abc import Sequence
+import dataclasses
 import json
 import pathlib
-import random
-import re
 import time
+from typing import Any
 
 from loguru import logger
 import torch
 
-from llm_jev.dataloader import answers
-from llm_jev.dataloader import schema
-from llm_jev.dataloader import storage
-from llm_jev.dataloader.sources import base
-from llm_jev.modeling import modeling
+from llm_jev import config
+from llm_jev import models
+from llm_jev.data import sampling
+from llm_jev.data import schema
+from llm_jev.data import storage
+from llm_jev.models import base
 
-SEED = base.SEED
+Metrics = dict[str, dict[str, float]]
 
 
-def subset(
-    rows: list[schema.Example], per: int, seed: int
-) -> list[schema.Example]:
-    """A fixed sample of `per` examples per dataset."""
-    by: dict[str, list] = collections.defaultdict(list)
-    for r in rows:
-        by[r.source].append(r)
-    rng = random.Random(seed)
-    out = []
-    for name in sorted(by):
-        out += rng.sample(by[name], min(per, len(by[name])))
+@dataclasses.dataclass(frozen=True)
+class RowResult:
+    """One scored row.
+
+    Attributes:
+      id: The row's id.
+      source: Its dataset.
+      correct: Whether argmax s is the gold option.
+      log_p_gold: log softmax(s)[gold].
+      prediction: argmax s (release order).
+    """
+
+    id: str
+    source: str
+    correct: bool
+    log_p_gold: float
+    prediction: int
+
+
+def score_rows(
+    model: base.DecisionModel,
+    rows: Sequence[schema.Example],
+    chunk: int = 256,
+) -> list[RowResult]:
+    """Scores rows in chunks (logging progress) and grades them."""
+    out: list[RowResult] = []
+    start = time.time()
+    for i in range(0, len(rows), chunk):
+        part = rows[i : i + chunk]
+        for row, s in zip(part, model.score(part), strict=True):
+            out.append(
+                RowResult(
+                    id=row.id,
+                    source=row.source,
+                    correct=int(s.argmax()) == row.gold,
+                    log_p_gold=torch.log_softmax(s.float(), 0)[row.gold].item(),
+                    prediction=int(s.argmax()),
+                )
+            )
+        elapsed = time.time() - start
+        logger.info(
+            "scored {}/{} rows, {:.1f}m, eta {:.1f}m",
+            len(out),
+            len(rows),
+            elapsed / 60,
+            elapsed / len(out) * (len(rows) - len(out)) / 60,
+        )
     return out
 
 
-PARTS = ("dev", "test", "all")
+def summarize(results: Sequence[RowResult]) -> Metrics:
+    """Per-dataset accuracy, log_p_gold and rows; "ALL" averages datasets."""
+    by_source: dict[str, list[RowResult]] = collections.defaultdict(list)
+    for r in results:
+        by_source[r.source].append(r)
+    metrics: Metrics = {
+        name: {
+            "accuracy": sum(r.correct for r in rs) / len(rs),
+            "log_p_gold": sum(r.log_p_gold for r in rs) / len(rs),
+            "rows": len(rs),
+        }
+        for name, rs in sorted(by_source.items())
+    }
+    metrics["ALL"] = {
+        key: sum(m[key] for m in metrics.values()) / len(metrics)
+        for key in ("accuracy", "log_p_gold")
+    }
+    return metrics
 
 
-def select_rows(rows: list[schema.Example], part: str = "dev", per: int = 100, seed: int = SEED,
-                ids: set[str] | None = None) -> list[schema.Example]:
-    """The rows to evaluate.
+def evaluate_distributed(
+    model: base.DecisionModel,
+    rows: Sequence[schema.Example],
+    accelerator: Any,
+) -> Metrics:
+    """`summarize(score_rows(...))` across the processes of a training run.
 
-    part "dev": subset(rows, per, seed), the fixed sample used to choose settings
-    (learning rates) and reported before the test split existed; "test": every
-    other row, never used for a choice; "all": every row. ids, if given, keeps
-    only those rows (e.g. the rows that fit a model's context).
+    Under FSDP every process must run the same forwards, so each scores all
+    rows; otherwise the rows are split over the processes and gathered.
     """
-    if part not in PARTS:
-        raise ValueError(f"part is one of {PARTS}, not {part!r}")
-    dev = subset(rows, per, seed)
-    chosen = {"dev": dev, "all": rows,
-              "test": [r for r in rows if r.id not in {d.id for d in dev}]}[part]
-    return chosen if ids is None else [r for r in chosen if r.id in ids]
+    from accelerate.utils import DistributedType
+    from accelerate.utils import gather_object
 
-
-def add_row_args(parser) -> None:
-    """--part, --rows-file and --save-rows, shared by the evaluation scripts."""
-    parser.add_argument("--part", choices=PARTS, default="dev",
-                        help="dev: the per-dataset sample settings were chosen on; test: every other row; all")
-    parser.add_argument("--rows-file", help="a JSON list of row ids to keep (e.g. rows that fit 8K tokens)")
-    parser.add_argument("--save-rows", action="store_true",
-                        help="also write eval_<tag>_rows.json: each row's id, dataset and correctness")
-
-
-def rows_from_args(args) -> list[schema.Example]:
-    """The rows chosen by --data/--split, --part, --eval-per, --seed and --rows-file."""
-    ids = set(json.loads(pathlib.Path(args.rows_file).read_text())) if args.rows_file else None
-    return select_rows(storage.load_examples(args.data, args.split), args.part, args.eval_per, args.seed, ids)
-
-
-def save_rows(out: pathlib.Path, tag: str, per_row: list[dict]) -> None:
-    """Writes eval_<tag>_rows.json (per-row correctness, for bootstrap intervals)."""
-    (out / f"eval_{tag}_rows.json").write_text(json.dumps(per_row))
-
-
-def evaluate(model, tok, rows: list[schema.Example],
-             gen_rows: list[schema.Example], device: str,
-             batch_tokens: int = 32768, batch_rows: int = 64, rows_out: list | None = None):
-    """Per-dataset metrics, and one example record per text-mode row.
-
-    Rows are scored in length-sorted batches bounded by batch_tokens and
-    batch_rows; text mode runs one row at a time.
-    """
-    was_training = model.training
+    was_training = model.network.training
     model.eval()
-    stats: dict = collections.defaultdict(lambda: collections.defaultdict(float))
-    examples = []
-    stop = [tok.convert_tokens_to_ids("<|im_end|>"), tok.eos_token_id]
-    gen_ids = {id(r) for r in gen_rows}
-    encoded = [answers.encode(r, tok, None) for r in rows]
-    prompts = [ex["input_ids"][: ex["path"][0][0] + 1] for ex in encoded]
-    scored: list = [None] * len(rows)
-    start = last = time.time()
-    done = 0
-    with torch.no_grad():
-        for batch in answers.batches([len(p) for p in prompts], batch_tokens, batch_rows):
-            results = answers.score_batch(
-                model, [prompts[i] for i in batch], tok,
-                [encoded[i]["n_options"] for i in batch], device, batch_tokens,
-                batch_rows)
-            for i, res in zip(batch, results):
-                scored[i] = res
-            done += len(batch)
-            if time.time() - last > 60 or done == len(rows):
-                last, el = time.time(), time.time() - start
-                logger.info("scored {}/{} rows, {:.1f}m, eta {:.1f}m", done,
-                            len(rows), el / 60, el / done * (len(rows) - done) / 60)
-        for r, ex, prompt, (s, mass, _) in zip(rows, encoded, prompts, scored):
-            st = stats[r.source]
-            st["rows"] += 1
-            st["accuracy"] += float(s.argmax().item() == ex["gold"])
-            if rows_out is not None:
-                rows_out.append({"id": r.id, "source": r.source, "correct": bool(s.argmax().item() == ex["gold"])})
-            st["log_p_gold"] += torch.log_softmax(s, 0)[ex["gold"]].item()
-            st["root_legal_mass"] += mass
-            if id(r) not in gen_ids:
-                continue
-            # Unguided greedy text, stopped at "]" and capped at the longest suffix.
-            longest = max(map(len, answers.candidates(tok, ex["n_options"])[0]))
-            out = model.generate(
-                torch.tensor([prompt], device=device), max_new_tokens=longest,
-                do_sample=False, eos_token_id=stop, stop_strings=["]"], tokenizer=tok,
-                pad_token_id=tok.pad_token_id, use_cache=True,
-            )[0, len(prompt):].tolist()
-            text = tok.decode([t for t in out if t not in stop])
-            m = re.match(r"(\d+)\]", text)
-            ok = bool(m) and 1 <= int(m.group(1)) <= ex["n_options"]
-            st["gen_rows"] += 1
-            st["gen_valid"] += float(ok)
-            st["gen_correct"] += float(ok and int(m.group(1)) == ex["gold"] + 1)
-            options = list(r.options)
-            top = torch.softmax(s, 0).topk(min(3, len(options)))
-            examples.append({
-                "source": r.source, "id": r.id,
-                "state": " / ".join(part.text for part in r.parts)[:400],
-                "question": r.question,
-                "options": options if len(options) <= 10 else options[:10] + ["…"],
-                "gold": f"[{ex['gold'] + 1}] {options[ex['gold']]}",
-                "scored_top3": [f"[{k + 1}] {options[k]} ({v:.3f})"
-                                for v, k in zip(top.values.tolist(),
-                                                top.indices.tolist())],
-                "generation": tok.decode(out),
-                "valid": ok,
-            })
+    if accelerator.distributed_type == DistributedType.FSDP:
+        results = score_rows(model, rows)
+    else:
+        mine = list(
+            rows[accelerator.process_index :: accelerator.num_processes]
+        )
+        results = gather_object(score_rows(model, mine))
     model.train(was_training)
-    metrics: dict = {}
-    for name, st in sorted(stats.items()):
-        metrics[name] = {k: v / (st["gen_rows"] if k.startswith("gen_")
-                                 else st["rows"])
-                         for k, v in st.items() if k not in ("rows", "gen_rows")}
-        metrics[name]["rows"] = st["rows"]
-        metrics[name]["gen_rows"] = st["gen_rows"]
-    keys = [k for k in next(iter(metrics.values()))
-            if k not in ("rows", "gen_rows")]
-    metrics["ALL"] = {k: sum(m[k] for m in metrics.values()) / len(metrics)
-                      for k in keys}
-    return metrics, examples
+    return summarize(results)
 
 
-def save(out: pathlib.Path, tag: str, metrics: dict, examples: list) -> None:
-    """Writes eval_<tag>.json and eval_<tag>_examples.jsonl under out."""
+def save(out: pathlib.Path, tag: str, metrics: Metrics) -> None:
+    """Writes <out>/eval_<tag>.json."""
     (out / f"eval_{tag}.json").write_text(json.dumps(metrics, indent=2))
-    with open(out / f"eval_{tag}_examples.jsonl", "w") as f:
-        for e in examples:
-            f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
 
-def log_summary(tag: str, metrics: dict) -> None:
+def save_rows(
+    out: pathlib.Path, tag: str, results: Sequence[RowResult]
+) -> None:
+    """Writes <out>/eval_<tag>_rows.json (id, dataset, correctness)."""
+    rows = [
+        {"id": r.id, "source": r.source, "correct": r.correct} for r in results
+    ]
+    (out / f"eval_{tag}_rows.json").write_text(json.dumps(rows))
+
+
+def log_summary(tag: str, metrics: Metrics) -> None:
     """Logs the mean metrics, then accuracy per dataset."""
-    logger.info("eval {}: {}", tag, " ".join(
-        f"{k} {v:.4f}" for k, v in metrics["ALL"].items()))
-    logger.info("eval {} accuracy per dataset: {}", tag, " ".join(
-        f"{n} {v['accuracy']:.3f}" for n, v in metrics.items() if n != "ALL"))
+    logger.info(
+        "eval {}: {}",
+        tag,
+        " ".join(f"{k} {v:.4f}" for k, v in metrics["ALL"].items()),
+    )
+    logger.info(
+        "eval {} accuracy per dataset: {}",
+        tag,
+        " ".join(
+            f"{name} {m['accuracy']:.3f}"
+            for name, m in metrics.items()
+            if name != "ALL" and "accuracy" in m
+        ),
+    )
 
 
 def main() -> None:
-    """Evaluates a base model or a trained adapter."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--adapter", help="a saved LoRA adapter (else the base)")
-    parser.add_argument("--data", default=storage.DEFAULT_SOURCE,
-                        help="local folder / .parquet, or a Hub dataset id")
-    parser.add_argument("--split", default="eval")
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--tag", default="base")
-    parser.add_argument("--eval-per", type=int, default=100)
-    parser.add_argument("--gen-per", type=int, default=20)
-    parser.add_argument("--seed", type=int, default=SEED)
-    add_row_args(parser)
-    args = parser.parse_args()
-
-    from transformers import AutoTokenizer
-
-    tok = AutoTokenizer.from_pretrained(args.model)
-    rows = rows_from_args(args)
-    gen_rows = subset(rows, args.gen_per, args.seed)
-    model = modeling.load(args.model, args.adapter, merge=False)
-    per_row: list = []
-    metrics, examples = evaluate(model, tok, rows, gen_rows, "cuda", rows_out=per_row)
-    out = pathlib.Path(args.out)
+    """Evaluates a model on one part of a split."""
+    cfg, _ = config.from_command_line(config.EvaluateConfig, __doc__)
+    rows = sampling.select_part(
+        storage.load_examples(cfg.source, cfg.split),
+        cfg.part,
+        cfg.eval_per,
+        cfg.seed,
+        sampling.read_ids(cfg.rows_file),
+    )
+    model = models.load(cfg.model)
+    results = score_rows(model, rows)
+    metrics = summarize(results)
+    out = pathlib.Path(cfg.out)
     out.mkdir(parents=True, exist_ok=True)
-    save(out, args.tag, metrics, examples)
-    if args.save_rows:
-        save_rows(out, args.tag, per_row)
-    log_summary(args.tag, metrics)
+    save(out, cfg.tag, metrics)
+    if cfg.save_rows:
+        save_rows(out, cfg.tag, results)
+    log_summary(cfg.tag, metrics)
 
 
 if __name__ == "__main__":

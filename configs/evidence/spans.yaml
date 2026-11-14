@@ -1,0 +1,18 @@
+# Best-of-N evidence labels (SelfCite reward) from vLLM servers started by
+# scripts/serve_labeller.sh. Re-running with the same `out` resumes.
+model: Qwen/Qwen3.6-27B
+served_name: labeller
+base_url: ["http://127.0.0.1:8011/v1"]
+source: data/splits/reason_long_nimble
+split: train
+n: 10
+temperature: 1.2
+top_p: 0.9
+max_cited_tokens: 384
+max_tokens: 16384
+max_model_len: 32768
+concurrency: 16
+datasets: null
+with_spans: false
+limit: 1000000            # rows per dataset
+out: runs/spans/train.jsonl

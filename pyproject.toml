@@ -1,50 +1,43 @@
 [project]
 name = "llm-jev"
-version = "0.1.0"
-description = "Train LLMs as Jev decision models and attribute their decisions with fast ContextCite"
+version = "0.2.0"
+description = "Decision models that pick one option per forward pass: LLM-as-Jev decoders and masked-LM encoders, with an evidence head"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "pydantic>=2",
-    "datasets",
-    "nvitop>=1.7.1",
-    "torch==2.9.0",
-    "torchvision==0.24.0",
-    "transformers==5.20.2",  # >= 5.20: native UltraBERT
-    "peft==0.21.0",
     "accelerate==1.15.0",
-    "tensorboard",
-    "flash-linear-attention==0.5.2",  # fast Gated DeltaNet for Qwen3.5
-    # Fast short convolution in Qwen3.5's linear-attention layers. Built from
-    # source against the installed torch: set CUDA_HOME to your CUDA toolkit.
-    "causal-conv1d==1.5.3.post1",
+    "datasets",
+    "jinja2",
     "loguru>=0.7.3",
-    "tensordict>=0.14.3",
     "nltk>=3.10.3",
-    "scikit-learn>=1.9.1",
+    "numpy",
     "omegaconf>=2.3",
+    "pandas",
+    "peft==0.21.0",
+    "scikit-learn>=1.9.1",
+    "scipy",
+    "tensorboard",
+    "tensordict>=0.14.3",
+    "torch==2.9.0",
+    "transformers==5.20.2",  # >= 5.20: native UltraBERT
 ]
 
 [project.optional-dependencies]
-spans = ["openai>=1.50"]               # llm_jev.span_generation (vLLM server, OpenAI API)
-dev = ["pytest", "hypothesis"]
-profile = ["matplotlib"]              # llm_jev.profiling (memory timeline HTML)
-blog = ["fastapi>=0.115", "uvicorn>=0.30"]  # blogs/server.py (the "Try it" section's local API)
-paper = ["matplotlib"]                # paper/figures (plots for the arXiv preprint)
+# Qwen3.5 decoders: fast Gated DeltaNet and short convolutions. causal-conv1d
+# is built from source against the installed torch (set CUDA_HOME).
+qwen35 = ["flash-linear-attention==0.5.2", "causal-conv1d==1.5.3.post1"]
+spans = ["openai>=1.50"]  # llm_jev.evidence.spans (vLLM server, OpenAI API)
+paper = ["matplotlib"]  # paper/figures
+dev = ["pytest", "ruff"]
 
 [project.scripts]
-llm-jev-train = "llm_jev.train.train:main"
-llm-jev-train-mlm = "llm_jev.train.train_mlm:main"
-llm-jev-train-at2 = "llm_jev.train.train_at2:main"
-llm-jev-train-evidence = "llm_jev.train.train_evidence:main"
+llm-jev-build-data = "llm_jev.data.build:main"
+llm-jev-train-decoder = "llm_jev.training.decoder:main"
+llm-jev-train-encoder = "llm_jev.training.encoder:main"
 llm-jev-evaluate = "llm_jev.evaluation.evaluate:main"
 llm-jev-benchmarks = "llm_jev.evaluation.benchmarks:main"
-llm-jev-attribution = "llm_jev.evaluation.attribution:main"
-llm-jev-build-data = "llm_jev.dataloader.build:main"
-llm-jev-merge = "llm_jev.serving.merge:main"
-llm-jev-spans = "llm_jev.span_generation.best_of_n:main"
-llm-jev-sglang-cite = "llm_jev.serving.sglang_client:main"
-llm-jev-predict = "llm_jev.serving.predict:main"
+llm-jev-train-evidence = "llm_jev.evidence.train:main"
+llm-jev-spans = "llm_jev.evidence.spans:main"
 
 # CUDA 12.8 wheels.
 [[tool.uv.index]]
@@ -57,7 +50,6 @@ no-build-isolation-package = ["causal-conv1d"]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -69,11 +61,6 @@ include = ["llm_jev*"]
 
 [tool.setuptools.package-data]
 llm_jev = ["prompts/*.j2"]
-"llm_jev.span_generation" = ["*.j2", "*.sh"]
-
-[tool.black]
-line-length = 80
-skip-magic-trailing-comma = true
 
 [tool.ruff]
 line-length = 80
@@ -81,7 +68,11 @@ indent-width = 4
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "D", "N", "UP", "B"]
-ignore = ["D107", "D203", "D213"]
+ignore = ["D105", "D107", "D203", "D213"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "E501"]  # Inline fixture data.
+"src/llm_jev/data/sources/download.py" = ["E501"]  # pinned URLs and hashes
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -90,3 +81,6 @@ convention = "google"
 force-single-line = true
 force-sort-within-sections = true
 
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

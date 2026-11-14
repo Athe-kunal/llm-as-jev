@@ -1,0 +1,36 @@
+# UltraBERT-380M as a decision model: one mask per option, full fine-tuning.
+# Recipe "sigmoid-norm": p_k = sigmoid(s_k) / sum_j sigmoid(s_j), s = yes - no.
+# Optimizer settings from the model card (AdamW (0.9, 0.98), eps 1e-6, weight
+# decay 0.1, linear schedule with 5% warmup); the learning rate was chosen on
+# dev from {0.8, 1.5, 3, 5} x 1e-5. Launch with configs/accelerate/ddp.yaml.
+model:
+  id: dmis-lab/UltraBERT-380M
+  revision: 671a38c087233c0cc72c5bfceea6fffa2822f1db
+  attention: varlen           # FlashAttention-2 varlen; or sdpa / eager
+  pack_tokens: 32768
+  gradient_checkpointing: true
+format:
+  template: decision_mlm
+  yes_token: " yes"
+  no_token: " no"
+  no_word: null
+data:
+  source: Athekunal/llm-jev-reason-long
+  max_tokens: 32768
+  eval_per: 100
+  eval_seed: 20260922         # Fixed across run.seed replicates.
+optim:
+  lr: 1.5e-5
+  betas: [0.9, 0.98]
+  eps: 1.0e-6
+  weight_decay: 0.1
+  batch_size: 32
+  warmup_ratio: 0.05
+  min_lr_ratio: 0.0
+  max_grad_norm: 1.0
+  loss: sigmoid_norm
+run:
+  out: runs/ultrabert_380m_lr1.5e-5_sigmoidnorm
+  seed: 20260922
+  epochs: 1
+  mixed_precision: bf16

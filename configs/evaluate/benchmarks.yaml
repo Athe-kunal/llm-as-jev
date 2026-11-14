@@ -1,0 +1,10 @@
+# External benchmarks: BoolQ, MMLU, MMLU-Pro, ARC-C, WinoGrande, SciQ (the
+# "external macro"), Banking77 and JevBench. Works for either model kind:
+# llm-jev-benchmarks --config configs/evaluate/benchmarks.yaml \
+#     model.kind=encoder model.path=runs/ultrabert_380m_lr1.5e-5
+model:
+  kind: ???
+  path: ???
+benchmarks: null          # null: all
+out: ${model.path}
+tag: final

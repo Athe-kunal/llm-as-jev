@@ -1,0 +1,7 @@
+# AT2, average attention and ContextCite on the eval rows with gold evidence.
+at2: runs/at2_ultrabert_380m
+source: data/splits/reason_long_nimble
+split: eval
+per: 0
+part: test
+seed: 0
